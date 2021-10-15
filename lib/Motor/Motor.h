@@ -8,6 +8,7 @@
 class Motor {
     private:
         int in1, in2, pwm;
+        float speeddiff;
     public:
         Motor();
         Motor(int in1, int in2, int pwm, float speeddiff);
