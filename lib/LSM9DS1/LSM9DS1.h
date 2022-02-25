@@ -2,7 +2,9 @@
 #define LSM9DS1_H
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_LSM9DS1.h>
+#include <Adafruit_Sensor.h>
 
 class lsm9ds1{
     private:
@@ -10,8 +12,8 @@ class lsm9ds1{
     public:
         lsm9ds1();
         void setup();
-        void read();
-        sensors_event_t a, m, g, t;
+        sensors_event_t read();
+
 };
 
 #endif

@@ -1,5 +1,7 @@
 #include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_LSM9DS1.h>
+#include <Adafruit_Sensor.h>
 #include <LSM9DS1.h>
 
 lsm9ds1::lsm9ds1(){
@@ -18,7 +20,9 @@ void lsm9ds1::setup(){
     lsm.setupGyro(lsm.LSM9DS1_GYROSCALE_245DPS);
 }
 
-void lsm9ds1::read(){
+sensors_event_t lsm9ds1::read(){
+    lsm.read();
     sensors_event_t a, m, g, t;
     lsm.getEvent(&a, &m, &g, &t);
+    return m;
 }
