@@ -1,28 +1,83 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_LSM9DS1.h>
-#include <Adafruit_Sensor.h>
+#include <SparkFunLSM9DS1.h>
 #include <LSM9DS1.h>
 
-lsm9ds1::lsm9ds1(){
-    Adafruit_LSM9DS1 lsm = Adafruit_LSM9DS1();
+LSM9DS1 sensor;
+
+Lsm9ds1::Lsm9ds1(int avgAmount, int DECLINATION){
+    Lsm9ds1::avgAmount = avgAmount;
+    Lsm9ds1::DECLINATION = DECLINATION;
 }
 
-void lsm9ds1::setup(){
-    if(!lsm.begin())
+void Lsm9ds1::setup() {
+    Wire.begin();
+    if (sensor.begin() == false) // with no arguments, this uses default addresses (AG:0x6B, M:0x1E) and i2c port (Wire).
     {
-    /* There was a problem detecting the LSM9DS1 ... check your connections */
-    Serial.print(F("Ooops, no LSM9DS1 detected ... Check your wiring!"));
-    while(1);
+    Serial.println("Failed to communicate with LSM9DS1.");
+    Serial.println("Double-check wiring.");
+    Serial.println("Default settings in this sketch will " \
+                   "work for an out of the box LSM9DS1 " \
+                   "Breakout, but may need to be modified " \
+                   "if the board jumpers are.");
+    while (1);
     }
-    lsm.setupAccel(lsm.LSM9DS1_ACCELRANGE_2G);
-    lsm.setupMag(lsm.LSM9DS1_MAGGAIN_4GAUSS);
-    lsm.setupGyro(lsm.LSM9DS1_GYROSCALE_245DPS);
+   sensor.settings.mag.scale = 16;
+    sensor.settings.device.commInterface = IMU_MODE_I2C; // Set mode to I2C
 }
 
-sensors_event_t lsm9ds1::read(){
-    lsm.read();
-    sensors_event_t a, m, g, t;
-    lsm.getEvent(&a, &m, &g, &t);
-    return m;
+float Lsm9ds1::magCalculate() {
+    return (Lsm9ds1::magGetHeading() - average);
+}
+
+
+void Lsm9ds1::magCalibrate() {
+    float sum = 0.0; // define sum
+
+    // Get values
+
+    for (int i = 0; i < avgAmount; i++) { 
+        float val = Lsm9ds1::magGetHeading();
+        Serial.println("Found values: " + String(val));
+        sum += val;
+        
+    }
+
+    // Calc and give average
+
+    average = sum/avgAmount; 
+
+    Serial.println("Average value: " + String(average));
+
+}
+
+
+float Lsm9ds1::magGetHeading() {
+    float heading; // gives heading a data type
+    
+    sensor.readMag(); // read the magnetometer
+    
+    // define variables
+    float my = -sensor.my;
+    float mx = -sensor.mx;
+
+    // calculate heading
+    if (my == 0) {
+        heading = (mx < 0) ? PI : 0;
+    } else {
+        heading = atan2(mx, my);
+    }
+
+    heading -= DECLINATION * PI / 180;
+
+    if (heading > PI) {
+        heading -= (2 * PI);
+    }
+    else if (heading < -PI) {
+        heading += (2 * PI);
+    }
+    
+    // rad2deg
+    heading *= 180.0 / PI;
+    return heading;
 }

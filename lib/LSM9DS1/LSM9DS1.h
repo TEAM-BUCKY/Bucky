@@ -3,16 +3,19 @@
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_LSM9DS1.h>
-#include <Adafruit_Sensor.h>
+#include <SparkFunLSM9DS1.h>
 
-class lsm9ds1{
-    private:
-        Adafruit_LSM9DS1 lsm;
+class Lsm9ds1 {
+    private: 
+        int avgAmount, DECLINATION;
+        float sum;
     public:
-        lsm9ds1();
+        float average;
+        Lsm9ds1(int avgAmount, int DECLINATION);
         void setup();
-        sensors_event_t read();
+        void magCalibrate();
+        float magGetHeading();
+        float magCalculate();
 
 };
 
