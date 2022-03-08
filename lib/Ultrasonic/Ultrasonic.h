@@ -9,7 +9,11 @@
 
 class Ultrasonic {
     private:
-        int in1, in2; // in1 and in2 are the pins used
+        int trigger, echo; // trigger and echo pins are used
     public:
-        int get(int in1, int in2);        
-}
+        Ultrasonic(int trigger, int echo);
+        void ultraSetup();
+        int read();        
+};
+
+#endif
