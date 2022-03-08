@@ -7,9 +7,11 @@
 
 class Lsm9ds1 {
     private: 
+        // var
         int avgAmount, DECLINATION;
         float sum;
     public:
+        // functions used
         float average;
         Lsm9ds1(int avgAmount, int DECLINATION);
         void setup();
