@@ -2,15 +2,13 @@
 #include <math.h>
 #include <Motor.h>
 
-Motor::Motor(int in1, int in2, int pwm, float speeddiff) {
+Motor::Motor(int in1, int pwm, float speeddiff) {
     Motor::in1 = in1;
-    Motor::in2 = in2;
     Motor::pwm = pwm;
     Motor::speeddiff = speeddiff;
 }
-Motor::Motor(int in1, int in2, int pwm) {
+Motor::Motor(int in1, int pwm) {
     Motor::in1 = in1;
-    Motor::in2 = in2;
     Motor::pwm = pwm;
     Motor::speeddiff = 0;
 }
@@ -18,7 +16,6 @@ Motor::Motor(int in1, int in2, int pwm) {
 
 void Motor::setup() {
     pinMode(in1, OUTPUT);
-    pinMode(in2, OUTPUT);
     pinMode(pwm, OUTPUT);
 }
 
@@ -27,13 +24,11 @@ void Motor::move(float speed) {
         return;
     }
     if(speed < 0) {
-        digitalWrite(in1, HIGH);
-        digitalWrite(in2, LOW);
+        digitalWrite(in1, LOW);
         analogWrite(pwm, abs(speed));
     }
     else {
-        digitalWrite(in1, LOW);
-        digitalWrite(in2, HIGH);
+        digitalWrite(in1, HIGH);
         analogWrite(pwm, abs(speed+speeddiff));
     }
 }

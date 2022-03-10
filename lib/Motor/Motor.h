@@ -7,12 +7,12 @@
 
 class Motor {
     private:
-        int in1, in2, pwm;
+        int in1, pwm;
         float speeddiff;
     public:
         Motor();
-        Motor(int in1, int in2, int pwm, float speeddiff);
-        Motor(int in1, int in2, int pwm);
+        Motor(int in1, int pwm, float speeddiff);
+        Motor(int in1, int pwm);
         void test();
         void move(float speed);
         void setup();
