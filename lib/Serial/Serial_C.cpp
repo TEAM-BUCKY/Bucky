@@ -7,27 +7,27 @@ Serial_C::Serial_C(bool isMaster){
 
 void Serial_C::setup() {
     if (isMaster) {
-        Serial3.begin(115200);
+        Serial5.begin(115200);
     }
     else {
-        Serial5.begin(115200);
+        Serial3.begin(115200);
     }
 }
 
 void Serial_C::send(String message) {
     if (isMaster) {
-        Serial3.print(message);
+        Serial5.print(message);
     }
     else {
-        Serial5.print(message);
+        Serial3.print(message);
     }
 }
 
 String Serial_C::receive() {
     if (isMaster) {
-        return Serial3.readStringUntil('\r');
+        return Serial5.readStringUntil('\r');
     }
     else {
-        return Serial5.readStringUntil('\r');
+        return Serial3.readStringUntil('\r');
     }
 }
