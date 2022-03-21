@@ -2,54 +2,42 @@
 #include <Motor.h>
 #include <Core.h>
 #include <Wire.h>
+#include <TSSP.h>
+#include <Serial_C.h>
 
-Motor m1 (1, 2);
-Motor m2 (22, 23);
-Motor m3 (24, 25);
+unsigned long time_ms = 0;
+#define T_MODEA 833
 
-enum Task {
-  SLEEP,
-  MOVE
-};
-Task task = MOVE;
-bool reset = false;
+int serialPrintAllPusleWidth(float *pulseWidth, sensorInfo_t *infop) {
+  return infop->maxSensorNumber;
+}
+
+Serial_C serial (true);
+
+const int degree_increase = 25.7142857143;
 
 void setup() {
-  setupCore();
-  analogReference(3.3);
-  m1.setup();
-  m2.setup();
-  m3.setup();
-  attachInterrupt(digitalPinToInterrupt(3), [](){reset = !reset;}, CHANGE);
+  Serial.begin(115200);
+  setAllSensorPinsInput();
+  serial.setup();
 }
 
-void move(double degrees, int basespeed) {
-  float pi = 57.29577951;
-  float speedM1 = -(basespeed) * sin((degrees + 180) / pi);
-  float speedM2 = -(basespeed) * sin((degrees + 60) / pi);
-  float speedM3 = -(basespeed) * sin((degrees - 60) / pi);
-  m1.move(speedM1);
-  m2.move(speedM2);
-  m3.move(speedM3);
-}
+void loop () {
+  float           pulseWidth[IR_NUM]; // パルス幅を格納する変数
+  sensorInfo_t    sensorInfo; 
 
-void loop() {
-  if(reset) {
-    task = SLEEP;
-  }
-  switch(task) {
-    case MOVE: {
-      move(0, 255);
-      delayMicroseconds(5);
-      break;
+  sensorInfo = getAllSensorPulseWidth(pulseWidth, T_MODEA);
+
+  if (millis() - time_ms > 50) {
+    time_ms = millis();
+    
+    int value = serialPrintAllPusleWidth(pulseWidth, &sensorInfo);
+    if (value == 1 or value == 13) {
+      value = 0;
     }
-    case SLEEP: {
-      m1.move(0);
-      m2.move(0);
-      m3.move(0);
-      task = MOVE;
-      delayMicroseconds(5);
-      break;
+    serial.send(String(value * 25.7142857143));
+
+    Serial.print(value);
+    Serial.print("\n");
     }
-  }
 }
