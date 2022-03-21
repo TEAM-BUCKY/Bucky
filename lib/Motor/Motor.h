@@ -25,7 +25,7 @@ class MotorControl {
         MotorControl(Motor m1, Motor m2, Motor m3);
         void forward(float time, float speed);
         void backward(float time, float speed);
-        void move(double degrees, int baseSpeed);
+        void move(int degrees, int baseSpeed);
 };
 
 #endif

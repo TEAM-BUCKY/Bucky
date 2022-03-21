@@ -12,6 +12,7 @@ void Serial_C::setup() {
     else {
         Serial3.begin(115200);
     }
+    Serial.begin(115200);
 }
 
 void Serial_C::send(String message) {
@@ -29,5 +30,6 @@ String Serial_C::receive() {
     }
     else {
         return Serial3.readStringUntil('\r');
+        
     }
 }

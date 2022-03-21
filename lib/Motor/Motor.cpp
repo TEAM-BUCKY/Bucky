@@ -55,7 +55,7 @@ void MotorControl::backward(float time, float speed) {
     m3.move(0);
 }
 
-void MotorControl::move(double degrees, int baseSpeed) {
+void MotorControl::move(int degrees, int baseSpeed) {
     float pi = 57.29577951;
     float speedM1 = -(baseSpeed) * sin((degrees + 180) / pi);
     float speedM2 = -(baseSpeed) * sin((degrees + 60) / pi);
@@ -63,7 +63,4 @@ void MotorControl::move(double degrees, int baseSpeed) {
     m1.move(speedM1);
     m2.move(speedM2);
     m3.move(speedM3);
-    m1.test();
-    m2.test();
-    m3.test();
 }
