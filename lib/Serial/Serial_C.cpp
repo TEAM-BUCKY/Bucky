@@ -17,10 +17,10 @@ void Serial_C::setup() {
 
 void Serial_C::send(String message) {
     if (isMaster) {
-        Serial5.print(message);
+        Serial5.print(message + '\r');
     }
     else {
-        Serial3.print(message);
+        Serial3.print(message + '\r');
     }
 }
 
