@@ -6,7 +6,7 @@
 // make LSM9DS1 object
 LSM9DS1 sensor;
 
-Lsm9ds1::Lsm9ds1(int avgAmount, int DECLINATION){
+Lsm9ds1::Lsm9ds1(int avgAmount, double DECLINATION){
     Lsm9ds1::avgAmount = avgAmount;
     Lsm9ds1::DECLINATION = DECLINATION;
 }

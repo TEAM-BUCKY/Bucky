@@ -8,12 +8,13 @@
 class Lsm9ds1 {
     private: 
         // var
-        int avgAmount, DECLINATION;
+        int avgAmount;
+        double DECLINATION;
         float sum;
     public:
         // functions used
         float average;
-        Lsm9ds1(int avgAmount, int DECLINATION);
+        Lsm9ds1(int avgAmount, double DECLINATION);
         void setup();
         void magCalibrate();
         float magGetHeading();
