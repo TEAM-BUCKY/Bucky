@@ -3,7 +3,7 @@
 #include <Core.h>
 #include <Wire.h>
 #include <Serial_C.h>
-#include <LSM9DS1.h>
+// #include <LSM9DS1.h>
 
 Motor m1 (1, 2);
 Motor m2 (22, 23);
@@ -38,8 +38,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println("start");
   serial.setup();
-  gyro.setup();
-  gyro.magCalibrate();
+  // gyro.setup();
+  // gyro.magCalibrate();
   m1.setup();
   m2.setup();
   m3.setup();
@@ -47,6 +47,6 @@ void setup() {
 
 void loop() {
   float deg = serial.receive().toFloat();
-  Serial.println(gyro.magCalculate());
+  //Serial.println(gyro.magCalculate());
   move(deg, 0);
 }
