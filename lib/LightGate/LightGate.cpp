@@ -11,5 +11,5 @@ void LightGate::setup(){
 }
 
 bool LightGate::read(){
-    return digitalRead(pin)!=0;
+    return digitalRead(pin)==0;
 }
