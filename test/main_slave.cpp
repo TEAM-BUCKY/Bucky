@@ -99,4 +99,21 @@ void loop()
       pixels.show();
     }
   }
+
+  String receivedString = serial.receive(); // receive full string (in format: 000.00000.00000.00+++)
+
+  float motorSpeeds[3] = {};
+
+  for (int i = 1; i < 4; i++) {
+    motorSpeeds[i-1] = receivedString.substring(i*6-6, i*6).toFloat(); 
+    if (receivedString[receivedString.length()-3+(i-1)] < 0) {
+      motorSpeeds[i-1]*-1;
+    }
+  }
+
+  float offset = magCompass.calculate()*1.00; // change this
+  m1.move(motorSpeeds[0], offset);
+  m2.move(motorSpeeds[1], offset);
+  m3.move(motorSpeeds[2], offset);
+  
 }
