@@ -10,9 +10,9 @@
 
 // pins list
 int pins[14] = {17, 16, 14, 40, 38, 39, 41, 15, 18, 24, 26, 27, 25, 19};
-String defaultString = "000.00000.00000.00+++\r";
 
 const float heading_x_const = 1.00;
+String defaultString = "000.00000.00000.00+++\r";
 
 float calcPIDReturn;
 
@@ -28,6 +28,7 @@ void CalcPID(int dummyArg)
 }
 
 void calcSpeed() {
+  defaultString = "000.00000.00000.00+++\r";
   double degrees = ir.IRInfo_theta;
   double speedM1_ = -(100)*sin((degrees + 180) / PI);
   double speedM2_ = -(100)*sin((degrees + 60) / PI);
@@ -39,6 +40,9 @@ void calcSpeed() {
     if (speeds_[i] < 0) {
       defaultString[18+i] = '-';
     }
+    if (speeds_[i] >= 0) {
+      defaultString[18+i] = '+';
+    }
 
   }
 
@@ -47,12 +51,11 @@ void calcSpeed() {
   String speedM3 = String(abs(speedM3_), 2);
 
 
-
   String speeds[3] = {speedM1, speedM2, speedM3};
   for (int i = 0; i < 3; i++) {
     String str_ = speeds[i];
-    for (int x = 0; x < str_.length()-1; x++) {
-      defaultString[6*(i+1)] = str_[str_.length()-1-x];
+    for (int x = 0; x < str_.length(); x++) {
+      defaultString[((i+1)*6)-x-1] = str_[str_.length()-1-x];
     }
   } 
 
@@ -68,13 +71,12 @@ void setup() // setup function
 void loop()
 {
   //threads.addThread(CalcPID);
-  //calcSpeed();
+  calcSpeed();
   
   // ir functions
   ir.getAllSensorPulseWidth(833);
   ir.calcRTfromXY();
   ir.calcVector();
-  // Serial.println(defaultString);
   Serial.println(ir.IRInfo_theta);
 
 }

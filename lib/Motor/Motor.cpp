@@ -19,48 +19,20 @@ void Motor::setup() {
     pinMode(pwm, OUTPUT);
 }
 
-void Motor::move(float speed) {
+void Motor::move(float speed, float offset) {
     if(speed < -255 || speed > 255) {
         return;
     }
+
+    speed += offset;
+
     if(speed < 0) {
         digitalWrite(in1, LOW);
         analogWrite(pwm, abs(speed));
     }
     else {
         digitalWrite(in1, HIGH);
-        analogWrite(pwm, abs(speed+speeddiff));
+        analogWrite(pwm, abs(speed));
     }
 }
 
-MotorControl::MotorControl(Motor m1, Motor m2, Motor m3) {
-    MotorControl::m1 = m1;
-    MotorControl::m2 = m2;
-    MotorControl::m3 = m3;
-}
-
-void MotorControl::forward(float time, float speed) {
-    m2.move(speed);
-    m3.move(speed*-1);
-    delay(time);
-    m2.move(0);
-    m3.move(0);
-}
-
-void MotorControl::backward(float time, float speed) {
-    m2.move(speed*-1);
-    m3.move(speed);
-    delay(time);
-    m2.move(0);
-    m3.move(0);
-}
-
-void MotorControl::move(int degrees, int baseSpeed) {
-    float pi = 57.29577951;
-    float speedM1 = -(baseSpeed) * sin((degrees + 180) / pi);
-    float speedM2 = -(baseSpeed) * sin((degrees + 60) / pi);
-    float speedM3 = -(baseSpeed) * sin((degrees - 60) / pi);
-    m1.move(speedM1);
-    m2.move(speedM2);
-    m3.move(speedM3);
-}

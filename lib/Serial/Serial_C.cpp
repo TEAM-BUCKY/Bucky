@@ -30,6 +30,5 @@ String Serial_C::receive() {
     }
     else {
         return Serial3.readStringUntil('\r');
-        
     }
 }
