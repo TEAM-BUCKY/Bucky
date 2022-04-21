@@ -49,6 +49,8 @@ void TSSP2::getAllSensorPulseWidth(int timeLimit) { // get the pulsewidth of eve
 }
 
 void TSSP2::calcVector() { // calculate the vector with the pulsewidth of every sensor
+    IRInfo_x = 0.0;
+    IRInfo_y = 0.0;
     for (int i = 0; i < ir_num; i++) {
         IRInfo_x += pulseWidth[i] * unitVectorX[i]; 
         IRInfo_y += pulseWidth[i] * unitVectorY[i];
@@ -58,6 +60,5 @@ void TSSP2::calcVector() { // calculate the vector with the pulsewidth of every 
 
 void TSSP2::calcRTfromXY() { // calculate the radius and theta with vector of x, y
     IRInfo_radius = sqrt(pow(IRInfo_x, 2.0) + pow(IRInfo_y, 2.0));
-    IRInfo_theta = atan2(IRInfo_x, IRInfo_y) / PI * 180.0;
+    IRInfo_theta = atan2(IRInfo_y, IRInfo_x) / PI * 180.0;
 }
-

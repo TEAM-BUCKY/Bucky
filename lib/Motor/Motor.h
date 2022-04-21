@@ -14,18 +14,10 @@ class Motor {
         Motor(int in1, int pwm, float speeddiff);
         Motor(int in1, int pwm);
         void test();
-        void move(float speed);
+        void move(float speed, float offset);
         void setup();
 };
 
-class MotorControl {
-    private:
-        Motor m1, m2, m3;
-    public:
-        MotorControl(Motor m1, Motor m2, Motor m3);
-        void forward(float time, float speed);
-        void backward(float time, float speed);
-        void move(int degrees, int baseSpeed);
-};
+
 
 #endif

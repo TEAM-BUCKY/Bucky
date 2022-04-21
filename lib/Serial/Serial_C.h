@@ -3,13 +3,16 @@
 
 class Serial_C {
     private:
-        String message;
+        String message, receive_string;
         bool isMaster;
     public:
         Serial_C(bool isMaster);
         void setup();
-        String receive();
-        void send(String message);
+        void receive();
+        void send(float f1, float f2);
+        float theta;
+        float x;
+        
 };
 
 #endif

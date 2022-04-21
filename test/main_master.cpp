@@ -4,43 +4,30 @@
 #include <Motor.h>
 #include <Core.h>
 #include <Wire.h>
-#include <TSSP.h>
+#include <TSSP2.h>
 #include <Serial_C.h>
-#include <LSM9DS1.h>
+#include <TeensyThreads.h>
 
-unsigned long time_ms = 0;
-#define T_MODEA 833
+int IR_pins[14] = {17, 16, 14, 40, 38, 39, 41, 15, 18, 24, 26, 27, 25, 19};
 
-int serialPrintAllPusleWidth(float *pulseWidth, sensorInfo_t *infop) {
-  return infop->maxSensorNumber;
-}
 
 Serial_C serial (true);
+TSSP2 tssp(IR_pins);
 
-const int degree_increase = 25.7142857143;
 
-void setup() {
-  Serial.begin(115200);
-  setAllSensorPinsInput();
-  serial.setup();
+void setup() // setup function
+{
+  Serial.begin(115200);       // begin Serial
+  serial.setup();             // setup serial for communication with slave
+  tssp.setAllSensorPinsInput(); // set all the sensor pins to input
 }
 
-void loop () {
-  float           pulseWidth[IR_NUM]; // パルス幅を格納する変数
-  sensorInfo_t    sensorInfo; 
+void loop()
+{
+  
+  tssp.getAllSensorPulseWidth(833);
+  tssp.calcRTfromXY();
+  tssp.calcVector();
+  serial.send(tssp.IRInfo_theta, tssp.IRInfo_x);
 
-  sensorInfo = getAllSensorPulseWidth(pulseWidth, T_MODEA);
-
-  if (millis() - time_ms > 50) {
-    time_ms = millis();
-    
-    int value = serialPrintAllPusleWidth(pulseWidth, &sensorInfo);
-    if (value == 1 or value == 13) {
-      value = 0;
-    }
-    serial.send(String(value * 25.7142857143));
-
-    Serial.print(value);
-    Serial.print("\n");
-    }
 }

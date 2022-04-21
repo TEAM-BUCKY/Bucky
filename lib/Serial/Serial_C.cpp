@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Serial_C.h>
+#include <stdlib.h>
 
 Serial_C::Serial_C(bool isMaster){
     Serial_C::isMaster = isMaster;
@@ -15,21 +16,34 @@ void Serial_C::setup() {
     Serial.begin(115200);
 }
 
-void Serial_C::send(String message) {
+void Serial_C::send(float f1, float f2) {
     if (isMaster) {
-        Serial5.print(message + '\r');
+        Serial5.print(String(f1) + ',' + String(f2) + '\r');
     }
-    else {
-        Serial3.print(message + '\r');
-    }
+
 }
 
-String Serial_C::receive() {
+void Serial_C::receive() {
     if (isMaster) {
-        return Serial5.readStringUntil('\r');
+        receive_string = Serial5.readStringUntil('\r');
+        int string_length = receive_string.length();
+        for (int i = 0; i< string_length; i++) {
+            if (receive_string[i] == ',') {
+                theta = receive_string.substring(0, i).toFloat();
+                x = receive_string.substring(i+1, string_length-i).toFloat();
+                break;
+            }
+        }
     }
     else {
-        return Serial3.readStringUntil('\r');
-        
+        receive_string = Serial3.readStringUntil('\r');
+        int string_length = receive_string.length();
+        for (int i = 0; i< string_length; i++) {
+            if (receive_string[i] == ',') {
+                theta = receive_string.substring(0, i).toFloat();
+                x = receive_string.substring(i+1, string_length-i).toFloat();
+                break;
+            }
+        }
     }
 }
