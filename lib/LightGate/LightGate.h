@@ -7,8 +7,8 @@ class LightGate {
         int pin;
     public:
         LightGate(int pin);
-        void setup();
-        bool read();
+        void setup(); // Set pin to INPUT
+        bool read(); // Returns True if ball obstructs laser
 
 };
 
