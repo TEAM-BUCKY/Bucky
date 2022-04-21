@@ -8,8 +8,11 @@ class Serial_C {
     public:
         Serial_C(bool isMaster);
         void setup();
-        String receive();
+        void receive();
         void send(String message);
+        void send(float speedM1, float speedM2, float speedM3);
+        float motorSpeeds[3];
+        String receive_string;
 };
 
 #endif
