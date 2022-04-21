@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Serial_C.h>
+#include <stdlib.h>
 
 Serial_C::Serial_C(bool isMaster){
     Serial_C::isMaster = isMaster;
@@ -15,59 +16,34 @@ void Serial_C::setup() {
     Serial.begin(115200);
 }
 
-void Serial_C::send(String message) {
+void Serial_C::send(float f1, float f2) {
     if (isMaster) {
-        Serial5.print(message + '\r');
+        Serial5.print(String(f1) + ',' + String(f2) + '\r');
     }
-    else {
-        Serial3.print(message + '\r');
-    }
-}
 
-void Serial_C::send(float speedM1, float speedM2, float speedM3) {
-    if (isMaster) {
-        String defaultString = "000.00000.00000.00+++\r";
-
-        float speeds_[3] = {speedM1, speedM2, speedM3};
-
-        for (int i = 0; i < 3; i++) {
-            if (speeds_[i] < 0) {
-                defaultString[18+i] = '-';
-            }
-        }
-
-        String speedM1_ = String(abs(speedM1), 2);
-        String speedM2_ = String(abs(speedM2), 2);
-        String speedM3_ = String(abs(speedM3), 2);
-
-        String speeds[3] = {speedM1_, speedM2_, speedM3_};
-        for (int i = 0; i < 3; i++) {
-            String str_ = speeds[i];
-            for (int x = 0; x < str_.length(); x++) {
-                defaultString[6*(i+1)-x-1] = str_[str_.length()-1-x];
-            }
-        }
-
-        Serial5.print(defaultString);
-        Serial.println(defaultString);
-    } else {
-        return;
-    }
 }
 
 void Serial_C::receive() {
     if (isMaster) {
         receive_string = Serial5.readStringUntil('\r');
+        int string_length = receive_string.length();
+        for (int i = 0; i< string_length; i++) {
+            if (receive_string[i] == ',') {
+                theta = receive_string.substring(0, i).toFloat();
+                x = receive_string.substring(i+1, string_length-i).toFloat();
+                break;
+            }
+        }
     }
     else {
-        String rawString = Serial3.readStringUntil('\r');
-
-        motorSpeeds[3] = {0};
-
-        for (int i = 4; i < 4; i++) {
-            motorSpeeds[i-1] = rawString.substring(i*6-6, i*6).toFloat();
-            if (rawString[rawString.length()-4+(i-1)] == '-') motorSpeeds[i-1] *= -1;
+        receive_string = Serial3.readStringUntil('\r');
+        int string_length = receive_string.length();
+        for (int i = 0; i< string_length; i++) {
+            if (receive_string[i] == ',') {
+                theta = receive_string.substring(0, i).toFloat();
+                x = receive_string.substring(i+1, string_length-i).toFloat();
+                break;
+            }
         }
-
     }
 }

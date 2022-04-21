@@ -13,7 +13,7 @@
 
 int buttonPressed = 0;
 int pinButton = 28;
-bool calibration = true;
+bool calibration = false;
 
 Motor m1(1, 2);
 Motor m2(22, 23);
@@ -27,6 +27,18 @@ HMC5883L_Compass magCompass(0.037, 1000);
 void interrupt_function()
 {
   buttonPressed++;
+}
+
+void move(int deg, int basespeed) { // move functions for motors
+  float pi = 57.29577951; 
+  float speedM1 = -(basespeed) * sin((deg + 180) / pi);
+  float speedM2 = -(basespeed) * sin((deg + 60) / pi); 
+  float speedM3 = -(basespeed) * sin((deg - 60) / pi); 
+
+  m1.move(speedM1, 0);
+  m2.move(speedM2, 0);
+  m3.move(speedM3, 0);
+
 }
 
 void setup()
@@ -99,21 +111,9 @@ void loop()
       pixels.show();
     }
   }
-
-  String receivedString = serial.receive(); // receive full string (in format: 000.00000.00000.00+++)
-
-  float motorSpeeds[3] = {};
-
-  for (int i = 1; i < 4; i++) {
-    motorSpeeds[i-1] = receivedString.substring(i*6-6, i*6).toFloat(); 
-    if (receivedString[receivedString.length()-3+(i-1)] < 0) {
-      motorSpeeds[i-1]*-1;
-    }
-  }
-
-  float offset = magCompass.calculate()*1.00; // change this
-  m1.move(motorSpeeds[0], offset);
-  m2.move(motorSpeeds[1], offset);
-  m3.move(motorSpeeds[2], offset);
+  serial.receive();
+  float IR_x = serial.x; // receive full string (in format: 000.00000.00000.00+++)
+  float IR_theta = serial.theta;
+  move
   
 }
