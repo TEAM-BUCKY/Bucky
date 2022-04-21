@@ -13,7 +13,7 @@ Motor m3 (24, 25);
 
 Serial_C serial (false);
 
-
+bool outBounds = false;
 
 int S[5] = {33, 34, 35, 36, 29}; // A0, A1, A2, A3, A4 Respectively on Arduino
 
@@ -57,9 +57,9 @@ void move(int deg, int basespeed) { // move functions for motors
   float speedM2 = -(basespeed) * sin((deg + 60) / pi); 
   float speedM3 = -(basespeed) * sin((deg - 60) / pi); 
 
-  m1.move(speedM1);
-  m2.move(speedM2);
-  m3.move(speedM3);
+  m1.move(speedM1, 0);
+  m2.move(speedM2, 0);
+  m3.move(speedM3, 0);
 
 }
 
@@ -110,16 +110,18 @@ void loop()
     if (val > 550)
     {
       // Serial.println("out of bounds");
-      degrees = invertDegrees(i * 15);
+      if (outBounds == false)
+        degrees = invertDegrees(i * 15);
+      outBounds = true;
       break;
     }
   }
   if (degrees != -1) {
     move(degrees, 100);
   } else {
-
+    serial.receive();
     // everything to do other then out of bounds
-    move(0, 100);
+    outBounds = false;
+    move(serial.theta, 100);
   }
-  Serial.println("d");
 }
