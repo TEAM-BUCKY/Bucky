@@ -113,13 +113,7 @@ void loop()
       degrees = invertDegrees(i * 15);
       break;
     }
-    else
-    {
-      // Serial.println("In bounds");
-      degrees = -1;
-    }
   }
-  Serial.println(String(degrees));
   if (degrees != -1) {
     move(degrees, 100);
   } else {
@@ -127,4 +121,5 @@ void loop()
     // everything to do other then out of bounds
     move(0, 100);
   }
+  Serial.println("d");
 }
