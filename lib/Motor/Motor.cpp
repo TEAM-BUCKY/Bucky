@@ -25,7 +25,8 @@ void Motor::move(float speed, float offset) {
     }
 
     speed += offset;
-
+    if (speed < -255) speed = -255;
+    if (speed > 255) speed = 255;
     if(speed < 0) {
         digitalWrite(in1, LOW);
         analogWrite(pwm, abs(speed));

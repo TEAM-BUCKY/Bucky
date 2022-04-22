@@ -21,7 +21,7 @@ class HMC5883L_Compass {
         int offX, offY, avgAmount;
     public:
         HMC5883L_Compass(float DECLINATION, int avgAmount);
-        float calibrate();
+        void calibrate();
         void setup(int offX, int offY);
         float calculate();
 };

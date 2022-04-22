@@ -41,7 +41,7 @@ void Serial_C::receive() {
         for (int i = 0; i< string_length; i++) {
             if (receive_string[i] == ',') {
                 theta = receive_string.substring(0, i).toFloat();
-                x = receive_string.substring(i+1, string_length-i).toFloat();
+                x = receive_string.substring(i+1, string_length).toFloat();
                 break;
             }
         }

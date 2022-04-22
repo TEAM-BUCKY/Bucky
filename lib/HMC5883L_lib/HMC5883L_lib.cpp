@@ -62,9 +62,9 @@ void HMC5883L_Compass::setup(int offX, int offY)
     compass.setOffset(offX, offY);
 }
 
-float HMC5883L_Compass::calibrate() {
+void HMC5883L_Compass::calibrate() {
     float sum = 0.00;
-    for (int i = 0; i <= avgAmount; i++) {
+    for (int i = 0; i < avgAmount; i++) {
         sum += calculate();
     }
 
@@ -106,5 +106,5 @@ float HMC5883L_Compass::calculate()
         correctedDegrees -= 360;
     }
     // output
-    return correctedDegrees;
+    return correctedDegrees - 180;
 }
