@@ -2,10 +2,16 @@
 The second iteration of Goaly Robot
 
 # Table of Contents 
--Introduction
+- Introduction
+- Hardware
+  - 
+- Software
+  - Compass
+  - Lightgate
+  - LightRing
+  - Motor
+  - Serial
+  - TSSP
+  - Ultrasonic
 - History
-- The Design
-- 3D printing
-- PCB
-- Sensors 
--  
+
