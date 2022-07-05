@@ -22,7 +22,7 @@ The second iteration of Goaly Robot
 ## Compass
 
 
-[Back to contents](#Table)
+[Back to contents](#Table-of-Contents)
 ## Lightgate
 ## LightRing
 ## Motor
