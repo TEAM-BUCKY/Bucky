@@ -20,33 +20,9 @@ The second iteration of Goaly Robot
 # Software
 
 ## Compass
-i
 
 
-
-
-
-
-i
-
-
-
-
-
-
-
-
-
-
-
-i
-i
-i
-i
-i
-i
-
-
+[Back to contents](#Table)
 ## Lightgate
 ## LightRing
 ## Motor
