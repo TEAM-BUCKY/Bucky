@@ -6,12 +6,50 @@ The second iteration of Goaly Robot
 - Hardware
   - 
 - Software
-  - Compass
-  - Lightgate
-  - LightRing
-  - Motor
-  - Serial
-  - TSSP
-  - Ultrasonic
+  - [Compass](#Compass)
+  - [Lightgate](#Lightgate)
+  - [LightRing](#Lightring)
+  - [Motor](#Motor)
+  - [Serial](#Serial)
+  - [TSSP](#TSSP)
+  - [Ultrasonic](#Ultrasonic)
 - History
 
+# Hardware
+
+# Software
+
+## Compass
+i
+
+
+
+
+
+
+i
+
+
+
+
+
+
+
+
+
+
+
+i
+i
+i
+i
+i
+i
+
+
+## Lightgate
+## LightRing
+## Motor
+## Serial
+## TSSP
+## Ultrasonic
