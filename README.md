@@ -13,6 +13,7 @@ The second iteration of Goaly Robot
   - [Serial](#Serial)
   - [TSSP](#TSSP)
   - [Ultrasonic](#Ultrasonic)
+  - [CAN](#CAN)
 - History
 
 # Hardware
@@ -89,5 +90,8 @@ The radius is calculated like this; `sqrt(pow(IRInfo_x, 2.0) + pow(IRInfo_y, 2.0
 The theta is calculated like thos; `atan2(IRInfo_y, IRInfo_x) / PI * 180.0;`
 [Back to contents](#Table-of-Contents)
 ## Ultrasonic
+
+[Back to contents](#Table-of-Contents)
+## CAN
 
 [Back to contents](#Table-of-Contents)
