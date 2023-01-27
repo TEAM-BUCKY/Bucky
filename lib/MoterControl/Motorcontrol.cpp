@@ -31,7 +31,7 @@ double MotorControl::BallFrontal(double X_distance, double Y_distance){
 // Side Back
 double MotorControl::BallSideBack(double X_distance, double Y_distance){
     return 180;
-}
+};
 
 // backwards
 double MotorControl::BallBack(double X_distance, double Y_distance){
