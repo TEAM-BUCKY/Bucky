@@ -4,7 +4,7 @@
 
 MotorControl::MotorControl(double RobotRadius){
     MotorControl::RobotRadius = RobotRadius;
-}
+};
 
 double MotorControl::CalculateTrajectory(double IRBallDegrees, double DistanceToBall)
 {
