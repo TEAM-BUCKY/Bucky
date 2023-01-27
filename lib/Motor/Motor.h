@@ -10,10 +10,8 @@ class Motor {
         int in1, pwm;
         float speeddiff;
     public:
-        Motor();
         Motor(int in1, int pwm, float speeddiff);
         Motor(int in1, int pwm);
-        void test();
         void move(float speed, float offset);
         void setup();
 };
