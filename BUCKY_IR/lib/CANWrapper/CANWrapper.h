@@ -11,7 +11,9 @@ class CANWrapper {
         int available();
         char* readData();
         void parsePacket();
+        void setPins(int rx, int tx);
         void end();
+        void setFilter(int id);
 };
 
 #endif

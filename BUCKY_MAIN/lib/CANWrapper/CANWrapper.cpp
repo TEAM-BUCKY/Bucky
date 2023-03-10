@@ -19,6 +19,31 @@ void CANWrapper::sendData(int id, int* data, int size) {
     CAN.endPacket();
 }
 
+void CANWrapper::setPins(int rx, int tx) {
+    CAN.setPins(rx, tx);
+}
+
+void CANWrapper::sendFloat(int id, float data) {
+    CAN.beginPacket(id);
+    String a = String(data);
+    for (int i = 0; i < sizeof(a); i++) {
+        CAN.write(a[i]);
+    }
+    CAN.endPacket();   
+}
+
+void CANWrapper::sendBetterFloat(int id, float data) {
+    CAN.beginPacket(id);
+    String dataString = String(data);
+    int length = sizeof(dataString);
+    int decimal = dataString.substring(length - 2).toInt();
+    int number = dataString.substring(0, length - 3).toInt();
+    CAN.write(number);
+    CAN.write(decimal);
+    CAN.endPacket();   
+}
+
+
 int CANWrapper::available() {
     return CAN.available();
 }
@@ -32,6 +57,11 @@ char* CANWrapper::readData() {
     }
     data[i]='\0';
     return data;
+}
+
+void CANWrapper::setFilter(int id) {
+    CAN.filter(id);
+    CAN.filterExtended(id);
 }
 
 void CANWrapper::sendDataString(int id, char* data, int size) {

@@ -6,10 +6,14 @@ class CANWrapper {
         void begin(int baudrate);
         void sendData(int id, int* data, int size);
         void sendDataString(int id, char* data, int size);
+        void sendFloat(int id, float data);
+        void sendBetterFloat(int id, float data);
         int available();
         char* readData();
         void parsePacket();
+        void setPins(int rx, int tx);
         void end();
+        void setFilter(int id);
 };
 
 #endif

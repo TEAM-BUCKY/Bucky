@@ -19,10 +19,13 @@ void CANWrapper::sendData(int id, int* data, int size) {
     CAN.endPacket();
 }
 
+void CANWrapper::setPins(int rx, int tx) {
+    CAN.setPins(rx, tx);
+}
+
 void CANWrapper::sendFloat(int id, float data) {
     CAN.beginPacket(id);
     String a = String(data);
-    Serial.println(data);
     for (int i = 0; i < sizeof(a); i++) {
         CAN.write(a[i]);
     }
@@ -56,13 +59,17 @@ char* CANWrapper::readData() {
     return data;
 }
 
+void CANWrapper::setFilter(int id) {
+    CAN.filter(id);
+    CAN.filterExtended(id);
+}
+
 void CANWrapper::sendDataString(int id, char* data, int size) {
     CAN.beginPacket(id);
     for (int i = 0; i < size; i++) {
         CAN.write(data[i]);
     }
     CAN.endPacket();
-    Serial.println("Data send!");
 }
 
 void CANWrapper::end() {

@@ -1,16 +1,19 @@
 #include <Arduino.h>
 #include <CANWrapper.h>
 
-CANWrapper Can;
+CANWrapper CanIR;
+CANWrapper CanLight;
 
-void setup() {
-  Can.begin(500E3);
+void setup()
+{
+  CanIR.begin(500E3);
+  CanIR.setPins(18, 16);
   Serial.begin(115200);
 }
 
-void loop() {
-  if (Can.available() > 0) {
-    char* data = Can.readData();
-    Serial.println(data);
-  }
+void loop()
+{
+  char* data = CanIR.readData();
+  Serial.print(data);
+  delay(500);
 }
