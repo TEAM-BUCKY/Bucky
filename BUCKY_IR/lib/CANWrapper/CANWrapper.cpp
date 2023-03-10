@@ -19,6 +19,28 @@ void CANWrapper::sendData(int id, int* data, int size) {
     CAN.endPacket();
 }
 
+void CANWrapper::sendFloat(int id, float data) {
+    CAN.beginPacket(id);
+    String a = String(data);
+    Serial.println(data);
+    for (int i = 0; i < sizeof(a); i++) {
+        CAN.write(a[i]);
+    }
+    CAN.endPacket();   
+}
+
+void CANWrapper::sendBetterFloat(int id, float data) {
+    CAN.beginPacket(id);
+    String dataString = String(data);
+    int length = sizeof(dataString);
+    int decimal = dataString.substring(length - 2).toInt();
+    int number = dataString.substring(0, length - 3).toInt();
+    CAN.write(number);
+    CAN.write(decimal);
+    CAN.endPacket();   
+}
+
+
 int CANWrapper::available() {
     return CAN.available();
 }
@@ -40,6 +62,7 @@ void CANWrapper::sendDataString(int id, char* data, int size) {
         CAN.write(data[i]);
     }
     CAN.endPacket();
+    Serial.println("Data send!");
 }
 
 void CANWrapper::end() {
