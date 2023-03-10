@@ -2,7 +2,7 @@
 #include <TSSP2.h>
 
 
-TSSP2::TSSP2(int pins[14]) { // equal the argument array to array in class
+TSSP2::TSSP2(int pins[16]) { // equal the argument array to array in class
     for (int i =0; i < TSSP2::ir_num; i++) {
         TSSP2::pins[i] = pins[i];
     }
@@ -60,5 +60,5 @@ void TSSP2::calcVector() { // calculate the vector with the pulsewidth of every 
 
 void TSSP2::calcRTfromXY() { // calculate the radius and theta with vector of x, y
     IRInfo_radius = sqrt(pow(IRInfo_x, 2.0) + pow(IRInfo_y, 2.0));
-    IRInfo_theta = atan2(IRInfo_y, IRInfo_x) / PI * 180.0;
+    IRInfo_theta = atan2(IRInfo_x, IRInfo_y) / PI * 180.0;
 }

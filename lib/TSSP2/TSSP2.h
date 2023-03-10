@@ -3,26 +3,22 @@
 
 class TSSP2{
     private:
-        int pins[14];
-        int ir_num = 14;
+        int pins[16];
+        int ir_num = 16;
         int deltaPulseWidth = 2;
 
-        const float unitVectorX[14] = {1.000, 1.000, 0.623, 
-        0.223, -0.223, -0.623, -0.901, -1.000, -0.901, -0.623, 
-        -0.223, 0.223, 0.623, 1.000};
-        const float unitVectorY[14] = {0.000, 0.000, 0.782, 
-        0.975, 0.975, 0.782, 0.434, 0.000, -0.434, -0.782, 
-        -0.975, -0.975, 0.782, 0.000};
+        const float unitVectorX[16] = {0.000, 0.000, 0.707, 0.923, 1.000, 0.923, 0.707, 0.383, 0.000, -0.383, -0.707, -0.923, -1.000, -0.923, -0.707, 0.000};
+        const float unitVectorY[16] = {1.000, 1.000, 0.707, 0.383, 0.000, -0.383, -0.707, -0.923, -1.000, -0.923, -0.707, -0.383, 0.000, 0.383, 0.707, 1.000};
 
     public:
-        TSSP2(int pins[14]); // change this to ir_num
+        TSSP2(int pins[16]); // change this to ir_num
         bool getSensorPin(int pin);
         void setAllSensorPinsInput();
         void getAllSensorPulseWidth(int timeLimit); // also change this to ir_num
         void calcVector();
         void calcRTfromXY();
         int maxPulseWidth, maxSensorNumber, activeSensors;
-	    int pulseWidth[14] = {};
+	    int pulseWidth[16] = {};
 
 
         float IRInfo_x;
