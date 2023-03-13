@@ -51,6 +51,10 @@ int CANWrapper::available() {
 char* CANWrapper::readData() {
     char* data = new char[255];
     int i = 0;
+    if (!CAN.available()) {
+        Serial.println("No data available");
+        return NULL;
+    }
     while (CAN.available()) {
         char byte = (char)CAN.read();
         data[i++] = byte;
