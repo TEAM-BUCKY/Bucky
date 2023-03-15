@@ -1,75 +1,51 @@
-#include "CANWrapper.h"
-#include "CAN.h"
+#include <CANWrapper.h>
+#include <CAN.h>
+#include <stdio.h>
 
-void CANWrapper::begin(int baudrate) {
-  // Initialize the CAN bus
-  CAN.begin(baudrate);
+CANWrapper::CANWrapper(int baudrate, int rx, int tx){
+  CANWrapper::baudrate = baudrate;
+  CANWrapper::rx = rx;
+  CANWrapper::tx = tx;
+};
+
+int CANWrapper::setup(){
+  CAN.setPins(rx, tx);
+  return CAN.begin(baudrate);
 }
 
-void CANWrapper::parsePacket() {
-  CAN.parsePacket();
+int CANWrapper::sendDouble(double message, int id){
+  union {
+    double message;
+    byte tempArray[8];
+  } u;
+  u.message = message;
+  CAN.beginPacket(id);
+  for (int i = 0; i < 8;i++){
+    CAN.write(u.tempArray[i]);
+  }
+  return CAN.endPacket();
 }
 
-void CANWrapper::sendData(int id, int* data, int size) {
-    CAN.beginPacket(id);
-    // check if data is a list if so loop through it and send each element
-    for (int i = 0; i < size; i++) {
-        CAN.write(data[i]);
-    }
-    CAN.endPacket();
+void receiveDouble(int test){
+  int packetId = CAN.packetId();
+  union {
+    double message;
+    byte tempArray[8];
+  } u;
+  for (int i = 0; i < 8; i++){
+    u.tempArray[i] = CAN.read();
+  }
+
+  if (packetId == 1){
+    irTheta = u.message;
+  }
+  else if (packetId == 2) {
+    irRadius = u.message;
+  }
 }
 
-void CANWrapper::setPins(int rx, int tx) {
-    CAN.setPins(rx, tx);
-}
-
-void CANWrapper::sendFloat(int id, float data) {
-    CAN.beginPacket(id);
-    String a = String(data);
-    for (int i = 0; i < sizeof(a); i++) {
-        CAN.write(a[i]);
-    }
-    CAN.endPacket();   
-}
-
-void CANWrapper::sendBetterFloat(int id, float data) {
-    CAN.beginPacket(id);
-    String dataString = String(data);
-    int length = sizeof(dataString);
-    int decimal = dataString.substring(length - 2).toInt();
-    int number = dataString.substring(0, length - 3).toInt();
-    CAN.write(number);
-    CAN.write(decimal);
-    CAN.endPacket();   
-}
-
-
-int CANWrapper::available() {
-    return CAN.available();
-}
-
-char* CANWrapper::readData() {
-    char* data = new char[255];
-    int i = 0;
-    while (CAN.available()) {
-        char byte = (char)CAN.read();
-        data[i++] = byte;
-    }
-    data[i]='\0';
-    return data;
-}
-
-void CANWrapper::setFilter(int id) {
-    CAN.filter(id);
-    CAN.filterExtended(id);
-}
-
-void CANWrapper::sendDataString(int id, char* data, int size) {
-    CAN.beginPacket(id);
-    for (int i = 0; i < size; i++) {
-        CAN.write(data[i]);
-    }
-    CAN.endPacket();
+void CANWrapper::registerCallback(){
+  CAN.onReceive(receiveDouble);
 }
 
 void CANWrapper::end() {

@@ -1,19 +1,18 @@
 #ifndef CANWRAPPER_H
 #define CANWRAPPER_H
 
+double irTheta, irRadius;
+
 class CANWrapper {
+    private:
+        int baudrate, rx, tx;
     public:
-        void begin(int baudrate);
-        void sendData(int id, int* data, int size);
-        void sendDataString(int id, char* data, int size);
-        void sendFloat(int id, float data);
-        void sendBetterFloat(int id, float data);
-        int available();
-        char* readData();
-        void parsePacket();
-        void setPins(int rx, int tx);
+        CANWrapper(int baudrate, int rx, int tx);
+        int setup();
         void end();
-        void setFilter(int id);
+        int sendDouble(double message, int id);
+        void registerCallback();
+
 };
 
 #endif
