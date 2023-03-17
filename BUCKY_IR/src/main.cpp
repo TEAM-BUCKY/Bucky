@@ -7,17 +7,14 @@ TSSP2 tssp2(pins);
 CANWrapper Canny; 
 
 void setup() {
-    tssp2.setAllSensorPinsInput();
+    tssp2.setup();
     Canny.setup();
     pinMode(13, OUTPUT);
     digitalWrite(13, HIGH);
 }
 
 void loop(){
-    tssp2.getAllSensorPulseWidth(833);
-    tssp2.calcVector();
-    tssp2.calcRTfromXY();
-
+    tssp2.update(833);
     Canny.sendDouble(tssp2.IRInfo_theta, 0);
     Canny.sendDouble(tssp2.IRInfo_radius, 1);
     delay(100);

@@ -8,7 +8,7 @@ TSSP2::TSSP2(int pins[16]) { // equal the argument array to array in class
     }
 }
 
-void TSSP2::setAllSensorPinsInput() { // set all the sensorpins to input
+void TSSP2::setup() { // set all the sensorpins to input
     for (int i = 0; i < ir_num; i++) {
         pinMode(pins[i], INPUT);
     }
@@ -18,7 +18,7 @@ bool TSSP2::getSensorPin(int pin) { // get digitalread of pins specified
     return digitalRead(pins[pin]);
 }
 
-void TSSP2::getAllSensorPulseWidth(int timeLimit) { // get the pulsewidth of every sensor
+void TSSP2::update(int timeLimit) { // get the pulsewidth of every sensor
     for (int i = 0; i < ir_num; i++) { // set the pulsewidth array to 0
         pulseWidth[i] = 0; 
     }
@@ -46,19 +46,15 @@ void TSSP2::getAllSensorPulseWidth(int timeLimit) { // get the pulsewidth of eve
             maxSensorNumber = i;
         }
     }
-}
 
-void TSSP2::calcVector() { // calculate the vector with the pulsewidth of every sensor
     IRInfo_x = 0.0;
     IRInfo_y = 0.0;
     for (int i = 0; i < ir_num; i++) {
         IRInfo_x += pulseWidth[i] * unitVectorX[i]; 
         IRInfo_y += pulseWidth[i] * unitVectorY[i];
     }
-}
 
-
-void TSSP2::calcRTfromXY() { // calculate the radius and theta with vector of x, y
     IRInfo_radius = sqrt(pow(IRInfo_x, 2.0) + pow(IRInfo_y, 2.0));
     IRInfo_theta = atan2(IRInfo_x, IRInfo_y) / PI * 180.0;
 }
+
