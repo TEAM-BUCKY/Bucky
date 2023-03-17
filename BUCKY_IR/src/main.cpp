@@ -4,12 +4,21 @@
 
 int pins[16] = {14, 27, 26, 25, 33, 32, 35, 34, 23, 22, 21, 19, 18, 17, 16, 15};
 TSSP2 tssp2(pins);
+CANWrapper Canny; 
 
 void setup() {
-    Serial.begin(115200);
-    Serial.println(irTheta);
+    tssp2.setAllSensorPinsInput();
+    Canny.setup();
+    pinMode(13, OUTPUT);
+    digitalWrite(13, HIGH);
 }
 
 void loop(){
+    tssp2.getAllSensorPulseWidth(833);
+    tssp2.calcVector();
+    tssp2.calcRTfromXY();
 
+    Canny.sendDouble(tssp2.IRInfo_theta, 0);
+    Canny.sendDouble(tssp2.IRInfo_radius, 1);
+    delay(100);
 }

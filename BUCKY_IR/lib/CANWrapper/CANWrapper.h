@@ -7,7 +7,7 @@ class CANWrapper {
     private:
         int baudrate, rx, tx;
     public:
-        CANWrapper(int baudrate, int rx, int tx);
+        CANWrapper(int baudrate = 500E3, int rx = 4, int tx = 5);
         int setup();
         void end();
         int sendDouble(double message, int id);
