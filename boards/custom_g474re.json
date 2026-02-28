@@ -1,0 +1,30 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DSTM32G474xx -DSTM32G4xx",
+    "f_cpu": "170000000L",
+    "framework_extra_flags": {
+      "arduino": "-D ARDUINO_GENERIC_G474RETX"
+    },
+    "mcu": "stm32g474ret6",
+    "product_line": "STM32G474xx",
+    "variant": "STM32G4xx/G473R(B-C)T_G473RETx(Z)_G474R(B-C-E)T_G483RET_G484RET",
+    "variant_h": "variant_generic.h"
+  },
+  "debug": {
+    "jlink_device": "STM32G474RE",
+    "openocd_target": "stm32g4x",
+    "svd_path": "STM32G474xx.svd"
+  },
+  "frameworks": ["arduino", "cmsis", "stm32cube"],
+  "name": "Custom STM32G474RE",
+  "upload": {
+    "maximum_ram_size": 131072,
+    "maximum_size": 524288,
+    "protocol": "dfu",
+    "protocols": ["dfu", "stlink", "jlink"]
+  },
+  "url": "https://www.st.com/en/microcontrollers-microprocessors/stm32g474re.html",
+  "vendor": "Generic"
+}
