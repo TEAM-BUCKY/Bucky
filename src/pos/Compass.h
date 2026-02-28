@@ -5,16 +5,22 @@
 #ifndef BUCKY_COMPASS_H
 #define BUCKY_COMPASS_H
 
+#include <Wire.h>
+#include <Adafruit_LSM6DS3TRC.h>
+
 class Compass
 {
     private:
-        int address;
+        Adafruit_LSM6DS3TRC imu;
+        float heading = 0;
+        float gyroBiasZ = 0;
+        unsigned long lastUpdateMicros = 0;
+
     public:
-        explicit Compass(const int address = 0x18) : address(address) {}
-
-        float getHeading();
-
-
+        bool init(TwoWire& wire, int calibrationSamples = 500);
+        void update();
+        float getHeading() const;
+        void reset();
 };
 
 #endif //BUCKY_COMPASS_H
