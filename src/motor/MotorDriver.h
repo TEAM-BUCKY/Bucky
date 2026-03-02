@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include "../gpio/pwm.h"
 
-#define MIN_SPEED 150
+#define MIN_SPEED 130
 #define MAX_SPEED 250
 
 struct Motor {
@@ -15,6 +15,7 @@ struct Motor {
 struct MotorPwm {
     PwmPin inA;
     PwmPin inB;
+    double currentSpeed = 0;
 };
 
 struct VectorXY
@@ -39,19 +40,15 @@ class MotorDriver {
 
     SpeedRange speedRange = {MIN_SPEED, MAX_SPEED};
 
-    double balanceDegrees = 0;
-
-    static void drive(const MotorPwm& motor, double speedPercentage);
+    static void drive(const MotorPwm& motor, double targetSpeed);
 
 public:
     MotorDriver(const Motor m1, const Motor m2, const Motor m3) : m1(m1), m2(m2), m3(m3) {};
 
     void init(int minSpeed = MIN_SPEED, int maxSpeed = MAX_SPEED);
 
-    void driveDegrees(double degrees, double scale = 100) const;
-    void driveVector(VectorXY vector) const;
-    void applyBalanceDegrees(double degreesOffset);
-    void applyBalanceVector(VectorXY balanceVector);
+    void driveDegrees(double degrees, double scale = 100, double rotation = 0) const;
+    void driveVector(VectorXY vector, double rotation = 0);
 
     void changeSpeed(const int minSpeed = MIN_SPEED, const int maxSpeed = MAX_SPEED) {
         this->speedRange.min = minSpeed;

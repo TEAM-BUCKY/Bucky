@@ -19,6 +19,12 @@ JoystickVector readJoystick()
     float x = (rawX - JOYSTICK_CENTER) / static_cast<float>(JOYSTICK_CENTER);
     float y = (rawY - JOYSTICK_CENTER) / static_cast<float>(JOYSTICK_CENTER);
 
+
+    Serial.print("X: ");
+    Serial.print(x);
+    Serial.print(", Y: ");
+    Serial.println(y);
+
     x = fmaxf(-1.0f, fminf(1.0f, x));
     y = fmaxf(-1.0f, fminf(1.0f, y));
 

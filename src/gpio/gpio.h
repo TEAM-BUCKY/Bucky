@@ -4,7 +4,6 @@
 #include <Arduino.h>
 #include <stm32g4xx.h>
 
-// Resolve an Arduino pin number to its GPIO port and bit mask
 struct GpioPin {
     GPIO_TypeDef* port;
     uint16_t mask; // bit mask (1 << pin_number_within_port)
@@ -19,8 +18,7 @@ struct GpioPin {
 };
 
 inline void gpioMode(const GpioPin gp, const int mode) {
-    const uint8_t pos = __builtin_ctz(gp.mask); // bit position 0-15
-    // Clear the 2-bit MODER field, then set it
+    const uint8_t pos = __builtin_ctz(gp.mask);
     gp.port->MODER = (gp.port->MODER & ~(0x3U << (pos * 2)))
                    | (static_cast<uint32_t>(mode == OUTPUT ? 0x1U : 0x0U) << (pos * 2));
 
@@ -36,7 +34,6 @@ inline void gpioMode(const GpioPin gp, const int mode) {
 }
 
 inline void gpioWrite(const GpioPin gp, const bool high) {
-    // BSRR: lower 16 bits set, upper 16 bits reset
     gp.port->BSRR = high ? gp.mask : (static_cast<uint32_t>(gp.mask) << 16);
 }
 

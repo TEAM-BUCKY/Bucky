@@ -6,6 +6,10 @@
 #include "i2c/I2CManager.h"
 #include "pos/Compass.h"
 #include "pos/Sonar.h"
+#include "tests/tests.h"
+
+// Uncomment to run a test instead of normal operation
+#define RUN_TEST testHoldHeading
 
 Motor m1 = {PA8, PA9};
 Motor m2 = {PA10, PC10};
@@ -15,7 +19,12 @@ MotorDriver motorDriver(m1, m2, m3);
 I2CManager i2c;
 Compass compass;
 
-[[noreturn]] int main() {
+constexpr float HEADING_KP = 0.4f;
+constexpr float HEADING_KD = 0.3f;
+constexpr float MAX_ROTATION = 25.0f;
+constexpr float HEADING_DEADZONE = 3.0f;
+
+int main() {
     init();
     analogReadResolution(12);
 
@@ -26,13 +35,34 @@ Compass compass;
 
     compass.init(i2c.getBus(I2CBus::BUS1));
 
+#ifdef RUN_TEST
+    RUN_TEST(motorDriver, compass);
+#else
+    float lastOffset = 0;
+    unsigned long lastTime = millis();
+
     while (true) {
         compass.update();
 
+        unsigned long now = millis();
+        float dt = (now - lastTime) / 1000.0f;
+        lastTime = now;
+
         auto [degrees, speed] = readJoystick();
-        motorDriver.applyBalanceDegrees(-compass.getHeading());
-        motorDriver.driveDegrees(degrees, speed);
+
+        const float offset = compass.getOffset();
+        float rotation = 0;
+        if (fabs(offset) > HEADING_DEADZONE) {
+            float derivative = (dt > 0) ? (offset - lastOffset) / dt : 0;
+            rotation = constrain(-offset * HEADING_KP - derivative * HEADING_KD, -MAX_ROTATION, MAX_ROTATION);
+        }
+        lastOffset = offset;
+
+        motorDriver.driveDegrees(degrees, speed, rotation);
 
         delay(10);
     }
+#endif
+
+    return 0;
 }
