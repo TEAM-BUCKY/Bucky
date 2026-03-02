@@ -1,53 +1,84 @@
 #include "Sonar.h"
+#include "../gpio/gpio.h"
 
-void Sonar::init() const
-{
-    pinMode(trigPin, OUTPUT);
+static GpioPin trigGpio{nullptr, 0};
+static GpioPin echoGpio[SONAR_COUNT] = {{nullptr, 0}, {nullptr, 0}, {nullptr, 0}, {nullptr, 0}};
+static int echoPinNumbers[SONAR_COUNT]; // kept for attachInterrupt (needs Arduino pin number)
+
+// ISR state: rise/fall timestamps per channel
+static volatile uint32_t riseTime[SONAR_COUNT];
+static volatile uint32_t duration[SONAR_COUNT];
+static volatile bool done[SONAR_COUNT];
+
+static void echoISR(const int idx) {
+    if (gpioRead(echoGpio[idx]))
+        riseTime[idx] = micros();
+    else {
+        duration[idx] = micros() - riseTime[idx];
+        done[idx] = true;
+    }
 }
 
-double Sonar::getDistance() const
-{
-    digitalWrite(trigPin, LOW);
+static void echoISR0() { echoISR(0); }
+static void echoISR1() { echoISR(1); }
+static void echoISR2() { echoISR(2); }
+static void echoISR3() { echoISR(3); }
+
+static constexpr void (*const isrTable[SONAR_COUNT])() = {echoISR0, echoISR1, echoISR2, echoISR3};
+
+void setupSonar(const SonarPins& pins) {
+    trigGpio = GpioPin(pins.trigPin);
+    gpioMode(trigGpio, OUTPUT);
+    gpioLow(trigGpio);
+
+    for (int i = 0; i < SONAR_COUNT; i++) {
+        echoPinNumbers[i] = pins.echoPins[i];
+        if (echoPinNumbers[i] >= 0) {
+            echoGpio[i] = GpioPin(echoPinNumbers[i]);
+            gpioMode(echoGpio[i], INPUT);
+        }
+    }
+}
+
+SonarReading readSonars() {
+    // Reset ISR state
+    for (int i = 0; i < SONAR_COUNT; i++) {
+        riseTime[i] = 0;
+        duration[i] = 0;
+        done[i] = false;
+    }
+
+    // Attach interrupts on all echo pins
+    for (int i = 0; i < SONAR_COUNT; i++)
+        attachInterrupt(digitalPinToInterrupt(echoPinNumbers[i]), isrTable[i], CHANGE);
+
+    // Fire a single trigger pulse
+    gpioLow(trigGpio);
     delayMicroseconds(2);
-    digitalWrite(trigPin, HIGH);
+    gpioHigh(trigGpio);
     delayMicroseconds(10);
-    digitalWrite(trigPin, LOW);
+    gpioLow(trigGpio);
 
-    const uint32_t duration = pulseIn(echoPin, HIGH, 30000);
-    return 0.034 * duration / 2;
-}
+    // Wait until all echoes return or timeout
+    const uint32_t start = micros();
+    bool allDone = false;
+    while (!allDone && micros() - start < SONAR_TIMEOUT_US) {
+        allDone = true;
+        for (int i = 0; i < SONAR_COUNT; i++) {
+            if (echoPinNumbers[i] >= 0 && !done[i]) {
+                allDone = false;
+            }
+        }
+    }
 
-void Sonar::changePins(const SonarPins pins)
-{
-    this->trigPin = pins.trigPin;
-    this->echoPin = pins.echoPin;
-}
+    // Detach interrupts
+    for (const auto pin : echoPinNumbers)
+        detachInterrupt(digitalPinToInterrupt(pin));
 
-Sonar sonar1({});
-Sonar sonar2({});
-Sonar sonar3({});
-Sonar sonar4({});
-
-void setupSonar(const SonarPins pins1, const SonarPins pins2, const SonarPins pins3, const SonarPins pins4)
-{
-    sonar1.changePins(pins1);
-    sonar2.changePins(pins2);
-    sonar3.changePins(pins3);
-    sonar4.changePins(pins4);
-
-    sonar1.init();
-    sonar2.init();
-    sonar3.init();
-    sonar4.init();
-}
-
-SonarReading readSonars()
-{
+    // Convert durations to distances (cm)
     SonarReading reading;
-    reading.sonar1 = sonar1.getDistance();
-    reading.sonar2 = sonar2.getDistance();
-    reading.sonar3 = sonar3.getDistance();
-    reading.sonar4 = sonar4.getDistance();
+    for (int i = 0; i < SONAR_COUNT; i++)
+        reading.distance[i] = 0.034 * duration[i] / 2.0;
 
     return reading;
 }

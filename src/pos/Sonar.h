@@ -3,33 +3,19 @@
 
 #include <Arduino.h>
 
+static constexpr int SONAR_COUNT = 4;
+static constexpr uint32_t SONAR_TIMEOUT_US = 30000; // ~5m max range
+
 struct SonarPins {
     int trigPin = -1;
-    int echoPin = -1;
+    int echoPins[SONAR_COUNT] = {-1, -1, -1, -1};
 };
 
-struct SonarReading
-{
-    double sonar1 = 0;
-    double sonar2 = 0;
-    double sonar3 = 0;
-    double sonar4 = 0;
+struct SonarReading {
+    double distance[SONAR_COUNT] = {};
 };
 
-class Sonar
-{
-    int trigPin;
-    int echoPin;
-
-    public:
-        explicit Sonar(const SonarPins pins) : trigPin(pins.trigPin), echoPin(pins.echoPin) {}
-        void init() const;
-
-        [[nodiscard]] double getDistance() const;
-
-        void changePins(SonarPins pins);
-};
-
-
+void setupSonar(const SonarPins& pins);
+SonarReading readSonars();
 
 #endif //BUCKY_SONAR_H
