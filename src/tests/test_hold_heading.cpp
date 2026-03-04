@@ -2,7 +2,7 @@
 #include <Arduino.h>
 #include <cmath>
 
-void testHoldHeading(MotorDriver& motorDriver, Compass& compass) {
+void testHoldHeading(MotorDriver& motorDriver, Compass& compass, IRController&, I2CManager&) {
     constexpr float KP = 0.4f;
     constexpr float KD = 0.3f;
     constexpr float MAX_ROT = 25.0f;
