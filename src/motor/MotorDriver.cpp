@@ -24,7 +24,16 @@ void MotorDriver::init(const int minSpeed, const int maxSpeed)
     pwmWrite(pw3.inA, 0);
     pwmWrite(pw3.inB, 0);
 
-    uint32_t currentTime = micros();
+    // Register all PWM pins for sync and align timer counters
+    pwmSyncRegister(pw1.inA);
+    pwmSyncRegister(pw1.inB);
+    pwmSyncRegister(pw2.inA);
+    pwmSyncRegister(pw2.inB);
+    pwmSyncRegister(pw3.inA);
+    pwmSyncRegister(pw3.inB);
+    pwmSyncTimers();
+
+    const uint32_t currentTime = micros();
     motor1 = {pw1, 0, 0, 0, currentTime};
     motor2 = {pw2, 0, 0, 0, currentTime};
     motor3 = {pw3, 0, 0, 0, currentTime};
@@ -56,7 +65,7 @@ void MotorDriver::setMotorSpeed(const MotorPwm& motor, const double targetSpeed)
 }
 
 constexpr double timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
-double getSmoothFunction(double begin, double target, double totalSpeed, uint32_t time) {
+double getSmoothFunction(const double begin, const double target, const double totalSpeed, const uint32_t time) {
     // https://www.desmos.com/calculator/0kpi5zggrd?lang=nl , in desmos: i = begin, o = target, s = totalSpeed, t = timePer100, x = time. (b = beginTime, already implemented inside updateMotor)
     // totalSpeed is used to make different motors sync, it's the scale given in driveDegrees, so if different motors have different speeds, they need the same time to reach targetSpeed
     if (time > abs(begin - totalSpeed) * timePer100) { // Constrain if outside function limits ( {b<x<\frac{\left|i-s\right|}{100}t+b\right\} )
@@ -76,6 +85,42 @@ void MotorDriver::updateAllMotors() const {
     updateMotor(motor3);
 }
 
+void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const double targetSpeed) {
+    if (targetSpeed > 100 || targetSpeed < -100) {
+        Serial.println("Error: speedPercentage must be between -100 and 100");
+        return;
+    }
+
+    if (targetSpeed == 0) {
+        pwmStage(motor.inA, 0);
+        pwmStage(motor.inB, 0);
+        return;
+    }
+
+    const double speed = map(static_cast<long>(abs(targetSpeed)), 0, 100, MIN_SPEED, MAX_SPEED);
+
+    if (targetSpeed < 0) {
+        pwmStage(motor.inA, 0);
+        pwmStage(motor.inB, static_cast<int>(round(speed)));
+        return;
+    }
+
+    pwmStage(motor.inA, static_cast<int>(round(speed)));
+    pwmStage(motor.inB, 0);
+}
+
+void MotorDriver::syncUpdateMotor(const Motor& motor) {
+    const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
+    stageMotorSpeed(motor.motor, getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth));
+}
+
+void MotorDriver::syncUpdateAllMotors() const {
+    syncUpdateMotor(motor1);
+    syncUpdateMotor(motor2);
+    syncUpdateMotor(motor3);
+    pwmCommit();
+}
+
 void MotorDriver::drive(Motor& motor, const double speed, const double totalSpeed) {
     motor.beginSpeed = motor.motor.currentSpeed;
     motor.targetSpeed = speed;
@@ -85,7 +130,7 @@ void MotorDriver::drive(Motor& motor, const double speed, const double totalSpee
 
 void MotorDriver::driveDegrees(const double degrees, const double scale, const double rotation) {
     // Translation component: drive in the desired direction
-    // Rotation component: scaled by drive speed so correction stays proportional,
+    // Rotation component: scaled by drive speed so correction stays proportional
     // but always allows at least the raw rotation for pure spin (scale=0)
     const double rotationScale = fmax(scale, fabs(rotation)) / 100.0;
     const double scaledRotation = rotation * rotationScale;

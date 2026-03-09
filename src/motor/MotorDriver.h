@@ -56,12 +56,16 @@ class MotorDriver {
     static void updateMotor(const Motor& motor);
     static void drive(Motor& motor, double speed, const double totalSpeed);
 
+    static void stageMotorSpeed(const MotorPwm& motor, double targetSpeed);
+    static void syncUpdateMotor(const Motor& motor);
+
 public:
     MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : m1(m1), m2(m2), m3(m3) {};
 
     void init(int minSpeed = MIN_SPEED, int maxSpeed = MAX_SPEED);
 
     void updateAllMotors() const;
+    void syncUpdateAllMotors() const;
 
     void driveDegrees(double degrees, double scale = 100, double rotation = 0);
     void driveVector(VectorXY vector, double rotation = 0);
