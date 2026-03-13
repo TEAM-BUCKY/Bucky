@@ -1,35 +1,36 @@
 #include "ADC.h"
 #include <Arduino.h>
+#include "../bitboard/bitboard.h"
 
 #ifndef ADC_CR_BOOST
 #define ADC_CR_BOOST (1UL << 8)
 #endif
 
 void adc_disable(ADC_TypeDef* adc) {
-    if (adc->CR & ADC_CR_ADSTART) {
-        adc->CR |= ADC_CR_ADSTP;
-        while (adc->CR & ADC_CR_ADSTP) {}
+    if (testMask(adc->CR, ADC_CR_ADSTART)) {
+        setMask(adc->CR, ADC_CR_ADSTP);
+        while (testMask(adc->CR, ADC_CR_ADSTP)) {}
     }
-    if (adc->CR & ADC_CR_ADEN) {
-        adc->CR |= ADC_CR_ADDIS;
-        while (adc->CR & ADC_CR_ADEN) {}
+    if (testMask(adc->CR, ADC_CR_ADEN)) {
+        setMask(adc->CR, ADC_CR_ADDIS);
+        while (testMask(adc->CR, ADC_CR_ADEN)) {}
     }
 }
 
 void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t extsel) {
-    adc->CR &= ~ADC_CR_DEEPPWD;
+    clearMask(adc->CR, ADC_CR_DEEPPWD);
 
     // Enable internal voltage regulator
-    adc->CR |= ADC_CR_ADVREGEN;
+    setMask(adc->CR, ADC_CR_ADVREGEN);
     delayMicroseconds(20); // tADCVREG_STUP
 
     // Boost mode required for fADC > 20 MHz (we use 42.5 MHz)
-    adc->CR |= ADC_CR_BOOST;
+    setMask(adc->CR, ADC_CR_BOOST);
 
     // Single-ended calibration
-    adc->CR &= ~ADC_CR_ADCALDIF;
-    adc->CR |= ADC_CR_ADCAL;
-    while (adc->CR & ADC_CR_ADCAL) {}
+    clearMask(adc->CR, ADC_CR_ADCALDIF);
+    setMask(adc->CR, ADC_CR_ADCAL);
+    while (testMask(adc->CR, ADC_CR_ADCAL)) {}
 
     adc->IER = 0;
     adc->CFGR2 = 0;
@@ -44,15 +45,15 @@ void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t
 
     if (channel < 10) {
         const uint32_t shift = channel * 3;
-        adc->SMPR1 = (adc->SMPR1 & ~(7U << shift)) | (2U << shift);
+        writeField(adc->SMPR1, 7U, shift, 2U);
     } else {
         const uint32_t shift = (channel - 10) * 3;
-        adc->SMPR2 = (adc->SMPR2 & ~(7U << shift)) | (2U << shift);
+        writeField(adc->SMPR2, 7U, shift, 2U);
     }
 
     adc->ISR = ADC_ISR_ADRDY;
-    adc->CR |= ADC_CR_ADEN;
-    while (!(adc->ISR & ADC_ISR_ADRDY)) {}
+    setMask(adc->CR, ADC_CR_ADEN);
+    while (!testMask(adc->ISR, ADC_ISR_ADRDY)) {}
 
-    adc->CR |= ADC_CR_ADSTART;
+    setMask(adc->CR, ADC_CR_ADSTART);
 }

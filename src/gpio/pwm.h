@@ -10,8 +10,8 @@
 template <bool enable>
 constexpr void toggleTimer(TIM_TypeDef* tim)
 {
-    if constexpr (enable) tim->CR1 |= TIM_CR1_CEN;
-    else tim->CR1 &= ~TIM_CR1_CEN;
+    if constexpr (enable) setMask(tim->CR1, TIM_CR1_CEN);
+    else clearMask(tim->CR1, TIM_CR1_CEN);
 }
 
 struct PwmPin {
@@ -34,38 +34,36 @@ struct PwmPin {
     constexpr PwmPin() : timer(nullptr), ccr(nullptr), channel(0), syncIndex(0xFF), complementary(false) {}
 };
 
-// Enable the timer's peripheral clock
 inline void pwmEnableClock(const TIM_TypeDef* tim) {
     switch (reinterpret_cast<uint32_t>(tim)) {
-        // APB1 timers
-        case TIM2_BASE:  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM2EN;  break;
-        case TIM3_BASE:  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM3EN;  break;
-        case TIM4_BASE:  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM4EN;  break;
+        case TIM2_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM2EN);  break;
+        case TIM3_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM3EN);  break;
+        case TIM4_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM4EN);  break;
 #ifdef TIM5_BASE
-        case TIM5_BASE:  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM5EN;  break;
+        case TIM5_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM5EN);  break;
 #endif
 #ifdef TIM6_BASE
-        case TIM6_BASE:  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM6EN;  break;
+        case TIM6_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM6EN);  break;
 #endif
 #ifdef TIM7_BASE
-        case TIM7_BASE:  RCC->APB1ENR1 |= RCC_APB1ENR1_TIM7EN;  break;
+        case TIM7_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM7EN);  break;
 #endif
         // APB2 timers
-        case TIM1_BASE:  RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;    break;
+        case TIM1_BASE:  setMask(RCC->APB2ENR, RCC_APB2ENR_TIM1EN);    break;
 #ifdef TIM8_BASE
-        case TIM8_BASE:  RCC->APB2ENR |= RCC_APB2ENR_TIM8EN;    break;
+        case TIM8_BASE:  setMask(RCC->APB2ENR, RCC_APB2ENR_TIM8EN);    break;
 #endif
 #ifdef TIM15_BASE
-        case TIM15_BASE: RCC->APB2ENR |= RCC_APB2ENR_TIM15EN;   break;
+        case TIM15_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM15EN);   break;
 #endif
 #ifdef TIM16_BASE
-        case TIM16_BASE: RCC->APB2ENR |= RCC_APB2ENR_TIM16EN;   break;
+        case TIM16_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM16EN);   break;
 #endif
 #ifdef TIM17_BASE
-        case TIM17_BASE: RCC->APB2ENR |= RCC_APB2ENR_TIM17EN;   break;
+        case TIM17_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM17EN);   break;
 #endif
 #ifdef TIM20_BASE
-        case TIM20_BASE: RCC->APB2ENR |= RCC_APB2ENR_TIM20EN;   break;
+        case TIM20_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM20EN);   break;
 #endif
         default: break;
     }
@@ -86,11 +84,11 @@ inline void pwmInit(const PwmPin& pw, const int pin, const uint32_t freq = 1000,
 
     volatile uint32_t* ccmr = &pw.timer->CCMR1 + (ch >> 1);
     const uint8_t shift = (ch & 1) * 8;
-    *ccmr = (*ccmr & ~(0xFFU << shift)) | (0x68U << shift); // OC mode 1 + preload
+    writeField(*ccmr, 0xFFU, shift, 0x68U); // OC mode 1 + preload
 
     *pw.ccr = 0;
 
-    pw.timer->CCER |= (1U << (ch * 4 + pw.complementary * 2));
+    setBit(pw.timer->CCER, ch * 4 + pw.complementary * 2);
 
     if (pw.timer == TIM1
 #ifdef TIM8
@@ -100,20 +98,17 @@ inline void pwmInit(const PwmPin& pw, const int pin, const uint32_t freq = 1000,
         || pw.timer == TIM20
 #endif
     ) {
-        pw.timer->BDTR |= TIM_BDTR_MOE;
+        setMask(pw.timer->BDTR, TIM_BDTR_MOE);
     }
 
     toggleTimer<true>(pw.timer);
 
-    // NOW switch pin to timer alternate function (seamless LOW -> 0% duty)
     pinmap_pinout(pn, PinMap_TIM);
 }
 
 inline void pwmWrite(const PwmPin& pw, const uint32_t value) {
     *pw.ccr = value;
 }
-
-// PWM Sync System
 
 #define PWM_SYNC_MAX_PINS   8
 #define PWM_SYNC_MAX_TIMERS 4
@@ -134,7 +129,6 @@ struct PwmSyncState {
 
 inline PwmSyncState pwmSync;
 
-// Register a PWM pin for sync operations (call after pwmInit)
 inline void pwmSyncRegister(PwmPin& pw) {
     if (pwmSync.pinCount < PWM_SYNC_MAX_PINS) {
         pw.syncIndex = pwmSync.pinCount;
@@ -167,19 +161,17 @@ inline void pwmSyncTimers() {
     __enable_irq();
 }
 
-// Stage a duty-cycle value
 inline void pwmStage(const PwmPin& pw, const uint32_t value) {
     pwmSync.pins[pw.syncIndex].value = value;
     setBit(pwmSync.dirtyPins, pw.syncIndex);
 }
 
-// Write all staged values to hardware CCR registers.
 inline void pwmCommit() {
     __disable_irq();
 
     uint8_t dirty = pwmSync.dirtyPins;
     Bitloop(dirty) {
-        const uint8_t i = __builtin_ctz(dirty);
+        const uint8_t i = GetLSB(dirty);
         *pwmSync.pins[i].ccr = pwmSync.pins[i].value;
     }
     pwmSync.dirtyPins = 0;

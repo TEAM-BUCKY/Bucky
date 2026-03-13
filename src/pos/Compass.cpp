@@ -1,4 +1,5 @@
 #include "Compass.h"
+#include "../bitboard/bitboard.h"
 
 void Compass::writeReg(uint8_t reg, uint8_t value) {
     wire->beginTransmission(LIS2MDL_ADDR);
@@ -20,8 +21,7 @@ bool Compass::init(TwoWire& wireRef) {
 
     delay(20);
 
-    // Check WHO_AM_I
-    uint8_t id = readReg(LIS2MDL_WHO_AM_I_REG);
+    const uint8_t id = readReg(LIS2MDL_WHO_AM_I_REG);
     Serial.print("Compass WHO_AM_I: 0x");
     Serial.println(id, HEX);
     if (id != 0x40) {
@@ -69,11 +69,11 @@ void Compass::update() {
     uint8_t zl = wire->read();
     uint8_t zh = wire->read();
 
-    int16_t rawX = (int16_t)((xh << 8) | xl);
-    int16_t rawY = (int16_t)((yh << 8) | yl);
+    const int16_t rawX = (int16_t)combineBytes(xh, xl);
+    const int16_t rawY = (int16_t)combineBytes(yh, yl);
 
-    float x = rawX * 1.5f * 0.1f;
-    float y = rawY * 1.5f * 0.1f;
+    const float x = rawX * 1.5f * 0.1f;
+    const float y = rawY * 1.5f * 0.1f;
 
     heading = atan2(y, x) * 180.0f / PI;
     if (heading < 0) heading += 360.0f;

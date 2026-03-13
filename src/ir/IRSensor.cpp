@@ -3,21 +3,21 @@
 #include "optimizations.h"
 #include "../dma/DMA.h"
 #include "../adc/ADC.h"
+#include "../bitboard/bitboard.h"
 
 // ---- Register helpers ----
 
 static FORCE_INLINE void gpio_set_af(GPIO_TypeDef* gpio, const uint8_t pin, const uint8_t af) {
-    gpio->MODER = gpio->MODER & ~(3U << (pin * 2)) | (2U << (pin * 2));
-    gpio->AFR[pin >> 3] = gpio->AFR[pin >> 3] & ~(0xFU << ((pin & 7) * 4))
-                        | (static_cast<uint32_t>(af) << ((pin & 7) * 4));
+    writeField(gpio->MODER, 3U, pin * 2, 2U);
+    writeField(gpio->AFR[pin >> 3], 0xFU, (pin & 7) * 4, af);
 }
 
 static FORCE_INLINE void gpio_set_analog(GPIO_TypeDef* gpio, const uint8_t pin) {
-    gpio->MODER |= 3U << (pin * 2);
+    writeField(gpio->MODER, 3U, pin * 2, 3U);
 }
 
 static FORCE_INLINE void tim_start(TIM_TypeDef* tim) {
-    tim->CR1 |= TIM_CR1_CEN;
+    setMask(tim->CR1, TIM_CR1_CEN);
 }
 
 static FORCE_INLINE void tim_set_trgo(TIM_TypeDef* tim, const uint32_t mms) {
@@ -29,7 +29,7 @@ static FORCE_INLINE void tim_set_dma_burst(TIM_TypeDef* tim, const uint32_t base
 }
 
 static FORCE_INLINE void tim_enable_update_dma(TIM_TypeDef* tim) {
-    tim->DIER |= TIM_DIER_UDE;
+    setMask(tim->DIER, TIM_DIER_UDE);
 }
 
 static constexpr uint32_t MMS_OC1REF   = 4;
@@ -80,11 +80,11 @@ static void init_timer_pwm(TIM_TypeDef* tim, const uint8_t channel) {
     // PWM mode 1 + preload enable (OC1M=110, OC1PE=1)
     volatile uint32_t* ccmr = &tim->CCMR1 + (channel >> 1);
     const uint8_t shift = (channel & 1) * 8;
-    *ccmr = *ccmr & ~(0xFFU << shift) | 0x68U << shift;
+    writeField(*ccmr, 0xFFU, shift, 0x68U);
 
     (&tim->CCR1)[channel] = IR_FAST_CCR;
-    tim->CCER |= 1U << (channel * 4);
-    tim->CR1 |= TIM_CR1_ARPE;
+    setBit(tim->CCER, channel * 4);
+    setMask(tim->CR1, TIM_CR1_ARPE);
 
     tim->EGR = TIM_EGR_UG;
     tim->SR = 0;
@@ -171,9 +171,9 @@ uint32_t ir_get_sensor_count(const uint8_t board) {
 }
 
 void ir_sensor_init() {
-    RCC->AHB1ENR  |= RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMAMUX1EN;
-    RCC->AHB2ENR  |= RCC_AHB2ENR_ADC12EN | RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN;
-    RCC->APB1ENR1 |= RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_TIM4EN;
+    setMask(RCC->AHB1ENR,  RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMAMUX1EN);
+    setMask(RCC->AHB2ENR,  RCC_AHB2ENR_ADC12EN | RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN);
+    setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_TIM4EN);
     __DSB();
 
     ADC12_COMMON->CCR = (ADC12_COMMON->CCR & ~ADC_CCR_CKMODE_Msk)
