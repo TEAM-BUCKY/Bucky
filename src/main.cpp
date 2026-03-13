@@ -33,7 +33,8 @@ int main() {
     i2c.configure(I2CBus::BUS1, PB9, PA15);
     i2c.init(I2CBus::BUS1);
 
-    compass.init(i2c.getBus(I2CBus::BUS1));
+    compass.begin(i2c.getBus(I2CBus::BUS1));
+    while (!compass.tick()) {}
 
 #ifdef RUN_TEST
     RUN_TEST(motorDriver, compass, i2c);
@@ -44,8 +45,8 @@ int main() {
     while (true) {
         compass.update();
 
-        unsigned long now = millis();
-        float dTimeMs = static_cast<float>(now - lastTime);
+        const unsigned long now = millis();
+        const auto dTimeMs = static_cast<float>(now - lastTime);
         float dTimeS = dTimeMs / 1000.0f;
         lastTime = now;
 

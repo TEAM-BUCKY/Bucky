@@ -3,6 +3,8 @@
 
 #include <stm32g4xx.h>
 
+#include "bitboard/bitboard.h"
+
 // DMAMUX request IDs (RM0440 Table 91)
 namespace DMAMux {
     constexpr uint32_t ADC_1    = 5;
@@ -27,6 +29,8 @@ void dma_init_periph_to_mem_16(DMA_Channel_TypeDef* channel,
                                uint32_t transfer_count,
                                uint32_t mux_request);
 
-void dma_enable(DMA_Channel_TypeDef* channel);
+inline void dma_enable(DMA_Channel_TypeDef *channel) {
+    setMask(channel->CCR, DMA_CCR_EN);
+}
 
 #endif // BUCKY_DMA_H

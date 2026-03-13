@@ -3,9 +3,8 @@
 
 static GpioPin trigGpio{nullptr, 0};
 static GpioPin echoGpio[SONAR_COUNT] = {{nullptr, 0}, {nullptr, 0}, {nullptr, 0}, {nullptr, 0}};
-static int echoPinNumbers[SONAR_COUNT]; // kept for attachInterrupt (needs Arduino pin number)
+static int echoPinNumbers[SONAR_COUNT];
 
-// ISR state: rise/fall timestamps per channel
 static volatile uint32_t riseTime[SONAR_COUNT];
 static volatile uint32_t duration[SONAR_COUNT];
 static volatile bool done[SONAR_COUNT];
@@ -41,25 +40,21 @@ void setupSonar(const SonarPins& pins) {
 }
 
 SonarReading readSonars() {
-    // Reset ISR state
     for (int i = 0; i < SONAR_COUNT; i++) {
         riseTime[i] = 0;
         duration[i] = 0;
         done[i] = false;
     }
 
-    // Attach interrupts on all echo pins
     for (int i = 0; i < SONAR_COUNT; i++)
         attachInterrupt(digitalPinToInterrupt(echoPinNumbers[i]), isrTable[i], CHANGE);
 
-    // Fire a single trigger pulse
     gpioLow(trigGpio);
     delayMicroseconds(2);
     gpioHigh(trigGpio);
     delayMicroseconds(10);
     gpioLow(trigGpio);
 
-    // Wait until all echoes return or timeout
     const uint32_t start = micros();
     bool allDone = false;
     while (!allDone && micros() - start < SONAR_TIMEOUT_US) {
@@ -71,11 +66,9 @@ SonarReading readSonars() {
         }
     }
 
-    // Detach interrupts
     for (const auto pin : echoPinNumbers)
         detachInterrupt(digitalPinToInterrupt(pin));
 
-    // Convert durations to distances (cm)
     SonarReading reading;
     for (int i = 0; i < SONAR_COUNT; i++)
         reading.distance[i] = 0.034 * duration[i] / 2.0;

@@ -38,10 +38,10 @@ void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t
     adc->CFGR = ADC_CFGR_DMAEN
               | ADC_CFGR_DMACFG
               | ADC_CFGR_OVRMOD
-              | (extsel << ADC_CFGR_EXTSEL_Pos)
-              | (1U << ADC_CFGR_EXTEN_Pos);
+              | extsel << ADC_CFGR_EXTSEL_Pos
+              | 1U << ADC_CFGR_EXTEN_Pos;
 
-    adc->SQR1 = (channel << 6); // SQ1 at bits [10:6]
+    adc->SQR1 = channel << 6; // SQ1 at bits [10:6]
 
     if (channel < 10) {
         const uint32_t shift = channel * 3;

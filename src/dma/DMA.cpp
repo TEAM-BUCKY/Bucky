@@ -1,5 +1,4 @@
 #include "DMA.h"
-#include "../bitboard/bitboard.h"
 
 void dma_init_mem_to_periph_32(DMA_Channel_TypeDef *channel,
                                DMAMUX_Channel_TypeDef *mux,
@@ -34,8 +33,4 @@ void dma_init_periph_to_mem_16(DMA_Channel_TypeDef *channel,
                    | DMA_CCR_MSIZE_0 // 16-bit memory
                    | DMA_CCR_PSIZE_0; // 16-bit peripheral
     mux->CCR = mux_request;
-}
-
-void dma_enable(DMA_Channel_TypeDef *channel) {
-    setMask(channel->CCR, DMA_CCR_EN);
 }

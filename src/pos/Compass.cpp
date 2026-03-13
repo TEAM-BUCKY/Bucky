@@ -1,55 +1,89 @@
 #include "Compass.h"
 #include "../bitboard/bitboard.h"
 
-void Compass::writeReg(uint8_t reg, uint8_t value) {
+void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
     wire->beginTransmission(LIS2MDL_ADDR);
     wire->write(reg);
     wire->write(value);
     wire->endTransmission();
 }
 
-uint8_t Compass::readReg(uint8_t reg) {
+uint8_t Compass::readReg(const uint8_t reg) const {
     wire->beginTransmission(LIS2MDL_ADDR);
     wire->write(reg);
     wire->endTransmission(false);
-    wire->requestFrom((uint8_t)LIS2MDL_ADDR, (uint8_t)1);
+    wire->requestFrom(static_cast<uint8_t>(LIS2MDL_ADDR), static_cast<uint8_t>(1));
     return wire->read();
 }
 
-bool Compass::init(TwoWire& wireRef) {
+void Compass::begin(TwoWire& wireRef) {
     wire = &wireRef;
+    state = CompassState::BOOT_WAIT;
+    stateStart = millis();
+}
 
-    delay(20);
+bool Compass::tick() {
+    switch (state) {
+        case CompassState::BOOT_WAIT:
+            if (millis() - stateStart >= 20) {
+                state = CompassState::CHECK_ID;
+            }
+            break;
 
-    const uint8_t id = readReg(LIS2MDL_WHO_AM_I_REG);
-    Serial.print("Compass WHO_AM_I: 0x");
-    Serial.println(id, HEX);
-    if (id != 0x40) {
-        return false;
+        case CompassState::CHECK_ID: {
+            const uint8_t id = readReg(LIS2MDL_WHO_AM_I_REG);
+            Serial.print("Compass WHO_AM_I: 0x");
+            Serial.println(id, HEX);
+            if (id != 0x40) {
+                state = CompassState::FAILED;
+                break;
+            }
+            // Soft reset
+            writeReg(LIS2MDL_CFG_REG_A, 0x20);
+            state = CompassState::RESET_WAIT;
+            stateStart = millis();
+            break;
+        }
+
+        case CompassState::RESET_WAIT:
+            if (millis() - stateStart >= 100) {
+                state = CompassState::CONFIGURE;
+            }
+            break;
+
+        case CompassState::CONFIGURE:
+            writeReg(LIS2MDL_CFG_REG_A, 0x8C);
+            writeReg(LIS2MDL_CFG_REG_C, 0x00);
+            state = CompassState::SETTLE_WAIT;
+            stateStart = millis();
+            break;
+
+        case CompassState::SETTLE_WAIT:
+            if (millis() - stateStart >= 200) {
+                state = CompassState::SAMPLING;
+                sampleCount = 0;
+                stateStart = millis();
+            }
+            break;
+
+        case CompassState::SAMPLING:
+            if (millis() - stateStart >= 20) {
+                update();
+                sampleCount++;
+                stateStart = millis();
+                if (sampleCount >= 10) {
+                    startHeading = heading;
+                    hasStartHeading = true;
+                    state = CompassState::READY;
+                }
+            }
+            break;
+
+        default:
+            break;
     }
 
-    // Soft reset
-    writeReg(LIS2MDL_CFG_REG_A, 0x20);
-    delay(100);
-
-    // Configure: continuous mode, temp compensation, 100Hz ODR
-    // CFG_REG_A bits: [7] COMP_TEMP_EN=1, [3:2] ODR=11 (100Hz), [1:0] MD=00 (continuous)
-    writeReg(LIS2MDL_CFG_REG_A, 0x8C);
-
-    // CFG_REG_C: BDU=0 (continuous update), no other features
-    writeReg(LIS2MDL_CFG_REG_C, 0x00);
-
-    // Let the sensor settle
-    delay(200);
-    for (int i = 0; i < 10; i++) {
-        update();
-        delay(20);
-    }
-
-    startHeading = heading;
-    hasStartHeading = true;
-
-    return true;
+    return state == CompassState::READY || state == CompassState::FAILED;
 }
 
 void Compass::update() {
@@ -57,20 +91,20 @@ void Compass::update() {
     wire->write(LIS2MDL_OUTX_L_REG);
     wire->endTransmission(false);
 
-    uint8_t count = wire->requestFrom((uint8_t)LIS2MDL_ADDR, (uint8_t)6);
+    const uint8_t count = wire->requestFrom(static_cast<uint8_t>(LIS2MDL_ADDR), static_cast<uint8_t>(6));
     if (count < 6) {
         return;
     }
 
-    uint8_t xl = wire->read();
-    uint8_t xh = wire->read();
-    uint8_t yl = wire->read();
-    uint8_t yh = wire->read();
-    uint8_t zl = wire->read();
-    uint8_t zh = wire->read();
+    const uint8_t xl = wire->read();
+    const uint8_t xh = wire->read();
+    const uint8_t yl = wire->read();
+    const uint8_t yh = wire->read();
+    const uint8_t zl = wire->read();
+    const uint8_t zh = wire->read();
 
-    const int16_t rawX = (int16_t)combineBytes(xh, xl);
-    const int16_t rawY = (int16_t)combineBytes(yh, yl);
+    const auto rawX = static_cast<int16_t>(combineBytes(xh, xl));
+    const auto rawY = static_cast<int16_t>(combineBytes(yh, yl));
 
     const float x = rawX * 1.5f * 0.1f;
     const float y = rawY * 1.5f * 0.1f;

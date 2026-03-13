@@ -13,19 +13,37 @@
 #define LIS2MDL_CFG_REG_C 0x62
 #define LIS2MDL_OUTX_L_REG 0x68
 
+enum class CompassState : uint8_t {
+    UNINIT,
+    BOOT_WAIT,
+    CHECK_ID,
+    RESET_WAIT,
+    CONFIGURE,
+    SETTLE_WAIT,
+    SAMPLING,
+    READY,
+    FAILED
+};
+
 class Compass
 {
-    private:
         TwoWire* wire = nullptr;
         float heading = 0;
         float startHeading = 0;
         bool hasStartHeading = false;
 
-        void writeReg(uint8_t reg, uint8_t value);
-        uint8_t readReg(uint8_t reg);
+        CompassState state = CompassState::UNINIT;
+        uint32_t stateStart = 0;
+        uint8_t sampleCount = 0;
+
+        void writeReg(uint8_t reg, uint8_t value) const;
+        uint8_t readReg(uint8_t reg) const;
 
     public:
-        bool init(TwoWire& wire);
+        void begin(TwoWire& wireRef);
+        bool tick();
+        bool isReady() const { return state == CompassState::READY; }
+        bool isFailed() const { return state == CompassState::FAILED; }
         void update();
         float getHeading() const;
         float getOffset() const;

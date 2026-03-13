@@ -150,6 +150,7 @@ static void init_board() {
     dma_init_periph_to_mem_16(board::dma_adc(), board::dmamux_adc(),
                               &board::adc()->DR, board::adc_buf(),
                               IR_ADC_BUFFER_SIZE, board::dma_adc_mux);
+
     dma_enable(board::dma_tim());
     dma_enable(board::dma_adc());
 
