@@ -10,7 +10,6 @@ enum class I2CBus : uint8_t {
 };
 
 class I2CManager {
-    private:
         TwoWire buses[3];
         bool configured[3] = {};
         bool initialized[3] = {};
