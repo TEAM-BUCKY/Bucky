@@ -36,6 +36,15 @@ class Compass
         uint32_t stateStart = 0;
         uint8_t sampleCount = 0;
 
+        // PD control state
+        float lastError = 0;
+        unsigned long lastTime = 0;
+
+        float kp = 0.4f;
+        float kd = 0.3f;
+        float maxRotation = 25.0f;
+        float deadzone = 3.0f;
+
         void writeReg(uint8_t reg, uint8_t value) const;
         uint8_t readReg(uint8_t reg) const;
 
@@ -47,6 +56,8 @@ class Compass
         void update();
         float getHeading() const;
         float getOffset() const;
+        float computeRotation(float targetDegrees);
+        void setPD(float kp, float kd, float maxRotation, float deadzone);
         void reset();
 };
 

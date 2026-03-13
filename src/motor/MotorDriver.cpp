@@ -1,4 +1,5 @@
 #include "MotorDriver.h"
+#include "../cordic/cordic.h"
 #include <cmath>
 
 void MotorDriver::init(const int minSpeed, const int maxSpeed)
@@ -71,7 +72,7 @@ double getSmoothFunction(const double begin, const double target, const double t
     if (time > abs(begin - totalSpeed) * timePer100) { // Constrain if outside function limits ( {b<x<\frac{\left|i-s\right|}{100}t+b\right\} )
         return target;
     }
-    return -(cos(PI*time*(100/(abs(begin-totalSpeed)*timePer100)))-1)/2 * (target - begin);
+    return -(cordic_cos(PI*time*(100/(abs(begin-totalSpeed)*timePer100)))-1)/2 * (target - begin);
 }
 
 void MotorDriver::updateMotor(const Motor &motor) { // Update the Motor to drive at the right speed following the smoothing function
@@ -149,7 +150,7 @@ void MotorDriver::driveDegrees(const double degrees, const double scale, const d
 }
 
 void MotorDriver::driveVector(const VectorXY vector, const double rotation) {
-    const double angle = atan2(vector.y, vector.x) * 180 / PI;
+    const double angle = cordic_atan2(vector.y, vector.x) * 180 / PI;
     const double magnitude = sqrt(pow(vector.x, 2) + pow(vector.y, 2));
 
     driveDegrees(angle, magnitude, rotation);

@@ -1,6 +1,6 @@
 #include "IRSensor.h"
 
-#include "optimizations.h"
+#include "../optimizations/optimizations.h"
 #include "../dma/DMA.h"
 #include "../adc/ADC.h"
 #include "../bitboard/bitboard.h"

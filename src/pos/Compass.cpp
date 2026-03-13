@@ -1,5 +1,6 @@
 #include "Compass.h"
 #include "../bitboard/bitboard.h"
+#include "cordic/cordic.h"
 
 void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
     wire->beginTransmission(LIS2MDL_ADDR);
@@ -109,7 +110,7 @@ void Compass::update() {
     const float x = rawX * 1.5f * 0.1f;
     const float y = rawY * 1.5f * 0.1f;
 
-    heading = atan2(y, x) * 180.0f / PI;
+    heading = cordic_atan2(y, x) * 180.0f / PI;
     if (heading < 0) heading += 360.0f;
 
     if (!hasStartHeading) {
@@ -129,6 +130,35 @@ float Compass::getOffset() const {
     return diff;
 }
 
+float Compass::computeRotation(const float targetDegrees) {
+    const unsigned long now = millis();
+    const auto dtMs = static_cast<float>(now - lastTime);
+    const float dtS = dtMs / 1000.0f;
+    lastTime = now;
+
+    float error = getOffset() - targetDegrees;
+    if (error > 180.0f) error -= 360.0f;
+    if (error < -180.0f) error += 360.0f;
+
+    float rotation = 0;
+    if (fabs(error) > deadzone) {
+        const float derivative = (dtS > 0) ? (error - lastError) / dtS : 0;
+        rotation = constrain(-error * kp - derivative * kd, -maxRotation, maxRotation);
+    }
+    lastError = error;
+
+    return rotation;
+}
+
+void Compass::setPD(const float kp_, const float kd_, const float maxRotation_, const float deadzone_) {
+    kp = kp_;
+    kd = kd_;
+    maxRotation = maxRotation_;
+    deadzone = deadzone_;
+}
+
 void Compass::reset() {
     startHeading = heading;
+    lastError = 0;
+    lastTime = millis();
 }

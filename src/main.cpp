@@ -1,14 +1,11 @@
 #include <Arduino.h>
-#include <cmath>
 
-#include "controls/Joystick.h"
 #include "motor/MotorDriver.h"
 #include "i2c/I2CManager.h"
 #include "pos/Compass.h"
-#include "pos/Sonar.h"
+#include "cordic/cordic.h"
 #include "tests/tests.h"
 
-// Uncomment to run a test instead of normal operation
 // #define RUN_TEST testHoldHeading
 
 MotorPin m1 = {PA8, PA9};
@@ -19,50 +16,34 @@ MotorDriver motorDriver(m1, m2, m3);
 I2CManager i2c;
 Compass compass;
 
-constexpr float HEADING_KP = 0.4f;
-constexpr float HEADING_KD = 0.3f;
-constexpr float MAX_ROTATION = 25.0f;
-constexpr float HEADING_DEADZONE = 3.0f;
-
-int main() {
+void setupEnvironment() {
     init();
-    analogReadResolution(12);
-
-    motorDriver.init();
+    cordic_init();
 
     i2c.configure(I2CBus::BUS1, PB9, PA15);
     i2c.init(I2CBus::BUS1);
 
-    compass.begin(i2c.getBus(I2CBus::BUS1));
-    while (!compass.tick()) {}
+    // compass.begin(i2c.getBus(I2CBus::BUS1));
+
+    analogReadResolution(12);
+
+    motorDriver.init();
+
+    // while (!compass.tick()) {}
+}
+
+int main() {
+    setupEnvironment();
+
 
 #ifdef RUN_TEST
     RUN_TEST(motorDriver, compass, i2c);
 #else
-    float lastOffset = 0;
-    unsigned long lastTime = millis();
-
     while (true) {
-        compass.update();
-
-        const unsigned long now = millis();
-        const auto dTimeMs = static_cast<float>(now - lastTime);
-        float dTimeS = dTimeMs / 1000.0f;
-        lastTime = now;
-
-        // auto [degrees, speed] = readJoystick();
-
-        // const float offset = compass.getOffset();
-        // float rotation = 0;
-        // if (fabs(offset) > HEADING_DEADZONE) {
-        //     float derivative = (dTimeS > 0) ? (offset - lastOffset) / dTimeS : 0;
-        //     rotation = constrain(-offset * HEADING_KP - derivative * HEADING_KD, -MAX_ROTATION, MAX_ROTATION);
-        // }
-        // lastOffset = offset;
+        // const float rotation = compass.computeRotation(0);
 
         motorDriver.driveDegrees(0, 30, 0);
         motorDriver.updateAllMotors();
-        delay(10);
     }
 #endif
 
