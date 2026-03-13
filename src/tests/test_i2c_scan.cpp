@@ -37,7 +37,7 @@ static void scanBus(const char* name, TwoWire& wire) {
     Serial.println();
 }
 
-void testI2CScan(MotorDriver&, Compass&, IRController&, I2CManager& i2c) {
+void testI2CScan(MotorDriver&, Compass&, I2CManager& i2c) {
     Serial.println();
     Serial.println("=== I2C Bus Scanner ===");
     Serial.println("Scanning all configured buses...");

@@ -1,7 +1,7 @@
 #include "tests.h"
 #include <Arduino.h>
 
-void testDriveForward(MotorDriver& motorDriver, Compass&, IRController&, I2CManager&) {
+void testDriveForward(MotorDriver& motorDriver, Compass&, I2CManager&) {
     Serial.println("=== Drive Forward Test ===");
 
     while (true) {

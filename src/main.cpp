@@ -36,7 +36,7 @@ int main() {
     compass.init(i2c.getBus(I2CBus::BUS1));
 
 #ifdef RUN_TEST
-    RUN_TEST(motorDriver, compass);
+    RUN_TEST(motorDriver, compass, i2c);
 #else
     float lastOffset = 0;
     unsigned long lastTime = millis();
