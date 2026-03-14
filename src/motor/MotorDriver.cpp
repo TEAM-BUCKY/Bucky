@@ -66,13 +66,24 @@ void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) 
 }
 
 constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
-float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time) {
-    // https://www.desmos.com/calculator/0kpi5zggrd?lang=nl , in desmos: i = begin, o = target, s = totalSpeed, t = timePer100, x = time. (b = beginTime, already implemented inside updateMotor)
-    // totalSpeed is used to make different motors sync, it's the scale given in driveDegrees, so if different motors have different speeds, they need the same time to reach targetSpeed
-    if (time > abs(begin - totalSpeed) * timePer100) { // Constrain if outside function limits ( {b<x<\frac{\left|i-s\right|}{100}t+b\right\} )
+// float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time) {
+//     // https://www.desmos.com/calculator/0kpi5zggrd?lang=nl , in desmos: i = begin, o = target, s = totalSpeed, t = timePer100, x = time. (b = beginTime, already implemented inside updateMotor)
+//     // totalSpeed is used to make different motors sync, it's the scale given in driveDegrees, so if different motors have different speeds, they need the same time to reach targetSpeed
+//     if (time > fabsf(begin - totalSpeed) * timePer100) { // Constrain if outside function limits ( {b<x<\frac{\left|i-s\right|}{100}t+b\right\} )
+//         return target;
+//     }
+//     return -(cordic_cos(PI*time*(100/(fabsf(begin-totalSpeed)*timePer100)))-1)/2 * (target - begin);
+// }
+
+// New implementation using Hermite smoothstep
+float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time)
+{
+    if (time > fabsf(begin - totalSpeed) * timePer100) {
         return target;
     }
-    return -(cordic_cos(PI*time*(100/(abs(begin-totalSpeed)*timePer100)))-1)/2 * (target - begin);
+    const float t = time / (fabsf(begin - totalSpeed) * timePer100); // Normalize time to [0, 1]
+    const float smoothStep = t * t * (3 - 2 * t); // Hermite smoothstep function
+    return begin + smoothStep * (target - begin);
 }
 
 void MotorDriver::updateMotor(const Motor &motor) { // Update the Motor to drive at the right speed following the smoothing function
@@ -134,7 +145,7 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
     // Translation component: drive in the desired direction
     // Rotation component: scaled by drive speed so correction stays proportional
     // but always allows at least the raw rotation for pure spin (scale=0)
-    const float rotationScale = fmax(scale, fabs(rotation)) / 100.0;
+    const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
     const float scaledRotation = rotation * rotationScale;
 
     float m1Speed = cordic_sin((degrees - 60) * PI_F / 180) * scale + scaledRotation;
@@ -154,5 +165,5 @@ void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
     float angle, magnitude;
     cordic_atan2_mod(vector.y, vector.x, angle, magnitude);
 
-    driveDegrees(angle * (180.0f / PI), magnitude, rotation);
+    driveDegrees(angle * (180.0f / PI_F), magnitude, rotation);
 }

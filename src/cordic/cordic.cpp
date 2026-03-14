@@ -22,6 +22,11 @@ static FORCE_INLINE float from_uq31(const uint32_t x) {
     return static_cast<float>(x) * Q31_INV;
 }
 
+void cordic_poll()
+{
+    while (__builtin_expect(!(CORDIC->CSR & CORDIC_CSR_RRDY), 1)) { }
+}
+
 void cordic_sin_cos(const float angle_rad, float &sin_out, float &cos_out) {
     float n = angle_rad * INV_PI;
     n -= 2.0f * floorf((n + 1.0f) * 0.5f);
@@ -29,11 +34,9 @@ void cordic_sin_cos(const float angle_rad, float &sin_out, float &cos_out) {
     CORDIC->CSR = CordicFunc::COSINE << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
                   | CORDIC_CSR_NRES;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(n));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
     cos_out = from_q31(static_cast<int32_t>(CORDIC->RDATA));
     sin_out = from_q31(static_cast<int32_t>(CORDIC->RDATA));
 }
@@ -59,12 +62,11 @@ float cordic_atan2(const float y, const float x) {
     CORDIC->CSR = CordicFunc::PHASE << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
                   | CORDIC_CSR_NARGS;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(x * inv));
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(y * inv));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
+
     return from_q31(static_cast<int32_t>(CORDIC->RDATA)) * PI_F;
 }
 
@@ -81,12 +83,11 @@ void cordic_atan2_mod(const float y, const float x, float &angle_out, float &mod
     CORDIC->CSR = CordicFunc::PHASE << CORDIC_CSR_FUNC_Pos
                   | (DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos)
                   | CORDIC_CSR_NARGS | CORDIC_CSR_NRES;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(x * inv));
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(y * inv));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
+
     angle_out = from_q31(static_cast<int32_t>(CORDIC->RDATA)) * PI_F;
     mod_out = from_uq31(CORDIC->RDATA) * m;
 }
@@ -100,23 +101,21 @@ float cordic_modulus(const float y, const float x) {
     CORDIC->CSR = CordicFunc::MODULUS << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
                   | CORDIC_CSR_NARGS;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(x * inv));
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(y * inv));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
+
     return from_uq31(CORDIC->RDATA) * m;
 }
 
 float cordic_atan(const float x) {
     CORDIC->CSR = CordicFunc::ARCTAN << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(x));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
+
     return from_q31(static_cast<int32_t>(CORDIC->RDATA)) * PI_F;
 }
 
@@ -124,12 +123,11 @@ void cordic_sinh_cosh(const float x, float &sinh_out, float &cosh_out) {
     CORDIC->CSR = CordicFunc::HCOSINE << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
                   | CORDIC_CSR_NARGS | CORDIC_CSR_NRES;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(x));
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(0.5f)); // m=0.5
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
+    
     cosh_out = from_q31(static_cast<int32_t>(CORDIC->RDATA)) * 2.0f;
     sinh_out = from_q31(static_cast<int32_t>(CORDIC->RDATA)) * 2.0f;
 }
@@ -150,12 +148,11 @@ float cordic_atanh(const float x) {
     CORDIC->CSR = (CordicFunc::HATANH << CORDIC_CSR_FUNC_Pos)
                   | (DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos)
                   | CORDIC_CSR_NARGS;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(x));
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(0.25f)); // m=0.25
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
+    cordic_poll();
+
     return from_q31(static_cast<int32_t>(CORDIC->RDATA)) * 4.0f;
 }
 
@@ -168,13 +165,11 @@ float cordic_ln(const float x) {
     CORDIC->CSR = CordicFunc::LN << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
                   | 1U << CORDIC_CSR_SCALE_Pos;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(frac));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {
-    }
-    const float ln_frac2 = from_q31(static_cast<int32_t>(CORDIC->RDATA));
+    cordic_poll();
 
+    const float ln_frac2 = from_q31(static_cast<int32_t>(CORDIC->RDATA));
     return ln_frac2 + static_cast<float>(exp - 1) * LN2;
 }
 
@@ -195,11 +190,10 @@ float cordic_sqrt(const float x) {
 
     CORDIC->CSR = CordicFunc::SQRT << CORDIC_CSR_FUNC_Pos
                   | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos;
-
     CORDIC->WDATA = static_cast<uint32_t>(to_q31(frac));
 
-    while (!(CORDIC->CSR & CORDIC_CSR_RRDY)) {}
-    const float result = from_q31(static_cast<int32_t>(CORDIC->RDATA));
+    cordic_poll();
 
+    const float result = from_q31(static_cast<int32_t>(CORDIC->RDATA));
     return ldexpf(result, exp / 2);
 }

@@ -44,7 +44,7 @@ JoystickVector readJoystick()
     // Square for finer low-speed control
     const float curved = scaled * scaled;
 
-    float angle = cordic_atan2(y, x) * (180.0f / M_PI) + ANGLE_OFFSET;
+    float angle = cordic_atan2(y, x) * (180.0f / PI_F) + ANGLE_OFFSET;
     if (angle < 0)   angle += 360.0f;
     if (angle >= 360) angle -= 360.0f;
 
