@@ -40,7 +40,7 @@ void MotorDriver::init(const int minSpeed, const int maxSpeed)
     motor3 = {pw3, 0, 0, 0, currentTime};
 }
 
-void MotorDriver::setMotorSpeed(const MotorPwm& motor, const double targetSpeed) {
+void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) {
     if (targetSpeed > 100 || targetSpeed < -100) {
         Serial.println("Error: speedPercentage must be between -100 and 100");
         return;
@@ -53,7 +53,7 @@ void MotorDriver::setMotorSpeed(const MotorPwm& motor, const double targetSpeed)
         return;
     }
     // Map -100%-100% to an actual speed value
-    const double speed = map(static_cast<long>(abs(targetSpeed)), 0, 100, MIN_SPEED, MAX_SPEED);
+    const float speed = map(static_cast<long>(abs(targetSpeed)), 0, 100, MIN_SPEED, MAX_SPEED);
 
     if (targetSpeed < 0) {
         pwmWrite(motor.inA, 0);
@@ -65,8 +65,8 @@ void MotorDriver::setMotorSpeed(const MotorPwm& motor, const double targetSpeed)
     pwmWrite(motor.inB, 0);
 }
 
-constexpr double timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
-double getSmoothFunction(const double begin, const double target, const double totalSpeed, const uint32_t time) {
+constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
+float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time) {
     // https://www.desmos.com/calculator/0kpi5zggrd?lang=nl , in desmos: i = begin, o = target, s = totalSpeed, t = timePer100, x = time. (b = beginTime, already implemented inside updateMotor)
     // totalSpeed is used to make different motors sync, it's the scale given in driveDegrees, so if different motors have different speeds, they need the same time to reach targetSpeed
     if (time > abs(begin - totalSpeed) * timePer100) { // Constrain if outside function limits ( {b<x<\frac{\left|i-s\right|}{100}t+b\right\} )
@@ -86,7 +86,7 @@ void MotorDriver::updateAllMotors() const {
     updateMotor(motor3);
 }
 
-void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const double targetSpeed) {
+void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const float targetSpeed) const {
     if (targetSpeed > 100 || targetSpeed < -100) {
         Serial.println("Error: speedPercentage must be between -100 and 100");
         return;
@@ -98,7 +98,7 @@ void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const double targetSpee
         return;
     }
 
-    const double speed = map(static_cast<long>(abs(targetSpeed)), 0, 100, MIN_SPEED, MAX_SPEED);
+    const float speed = abs(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
 
     if (targetSpeed < 0) {
         pwmStage(motor.inA, 0);
@@ -110,7 +110,8 @@ void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const double targetSpee
     pwmStage(motor.inB, 0);
 }
 
-void MotorDriver::syncUpdateMotor(const Motor& motor) {
+void MotorDriver::syncUpdateMotor(const Motor& motor) const
+{
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
     stageMotorSpeed(motor.motor, getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth));
 }
@@ -122,23 +123,23 @@ void MotorDriver::syncUpdateAllMotors() const {
     pwmCommit();
 }
 
-void MotorDriver::drive(Motor& motor, const double speed, const double totalSpeed) {
+void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed) {
     motor.beginSpeed = motor.motor.currentSpeed;
     motor.targetSpeed = speed;
     motor.totalSpeed = totalSpeed;
     motor.beginTimeMs = micros();
 }
 
-void MotorDriver::driveDegrees(const double degrees, const double scale, const double rotation) {
+void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
     // Translation component: drive in the desired direction
     // Rotation component: scaled by drive speed so correction stays proportional
     // but always allows at least the raw rotation for pure spin (scale=0)
-    const double rotationScale = fmax(scale, fabs(rotation)) / 100.0;
-    const double scaledRotation = rotation * rotationScale;
+    const float rotationScale = fmax(scale, fabs(rotation)) / 100.0;
+    const float scaledRotation = rotation * rotationScale;
 
-    double m1Speed = sin((degrees - 60) * PI / 180) * scale + scaledRotation;
-    double m2Speed = -sin(degrees * PI / 180) * scale + scaledRotation;
-    double m3Speed = sin((degrees - 300) * PI / 180) * scale + scaledRotation;
+    float m1Speed = cordic_sin((degrees - 60) * PI_F / 180) * scale + scaledRotation;
+    float m2Speed = -cordic_sin(degrees * PI_F / 180) * scale + scaledRotation;
+    float m3Speed = cordic_sin((degrees - 300) * PI_F / 180) * scale + scaledRotation;
 
     m1Speed = constrain(m1Speed, -100.0, 100.0);
     m2Speed = constrain(m2Speed, -100.0, 100.0);
@@ -149,9 +150,9 @@ void MotorDriver::driveDegrees(const double degrees, const double scale, const d
     drive(this->motor3, m3Speed, scale);
 }
 
-void MotorDriver::driveVector(const VectorXY vector, const double rotation) {
-    const double angle = cordic_atan2(vector.y, vector.x) * 180 / PI;
-    const double magnitude = sqrt(pow(vector.x, 2) + pow(vector.y, 2));
+void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
+    float angle, magnitude;
+    cordic_atan2_mod(vector.y, vector.x, angle, magnitude);
 
-    driveDegrees(angle, magnitude, rotation);
+    driveDegrees(angle * (180.0f / PI), magnitude, rotation);
 }

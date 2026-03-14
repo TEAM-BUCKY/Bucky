@@ -15,14 +15,14 @@ struct MotorPin {
 struct MotorPwm {
     PwmPin inA;
     PwmPin inB;
-    double currentSpeed = 0;
+    float currentSpeed = 0;
 };
 
 struct Motor {
     MotorPwm motor;
-    double beginSpeed = 0;
-    double targetSpeed = 0;
-    double totalSpeed = 0;
+    float beginSpeed = 0;
+    float targetSpeed = 0;
+    float totalSpeed = 0;
     uint32_t beginTimeMs = 0;
 };
 
@@ -52,12 +52,12 @@ class MotorDriver {
 
     SpeedRange speedRange = {MIN_SPEED, MAX_SPEED};
 
-    static void setMotorSpeed(const MotorPwm& motor, double targetSpeed);
+    static void setMotorSpeed(const MotorPwm& motor, float targetSpeed);
     static void updateMotor(const Motor& motor);
-    static void drive(Motor& motor, double speed, const double totalSpeed);
+    static void drive(Motor& motor, float speed, float totalSpeed);
 
-    static void stageMotorSpeed(const MotorPwm& motor, double targetSpeed);
-    static void syncUpdateMotor(const Motor& motor);
+    void stageMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
+    void syncUpdateMotor(const Motor& motor) const;
 
 public:
     MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : m1(m1), m2(m2), m3(m3) {};
@@ -67,8 +67,8 @@ public:
     void updateAllMotors() const;
     void syncUpdateAllMotors() const;
 
-    void driveDegrees(double degrees, double scale = 100, double rotation = 0);
-    void driveVector(VectorXY vector, double rotation = 0);
+    void driveDegrees(float degrees, float scale = 100, float rotation = 0);
+    void driveVector(VectorXY vector, float rotation = 0);
 
     void changeSpeed(const int minSpeed = MIN_SPEED, const int maxSpeed = MAX_SPEED) {
         this->speedRange.min = minSpeed;

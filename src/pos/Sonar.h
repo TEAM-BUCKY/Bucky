@@ -12,7 +12,7 @@ struct SonarPins {
 };
 
 struct SonarReading {
-    double distance[SONAR_COUNT] = {};
+    float distance[SONAR_COUNT] = {};
 };
 
 void setupSonar(const SonarPins& pins);
