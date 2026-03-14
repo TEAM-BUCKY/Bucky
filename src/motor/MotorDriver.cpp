@@ -141,6 +141,8 @@ void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed)
     motor.beginTimeMs = micros();
 }
 
+constexpr float SIN_60 = 0.8660254037844f;
+
 void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
     // Translation component: drive in the desired direction
     // Rotation component: scaled by drive speed so correction stays proportional
@@ -148,9 +150,12 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
     const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
     const float scaledRotation = rotation * rotationScale;
 
-    float m1Speed = cordic_sin((degrees - 60) * PI_F / 180) * scale + scaledRotation;
-    float m2Speed = -cordic_sin(degrees * PI_F / 180) * scale + scaledRotation;
-    float m3Speed = cordic_sin((degrees - 300) * PI_F / 180) * scale + scaledRotation;
+    float sinDegrees, cosDegrees;
+    cordic_sin_cos(degrees * PI_F / 180, sinDegrees, cosDegrees);
+
+    float m1Speed = (0.5f * sinDegrees - SIN_60 * cosDegrees) * scale + scaledRotation;
+    float m2Speed = -sinDegrees * scale + scaledRotation;
+    float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
 
     m1Speed = constrain(m1Speed, -100.0, 100.0);
     m2Speed = constrain(m2Speed, -100.0, 100.0);
