@@ -18,7 +18,7 @@ Compass compass;
 
 void setupEnvironment() {
     init();
-    cordic_init();
+    cordicInit();
 
     i2c.configure(I2CBus::BUS1, PB9, PA15);
     i2c.init(I2CBus::BUS1);

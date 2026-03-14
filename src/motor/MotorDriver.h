@@ -68,6 +68,7 @@ public:
     void syncUpdateAllMotors() const;
 
     void driveDegrees(float degrees, float scale = 100, float rotation = 0);
+    void driveRadians(float radians, float scale = 100, float rotation = 0);
     void driveVector(VectorXY vector, float rotation = 0);
 
     void changeSpeed(const int minSpeed = MIN_SPEED, const int maxSpeed = MAX_SPEED) {

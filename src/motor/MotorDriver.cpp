@@ -151,7 +151,30 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
     const float scaledRotation = rotation * rotationScale;
 
     float sinDegrees, cosDegrees;
-    cordic_sin_cos(degrees * PI_F / 180, sinDegrees, cosDegrees);
+    cordicSinCos(degrees * PI_F / 180, sinDegrees, cosDegrees);
+
+    float m1Speed = (0.5f * sinDegrees - SIN_60 * cosDegrees) * scale + scaledRotation;
+    float m2Speed = -sinDegrees * scale + scaledRotation;
+    float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
+
+    m1Speed = constrain(m1Speed, -100.0, 100.0);
+    m2Speed = constrain(m2Speed, -100.0, 100.0);
+    m3Speed = constrain(m3Speed, -100.0, 100.0);
+
+    drive(this->motor1, m1Speed, scale);
+    drive(this->motor2, m2Speed, scale);
+    drive(this->motor3, m3Speed, scale);
+}
+
+void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
+    // Translation component: drive in the desired direction
+    // Rotation component: scaled by drive speed so correction stays proportional
+    // but always allows at least the raw rotation for pure spin (scale=0)
+    const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
+    const float scaledRotation = rotation * rotationScale;
+
+    float sinDegrees, cosDegrees;
+    cordicSinCos(radians, sinDegrees, cosDegrees);
 
     float m1Speed = (0.5f * sinDegrees - SIN_60 * cosDegrees) * scale + scaledRotation;
     float m2Speed = -sinDegrees * scale + scaledRotation;
@@ -168,7 +191,7 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
 
 void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
     float angle, magnitude;
-    cordic_atan2_mod(vector.y, vector.x, angle, magnitude);
+    cordicAtan2Mod(vector.y, vector.x, angle, magnitude);
 
     driveDegrees(angle * (180.0f / PI_F), magnitude, rotation);
 }

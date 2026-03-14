@@ -110,7 +110,7 @@ void Compass::update() {
     const float x = rawX * 1.5f * 0.1f;
     const float y = rawY * 1.5f * 0.1f;
 
-    heading = cordic_atan2(y, x) * 180.0f / PI;
+    heading = cordicAtan2(y, x) * 180.0f / PI;
     if (heading < 0) heading += 360.0f;
 
     if (!hasStartHeading) {
