@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <stm32g4xx.h>
 
-#include "bitboard/bitboard.h"
+#include "optimizations/bitboard.h"
 
 struct GpioPin {
     GPIO_TypeDef* port;

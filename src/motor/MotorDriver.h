@@ -2,7 +2,7 @@
 #define BUCKY_MOTORDRIVER_H
 
 #include <Arduino.h>
-#include "../gpio/pwm.h"
+#include "io/gpio/pwm.h"
 
 #define MIN_SPEED 130
 #define MAX_SPEED 250

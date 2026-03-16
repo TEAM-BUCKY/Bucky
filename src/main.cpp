@@ -1,9 +1,9 @@
 #include <Arduino.h>
 
 #include "motor/MotorDriver.h"
-#include "i2c/I2CManager.h"
+#include "io/i2c/I2CManager.h"
 #include "pos/Compass.h"
-#include "cordic/cordic.h"
+#include "io/cordic/cordic.h"
 #include "tests/tests.h"
 
 // #define RUN_TEST testHoldHeading

@@ -1,9 +1,9 @@
 #include "IRSensor.h"
 
-#include "../optimizations/optimizations.h"
-#include "../dma/DMA.h"
-#include "../adc/ADC.h"
-#include "../bitboard/bitboard.h"
+#include "optimizations/optimizations.h"
+#include "io/dma/DMA.h"
+#include "io/adc/ADC.h"
+#include "optimizations/bitboard.h"
 
 // ---- Register helpers ----
 

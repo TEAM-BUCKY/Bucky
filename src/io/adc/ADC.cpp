@@ -1,6 +1,6 @@
 #include "ADC.h"
 #include <Arduino.h>
-#include "../bitboard/bitboard.h"
+#include "optimizations/bitboard.h"
 
 #ifndef ADC_CR_BOOST
 #define ADC_CR_BOOST (1UL << 8)

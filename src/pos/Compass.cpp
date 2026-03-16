@@ -1,6 +1,6 @@
 #include "Compass.h"
-#include "../bitboard/bitboard.h"
-#include "cordic/cordic.h"
+#include "../optimizations/bitboard.h"
+#include "io/cordic/cordic.h"
 
 void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
     wire->beginTransmission(LIS2MDL_ADDR);
@@ -110,7 +110,7 @@ void Compass::update() {
     const float x = rawX * 1.5f * 0.1f;
     const float y = rawY * 1.5f * 0.1f;
 
-    heading = cordicAtan2(y, x) * 180.0f / PI;
+    heading = cordicAtan2(y, x) * 180.0f / PI_F;
     if (heading < 0) heading += 360.0f;
 
     if (!hasStartHeading) {
@@ -141,7 +141,7 @@ float Compass::computeRotation(const float targetDegrees) {
     if (error < -180.0f) error += 360.0f;
 
     float rotation = 0;
-    if (fabs(error) > deadzone) {
+    if (fabsf(error) > deadzone) {
         const float derivative = (dtS > 0) ? (error - lastError) / dtS : 0;
         rotation = constrain(-error * kp - derivative * kd, -maxRotation, maxRotation);
     }

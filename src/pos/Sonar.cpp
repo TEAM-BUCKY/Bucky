@@ -1,5 +1,5 @@
 #include "Sonar.h"
-#include "../gpio/gpio.h"
+#include "io/gpio/gpio.h"
 
 static GpioPin trigGpio{nullptr, 0};
 static GpioPin echoGpio[SONAR_COUNT] = {{nullptr, 0}, {nullptr, 0}, {nullptr, 0}, {nullptr, 0}};
@@ -71,7 +71,7 @@ SonarReading readSonars() {
 
     SonarReading reading;
     for (int i = 0; i < SONAR_COUNT; i++)
-        reading.distance[i] = 0.034 * duration[i] / 2.0;
+        reading.distance[i] = 0.034f * duration[i] / 2.0f;
 
     return reading;
 }

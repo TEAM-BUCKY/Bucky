@@ -3,7 +3,7 @@
 
 #include "../motor/MotorDriver.h"
 #include "../pos/Compass.h"
-#include "../i2c/I2CManager.h"
+#include "io/i2c/I2CManager.h"
 
 void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CManager& i2c);
 void testIR(MotorDriver& motorDriver, Compass& compass, I2CManager& i2c);

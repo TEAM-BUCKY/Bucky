@@ -3,7 +3,7 @@
 
 #include <stm32g4xx.h>
 
-#include "bitboard/bitboard.h"
+#include "optimizations/bitboard.h"
 
 // DMAMUX request IDs (RM0440 Table 91)
 namespace DMAMux {

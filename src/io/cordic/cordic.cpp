@@ -1,5 +1,5 @@
 #include "cordic.h"
-#include "../bitboard/bitboard.h"
+#include "optimizations/bitboard.h"
 #include <cmath>
 
 #include "optimizations/optimizations.h"
@@ -17,12 +17,26 @@ static FORCE_INLINE int32_t to_q31(const float x)
 
 static FORCE_INLINE float from_q31(const int32_t x)
 {
-    return static_cast<float>(x) * Q31_INV;
+    float result;
+    asm volatile(
+        "VMOV %[res], %[x]\n\t"
+        "VCVT.F32.S32 %[res], %[res], #31"
+        : [res] "=t" (result)
+        : [x] "r" (x)
+    );
+    return result;
 }
 
 static FORCE_INLINE float from_uq31(const uint32_t x)
 {
-    return static_cast<float>(x) * Q31_INV;
+    float result;
+    asm volatile(
+        "VMOV %[res], %[x]\n\t"
+        "VCVT.F32.U32 %[res], %[res], #31"
+        : [res] "=t" (result)
+        : [x] "r" (x)
+    );
+    return result;
 }
 
 void cordicSinCos(const float angle_rad, float& sin_out, float& cos_out)

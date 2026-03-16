@@ -1,5 +1,5 @@
 #include "MotorDriver.h"
-#include "../cordic/cordic.h"
+#include "io/cordic/cordic.h"
 #include <cmath>
 
 void MotorDriver::init(const int minSpeed, const int maxSpeed)
@@ -157,9 +157,9 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
     float m2Speed = -sinDegrees * scale + scaledRotation;
     float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
 
-    m1Speed = constrain(m1Speed, -100.0, 100.0);
-    m2Speed = constrain(m2Speed, -100.0, 100.0);
-    m3Speed = constrain(m3Speed, -100.0, 100.0);
+    m1Speed = constrain(m1Speed, -100.0f, 100.0f);
+    m2Speed = constrain(m2Speed, -100.0f, 100.0f);
+    m3Speed = constrain(m3Speed, -100.0f, 100.0f);
 
     drive(this->motor1, m1Speed, scale);
     drive(this->motor2, m2Speed, scale);
@@ -180,9 +180,9 @@ void MotorDriver::driveRadians(const float radians, const float scale, const flo
     float m2Speed = -sinDegrees * scale + scaledRotation;
     float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
 
-    m1Speed = constrain(m1Speed, -100.0, 100.0);
-    m2Speed = constrain(m2Speed, -100.0, 100.0);
-    m3Speed = constrain(m3Speed, -100.0, 100.0);
+    m1Speed = constrain(m1Speed, -100.0f, 100.0f);
+    m2Speed = constrain(m2Speed, -100.0f, 100.0f);
+    m3Speed = constrain(m3Speed, -100.0f, 100.0f);
 
     drive(this->motor1, m1Speed, scale);
     drive(this->motor2, m2Speed, scale);
@@ -193,5 +193,5 @@ void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
     float angle, magnitude;
     cordicAtan2Mod(vector.y, vector.x, angle, magnitude);
 
-    driveDegrees(angle * (180.0f / PI_F), magnitude, rotation);
+    driveRadians(angle, magnitude, rotation);
 }

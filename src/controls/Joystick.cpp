@@ -9,7 +9,7 @@
 #include <variant_generic.h>
 #include <wiring_analog.h>
 
-#include "cordic/cordic.h"
+#include "io/cordic/cordic.h"
 #include "motor/MotorDriver.h"
 
 JoystickVector readJoystick()
@@ -29,7 +29,9 @@ JoystickVector readJoystick()
     x = fmaxf(-1.0f, fminf(1.0f, x));
     y = fmaxf(-1.0f, fminf(1.0f, y));
 
-    float magnitude = sqrtf(x * x + y * y);
+    float angle, magnitude;
+    cordicAtan2Mod(y, x, angle, magnitude);
+
     constexpr float deadzoneThreshold = DEADZONE / static_cast<float>(JOYSTICK_CENTER);
 
     if (magnitude < deadzoneThreshold) {
@@ -44,7 +46,7 @@ JoystickVector readJoystick()
     // Square for finer low-speed control
     const float curved = scaled * scaled;
 
-    float angle = cordicAtan2(y, x) * (180.0f / PI_F) + ANGLE_OFFSET;
+    angle = angle * (180.0f / PI_F) + ANGLE_OFFSET;
     if (angle < 0)   angle += 360.0f;
     if (angle >= 360) angle -= 360.0f;
 

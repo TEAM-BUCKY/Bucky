@@ -5,7 +5,7 @@
 #include <stm32g4xx.h>
 #include <PeripheralPins.h>
 
-#include "bitboard/bitboard.h"
+#include "optimizations/bitboard.h"
 
 template <bool enable>
 constexpr void toggleTimer(TIM_TypeDef* tim)
