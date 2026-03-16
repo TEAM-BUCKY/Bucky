@@ -5,27 +5,26 @@
 
 #include "optimizations/optimizations.h"
 
-static constexpr float PI_F = 3.14159265358979f;
-static constexpr float INV_PI = 1.0f / PI_F;
+#define PI_F      3.14159265358979f
+#define INV_PI_F  (1.0f / PI_F)
 
-namespace CordicFunc {
-    constexpr uint32_t COSINE  = 0;
-    constexpr uint32_t SINE    = 1;
-    constexpr uint32_t PHASE   = 2;  // atan2
-    constexpr uint32_t MODULUS = 3;
-    constexpr uint32_t ARCTAN  = 4;
-    constexpr uint32_t HCOSINE = 5;
-    constexpr uint32_t HSINE   = 6;
-    constexpr uint32_t HATANH  = 7;
-    constexpr uint32_t LN      = 8;
-    constexpr uint32_t SQRT    = 9;
-}
+#define CORDIC_FUNC_COSINE  0
+#define CORDIC_FUNC_SINE    1
+#define CORDIC_FUNC_PHASE   2
+#define CORDIC_FUNC_MODULUS 3
+#define CORDIC_FUNC_ARCTAN  4
+#define CORDIC_FUNC_HCOSINE 5
+#define CORDIC_FUNC_HSINE   6
+#define CORDIC_FUNC_HATANH  7
+#define CORDIC_FUNC_LN      8
+#define CORDIC_FUNC_SQRT    9
 
-void FORCE_INLINE cordicInit() {
+static FORCE_INLINE void cordic_init(void)
+{
     RCC->AHB1ENR |= RCC_AHB1ENR_CORDICEN;
 }
 
-static FORCE_INLINE int32_t cordicCompute(uint32_t csr, int32_t arg)
+static FORCE_INLINE int32_t cordic_compute(uint32_t csr, int32_t arg)
 {
     int32_t result;
     asm volatile(
@@ -47,7 +46,7 @@ static FORCE_INLINE int32_t cordicCompute(uint32_t csr, int32_t arg)
     return result;
 }
 
-static FORCE_INLINE int32_t cordicCompute2(uint32_t csr, int32_t arg1, int32_t arg2)
+static FORCE_INLINE int32_t cordic_compute2(uint32_t csr, int32_t arg1, int32_t arg2)
 {
     int32_t result;
     asm volatile(
@@ -70,7 +69,7 @@ static FORCE_INLINE int32_t cordicCompute2(uint32_t csr, int32_t arg1, int32_t a
     return result;
 }
 
-static FORCE_INLINE void cordicComputeRes2(uint32_t csr, int32_t arg, int32_t &res1, int32_t &res2)
+static FORCE_INLINE void cordic_compute_res2(uint32_t csr, int32_t arg, int32_t *res1, int32_t *res2)
 {
     asm volatile(
         "STR %[csr], [%[base], %[csr_off]]\n\t"
@@ -80,7 +79,7 @@ static FORCE_INLINE void cordicComputeRes2(uint32_t csr, int32_t arg, int32_t &r
         "BEQ 1b\n\t"
         "LDR %[r1], [%[base], %[rd_off]]\n\t"
         "LDR %[r2], [%[base], %[rd_off]]"
-        : [r1] "=&r" (res1), [r2] "=&r" (res2)
+        : [r1] "=&r" (*res1), [r2] "=&r" (*res2)
         : [base] "r" (CORDIC),
           [csr] "r" (csr), [arg] "r" (arg),
           [rdy] "I" (CORDIC_CSR_RRDY),
@@ -91,7 +90,7 @@ static FORCE_INLINE void cordicComputeRes2(uint32_t csr, int32_t arg, int32_t &r
     );
 }
 
-static FORCE_INLINE void cordicCompute2Res2(uint32_t csr, int32_t arg1, int32_t arg2, int32_t &res1, int32_t &res2)
+static FORCE_INLINE void cordic_compute2_res2(uint32_t csr, int32_t arg1, int32_t arg2, int32_t *res1, int32_t *res2)
 {
     asm volatile(
         "STR %[csr], [%[base], %[csr_off]]\n\t"
@@ -102,7 +101,7 @@ static FORCE_INLINE void cordicCompute2Res2(uint32_t csr, int32_t arg1, int32_t 
         "BEQ 1b\n\t"
         "LDR %[r1], [%[base], %[rd_off]]\n\t"
         "LDR %[r2], [%[base], %[rd_off]]"
-        : [r1] "=&r" (res1), [r2] "=&r" (res2)
+        : [r1] "=&r" (*res1), [r2] "=&r" (*res2)
         : [base] "r" (CORDIC),
           [csr] "r" (csr), [a1] "r" (arg1), [a2] "r" (arg2),
           [rdy] "I" (CORDIC_CSR_RRDY),
@@ -113,20 +112,20 @@ static FORCE_INLINE void cordicCompute2Res2(uint32_t csr, int32_t arg1, int32_t 
     );
 }
 
-void cordicSinCos(float angle_rad, float& sin_out, float& cos_out);
-float cordicSin(float angle_rad);
-float cordicCos(float angle_rad);
-float cordicAtan2(float y, float x);
-void cordicAtan2Mod(float y, float x, float& angle_out, float& mod_out);
-float cordicModulus(float y, float x);
-float cordicAan(float x);
+void cordic_sin_cos(float angle_rad, float *sin_out, float *cos_out);
+float cordic_sin(float angle_rad);
+float cordic_cos(float angle_rad);
+float cordic_atan2(float y, float x);
+void cordic_atan2_mod(float y, float x, float *angle_out, float *mod_out);
+float cordic_modulus(float y, float x);
+float cordic_atan(float x);
 
-void cordicSinhCosh(float x, float& sinh_out, float& cosh_out);
-float cordicSinh(float x);
-float cordicCosh(float x);
-float cordicAtanh(float x);
+void cordic_sinh_cosh(float x, float *sinh_out, float *cosh_out);
+float cordic_sinh(float x);
+float cordic_cosh(float x);
+float cordic_atanh(float x);
 
-float cordicLn(float x);
-float cordicSqrt(float x);
+float cordic_ln(float x);
+float cordic_sqrt(float x);
 
 #endif // BUCKY_CORDIC_H

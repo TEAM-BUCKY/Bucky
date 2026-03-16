@@ -3,13 +3,18 @@
 
 #include <stm32g4xx.h>
 
-namespace ADCExtSel {
-    constexpr uint32_t TIM3_TRGO = 4;   // 00100
-    constexpr uint32_t TIM4_TRGO = 12;  // 01100
+#define ADC_EXTSEL_TIM3_TRGO  4
+#define ADC_EXTSEL_TIM4_TRGO  12
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void adc_disable(ADC_TypeDef *adc);
+void adc_init_triggered(ADC_TypeDef *adc, uint32_t channel, uint32_t extsel);
+
+#ifdef __cplusplus
 }
-
-void adc_disable(ADC_TypeDef* adc);
-
-void adc_init_triggered(ADC_TypeDef* adc, uint32_t channel, uint32_t extsel);
+#endif
 
 #endif // BUCKY_ADC_H

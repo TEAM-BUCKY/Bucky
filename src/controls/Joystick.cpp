@@ -30,7 +30,7 @@ JoystickVector readJoystick()
     y = fmaxf(-1.0f, fminf(1.0f, y));
 
     float angle, magnitude;
-    cordicAtan2Mod(y, x, angle, magnitude);
+    cordic_atan2_mod(y, x, &angle, &magnitude);
 
     constexpr float deadzoneThreshold = DEADZONE / static_cast<float>(JOYSTICK_CENTER);
 

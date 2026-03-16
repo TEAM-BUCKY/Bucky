@@ -6,21 +6,23 @@
 
 #include "optimizations/bitboard.h"
 
-struct GpioPin {
-    GPIO_TypeDef* port;
+typedef struct {
+    GPIO_TypeDef *port;
     uint16_t mask;
+} GpioPin;
 
-    explicit GpioPin(const int pin) {
-        const PinName pn = digitalPinToPinName(pin);
-        port = get_GPIO_Port(STM_PORT(pn));
-        mask = 1U << STM_PIN(pn);
-    }
+static inline GpioPin gpio_pin_init(int pin)
+{
+    PinName pn = digitalPinToPinName(pin);
+    GpioPin gp;
+    gp.port = get_GPIO_Port(STM_PORT(pn));
+    gp.mask = 1U << STM_PIN(pn);
+    return gp;
+}
 
-    constexpr GpioPin(GPIO_TypeDef* port, const uint16_t mask) : port(port), mask(mask) {}
-};
-
-inline void gpioMode(const GpioPin gp, const int mode) {
-    const uint8_t pos = GetLSB(gp.mask);
+static inline void gpio_mode(GpioPin gp, int mode)
+{
+    uint8_t pos = GetLSB(gp.mask);
     writeField(gp.port->MODER, 0x3U, pos * 2, mode == OUTPUT ? 1U : 0U);
 
     if (mode == INPUT_PULLUP)
@@ -28,27 +30,32 @@ inline void gpioMode(const GpioPin gp, const int mode) {
     else if (mode == INPUT_PULLDOWN)
         writeField(gp.port->PUPDR, 0x3U, pos * 2, 2U);
     else
-        clearField(gp.port->PUPDR, 0x3U, pos * 2); // no pull
+        clearField(gp.port->PUPDR, 0x3U, pos * 2);
 }
 
-inline void gpioWrite(const GpioPin gp, const bool high) {
-    gp.port->BSRR = high ? gp.mask : static_cast<uint32_t>(gp.mask) << 16;
+static inline void gpio_write(GpioPin gp, int high)
+{
+    gp.port->BSRR = high ? gp.mask : (uint32_t)gp.mask << 16;
 }
 
-inline bool gpioRead(const GpioPin gp) {
+static inline int gpio_read(GpioPin gp)
+{
     return (gp.port->IDR & gp.mask) != 0;
 }
 
-inline void gpioHigh(const GpioPin gp) {
+static inline void gpio_high(GpioPin gp)
+{
     gp.port->BSRR = gp.mask;
 }
 
-inline void gpioLow(const GpioPin gp) {
-    gp.port->BSRR = static_cast<uint32_t>(gp.mask) << 16;
+static inline void gpio_low(GpioPin gp)
+{
+    gp.port->BSRR = (uint32_t)gp.mask << 16;
 }
 
-inline void gpioToggle(const GpioPin gp) {
+static inline void gpio_toggle(GpioPin gp)
+{
     toggleMask(gp.port->ODR, gp.mask);
 }
 
-#endif //BUCKY_GPIO_H
+#endif // BUCKY_GPIO_H

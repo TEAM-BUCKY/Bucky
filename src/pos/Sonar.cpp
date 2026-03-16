@@ -1,8 +1,8 @@
 #include "Sonar.h"
 #include "io/gpio/gpio.h"
 
-static GpioPin trigGpio{nullptr, 0};
-static GpioPin echoGpio[SONAR_COUNT] = {{nullptr, 0}, {nullptr, 0}, {nullptr, 0}, {nullptr, 0}};
+static GpioPin trigGpio = {NULL, 0};
+static GpioPin echoGpio[SONAR_COUNT] = {{NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}};
 static int echoPinNumbers[SONAR_COUNT];
 
 static volatile uint32_t riseTime[SONAR_COUNT];
@@ -10,7 +10,7 @@ static volatile uint32_t duration[SONAR_COUNT];
 static volatile bool done[SONAR_COUNT];
 
 static void echoISR(const int idx) {
-    if (gpioRead(echoGpio[idx]))
+    if (gpio_read(echoGpio[idx]))
         riseTime[idx] = micros();
     else {
         duration[idx] = micros() - riseTime[idx];
@@ -26,15 +26,15 @@ static void echoISR3() { echoISR(3); }
 static constexpr void (*const isrTable[SONAR_COUNT])() = {echoISR0, echoISR1, echoISR2, echoISR3};
 
 void setupSonar(const SonarPins& pins) {
-    trigGpio = GpioPin(pins.trigPin);
-    gpioMode(trigGpio, OUTPUT);
-    gpioLow(trigGpio);
+    trigGpio = gpio_pin_init(pins.trigPin);
+    gpio_mode(trigGpio, OUTPUT);
+    gpio_low(trigGpio);
 
     for (int i = 0; i < SONAR_COUNT; i++) {
         echoPinNumbers[i] = pins.echoPins[i];
         if (echoPinNumbers[i] >= 0) {
-            echoGpio[i] = GpioPin(echoPinNumbers[i]);
-            gpioMode(echoGpio[i], INPUT);
+            echoGpio[i] = gpio_pin_init(echoPinNumbers[i]);
+            gpio_mode(echoGpio[i], INPUT);
         }
     }
 }
@@ -49,11 +49,11 @@ SonarReading readSonars() {
     for (int i = 0; i < SONAR_COUNT; i++)
         attachInterrupt(digitalPinToInterrupt(echoPinNumbers[i]), isrTable[i], CHANGE);
 
-    gpioLow(trigGpio);
+    gpio_low(trigGpio);
     delayMicroseconds(2);
-    gpioHigh(trigGpio);
+    gpio_high(trigGpio);
     delayMicroseconds(10);
-    gpioLow(trigGpio);
+    gpio_low(trigGpio);
 
     const uint32_t start = micros();
     bool allDone = false;

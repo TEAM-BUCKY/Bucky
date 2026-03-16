@@ -97,8 +97,8 @@ template<> struct BoardCfg<1> {
     static constexpr uint8_t  clk_pin = 6, clk_af = 2, adc_pin = 4;
     static constexpr uint8_t  tim_ch = 0;
     static constexpr uint32_t trgo = MMS_OC1REF, burst_words = 3, ccr_off = 2;
-    static constexpr uint32_t adc_ch = 17, extsel = ADCExtSel::TIM4_TRGO;
-    static constexpr uint32_t dma_tim_mux = DMAMux::TIM4_UP, dma_adc_mux = DMAMux::ADC_2;
+    static constexpr uint32_t adc_ch = 17, extsel = ADC_EXTSEL_TIM4_TRGO;
+    static constexpr uint32_t dma_tim_mux = DMAMUX_REQ_TIM4_UP, dma_adc_mux = DMAMUX_REQ_ADC_2;
 
     static auto timer()      { return TIM4; }
     static auto adc()        { return ADC2; }
@@ -117,8 +117,8 @@ template<> struct BoardCfg<2> {
     static constexpr uint8_t  clk_pin = 5, clk_af = 2, adc_pin = 14;
     static constexpr uint8_t  tim_ch = 1;
     static constexpr uint32_t trgo = MMS_OC2REF, burst_words = 4, ccr_off = 3;
-    static constexpr uint32_t adc_ch = 5, extsel = ADCExtSel::TIM3_TRGO;
-    static constexpr uint32_t dma_tim_mux = DMAMux::TIM3_UP, dma_adc_mux = DMAMux::ADC_1;
+    static constexpr uint32_t adc_ch = 5, extsel = ADC_EXTSEL_TIM3_TRGO;
+    static constexpr uint32_t dma_tim_mux = DMAMUX_REQ_TIM3_UP, dma_adc_mux = DMAMUX_REQ_ADC_1;
 
     static auto timer()      { return TIM3; }
     static auto adc()        { return ADC1; }
