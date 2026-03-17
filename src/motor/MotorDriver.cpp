@@ -1,4 +1,5 @@
 #include "MotorDriver.h"
+#include "debug.h"
 #include "io/cordic/cordic.h"
 #include <cmath>
 
@@ -42,7 +43,7 @@ void MotorDriver::init(const int minSpeed, const int maxSpeed)
 
 void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) {
     if (targetSpeed > 100 || targetSpeed < -100) {
-        Serial.println("Error: speedPercentage must be between -100 and 100");
+        DBG_PRINTLN("Error: speedPercentage must be between -100 and 100");
         return;
     }
 
@@ -91,7 +92,7 @@ void MotorDriver::updateAllMotors() const {
 
 void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const float targetSpeed) const {
     if (targetSpeed > 100 || targetSpeed < -100) {
-        Serial.println("Error: speedPercentage must be between -100 and 100");
+        DBG_PRINTLN("Error: speedPercentage must be between -100 and 100");
         return;
     }
 

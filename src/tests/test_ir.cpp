@@ -1,11 +1,12 @@
 #include "tests.h"
+#include "debug.h"
 #include <Arduino.h>
 #include "../ir/IRSensor.h"
 
 void testIR(MotorDriver&, Compass&, I2CManager&) {
-    Serial.println("=== IR Sensor Test (DMA) ===");
-    Serial.println("Move IR ball around the robot.");
-    Serial.println();
+    DBG_PRINTLN("=== IR Sensor Test (DMA) ===");
+    DBG_PRINTLN("Move IR ball around the robot.");
+    DBG_PRINTLN();
 
     const volatile uint16_t* buf1 = ir_get_buffer(1);
     const volatile uint16_t* buf2 = ir_get_buffer(2);
@@ -15,30 +16,30 @@ void testIR(MotorDriver&, Compass&, I2CManager&) {
     while (true) {
         if (IR_BOARD1_ENABLED) {
             for (uint32_t s = 0; s < IR_SWEEPS_PER_CYCLE; s++) {
-                Serial.print("B1 S");
-                Serial.print(s);
-                Serial.print(": ");
+                DBG_PRINT("B1 S");
+                DBG_PRINT(s);
+                DBG_PRINT(": ");
                 for (uint32_t i = 0; i < count1; i++) {
-                    if (i > 0) Serial.print('\t');
-                    Serial.print(buf1[s * IR_MUX_CHANNELS + i]);
+                    if (i > 0) DBG_PRINT('\t');
+                    DBG_PRINT(buf1[s * IR_MUX_CHANNELS + i]);
                 }
-                Serial.println();
+                DBG_PRINTLN();
             }
         }
 
         if (IR_BOARD2_ENABLED) {
             for (uint32_t s = 0; s < IR_SWEEPS_PER_CYCLE; s++) {
-                Serial.print("B2 S");
-                Serial.print(s);
-                Serial.print(": ");
+                DBG_PRINT("B2 S");
+                DBG_PRINT(s);
+                DBG_PRINT(": ");
                 for (uint32_t i = 0; i < count2; i++) {
-                    if (i > 0) Serial.print('\t');
-                    Serial.print(buf2[s * IR_MUX_CHANNELS + i]);
+                    if (i > 0) DBG_PRINT('\t');
+                    DBG_PRINT(buf2[s * IR_MUX_CHANNELS + i]);
                 }
-                Serial.println();
+                DBG_PRINTLN();
             }
         }
-        Serial.println();
+        DBG_PRINTLN();
 
         delay(500);
     }

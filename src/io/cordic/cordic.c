@@ -9,7 +9,7 @@
 
 #define DEFAULT_PRECISION 6
 
-static FORCE_INLINE int32_t to_q31(float x)
+static FORCE_INLINE int32_t to_q31(const float x)
 {
     return x >= 1.0f ? 0x7FFFFFFF : (int32_t)(x * Q31_SCALE);
 }
@@ -38,12 +38,12 @@ static FORCE_INLINE float from_uq31(uint32_t x)
     return result;
 }
 
-void cordic_sin_cos(float angle_rad, float *sin_out, float *cos_out)
+void cordic_sin_cos(const float angle_rad, float *sin_out, float *cos_out)
 {
     float n = angle_rad * INV_PI_F;
     n -= 2.0f * floorf((n + 1.0f) * 0.5f);
 
-    uint32_t csr = CORDIC_FUNC_COSINE << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_COSINE << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NRES;
     int32_t r1, r2;
@@ -52,35 +52,35 @@ void cordic_sin_cos(float angle_rad, float *sin_out, float *cos_out)
     *sin_out = from_q31(r2);
 }
 
-float cordic_sin(float angle_rad)
+float cordic_sin(const float angle_rad)
 {
     float s, c;
     cordic_sin_cos(angle_rad, &s, &c);
     return s;
 }
 
-float cordic_cos(float angle_rad)
+float cordic_cos(const float angle_rad)
 {
     float s, c;
     cordic_sin_cos(angle_rad, &s, &c);
     return c;
 }
 
-float cordic_atan2(float y, float x)
+float cordic_atan2(const float y, const float x)
 {
     if (x == 0.0f && y == 0.0f) return 0.0f;
 
-    float m = fmaxf(fabsf(x), fabsf(y));
-    float inv = 1.0f / m;
+    const float max = fmaxf(fabsf(x), fabsf(y));
+    const float inv = 1.0f / max;
 
-    uint32_t csr = CORDIC_FUNC_PHASE << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_PHASE << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NARGS;
 
     return from_q31(cordic_compute2(csr, to_q31(x * inv), to_q31(y * inv))) * PI_F;
 }
 
-void cordic_atan2_mod(float y, float x, float *angle_out, float *mod_out)
+void cordic_atan2_mod(const float y, const float x, float *angle_out, float *mod_out)
 {
     if (x == 0.0f && y == 0.0f)
     {
@@ -89,43 +89,43 @@ void cordic_atan2_mod(float y, float x, float *angle_out, float *mod_out)
         return;
     }
 
-    float m = fmaxf(fabsf(x), fabsf(y));
-    float inv = 1.0f / m;
+    const float max = fmaxf(fabsf(x), fabsf(y));
+    const float inv = 1.0f / max;
 
-    uint32_t csr = CORDIC_FUNC_PHASE << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_PHASE << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NARGS | CORDIC_CSR_NRES;
     int32_t r1, r2;
     cordic_compute2_res2(csr, to_q31(x * inv), to_q31(y * inv), &r1, &r2);
     *angle_out = from_q31(r1) * PI_F;
-    *mod_out = from_uq31((uint32_t)r2) * m;
+    *mod_out = from_uq31((uint32_t)r2) * max;
 }
 
-float cordic_modulus(float y, float x)
+float cordic_modulus(const float y, const float x)
 {
     if (x == 0.0f && y == 0.0f) return 0.0f;
 
-    float m = fmaxf(fabsf(x), fabsf(y));
-    float inv = 1.0f / m;
+    const float max = fmaxf(fabsf(x), fabsf(y));
+    const float inv = 1.0f / max;
 
-    uint32_t csr = CORDIC_FUNC_MODULUS << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_MODULUS << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NARGS;
 
-    return from_uq31((uint32_t)cordic_compute2(csr, to_q31(x * inv), to_q31(y * inv))) * m;
+    return from_uq31((uint32_t)cordic_compute2(csr, to_q31(x * inv), to_q31(y * inv))) * max;
 }
 
-float cordic_atan(float x)
+float cordic_atan(const float x)
 {
-    uint32_t csr = CORDIC_FUNC_ARCTAN << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_ARCTAN << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos;
 
     return from_q31(cordic_compute(csr, to_q31(x))) * PI_F;
 }
 
-void cordic_sinh_cosh(float x, float *sinh_out, float *cosh_out)
+void cordic_sinh_cosh(const float x, float *sinh_out, float *cosh_out)
 {
-    uint32_t csr = CORDIC_FUNC_HCOSINE << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_HCOSINE << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NARGS | CORDIC_CSR_NRES;
     int32_t r1, r2;
@@ -134,45 +134,45 @@ void cordic_sinh_cosh(float x, float *sinh_out, float *cosh_out)
     *sinh_out = from_q31(r2) * 2.0f;
 }
 
-float cordic_sinh(float x)
+float cordic_sinh(const float x)
 {
     float s, c;
     cordic_sinh_cosh(x, &s, &c);
     return s;
 }
 
-float cordic_cosh(float x)
+float cordic_cosh(const float x)
 {
     float s, c;
     cordic_sinh_cosh(x, &s, &c);
     return c;
 }
 
-float cordic_atanh(float x)
+float cordic_atanh(const float x)
 {
-    uint32_t csr = CORDIC_FUNC_HATANH << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_HATANH << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NARGS;
 
     return from_q31(cordic_compute2(csr, to_q31(x), to_q31(0.25f))) * 4.0f;
 }
 
-float cordic_ln(float x)
+float cordic_ln(const float x)
 {
     if (x <= 0.0f) return -__builtin_inff();
 
     int exp;
-    float frac = frexpf(x, &exp);
+    const float frac = frexpf(x, &exp);
 
-    uint32_t csr = CORDIC_FUNC_LN << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_LN << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | 1U << CORDIC_CSR_SCALE_Pos;
 
-    float ln_frac2 = from_q31(cordic_compute(csr, to_q31(frac)));
+    const float ln_frac2 = from_q31(cordic_compute(csr, to_q31(frac)));
     return ln_frac2 + (float)(exp - 1) * LN2_F;
 }
 
-float cordic_sqrt(float x)
+float cordic_sqrt(const float x)
 {
     if (x <= 0.0f) return 0.0f;
 
@@ -190,7 +190,7 @@ float cordic_sqrt(float x)
         exp += 2;
     }
 
-    uint32_t csr = CORDIC_FUNC_SQRT << CORDIC_CSR_FUNC_Pos
+    const uint32_t csr = CORDIC_FUNC_SQRT << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos;
 
     return ldexpf(from_q31(cordic_compute(csr, to_q31(frac))), exp / 2);

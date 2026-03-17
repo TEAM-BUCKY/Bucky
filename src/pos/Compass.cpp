@@ -1,4 +1,5 @@
 #include "Compass.h"
+#include "debug.h"
 #include "../optimizations/bitboard.h"
 #include "io/cordic/cordic.h"
 
@@ -33,8 +34,8 @@ bool Compass::tick() {
 
         case CompassState::CHECK_ID: {
             const uint8_t id = readReg(LIS2MDL_WHO_AM_I_REG);
-            Serial.print("Compass WHO_AM_I: 0x");
-            Serial.println(id, HEX);
+            DBG_PRINT("Compass WHO_AM_I: 0x");
+            DBG_PRINTLN(id, HEX);
             if (id != 0x40) {
                 state = CompassState::FAILED;
                 break;

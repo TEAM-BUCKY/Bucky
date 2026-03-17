@@ -1,9 +1,10 @@
 #include "tests.h"
+#include "debug.h"
 #include <Arduino.h>
 
 void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CManager&) {
-    Serial.println("=== Hold Heading Test (PD) ===");
-    Serial.println("Rotate the robot by hand, it should fight back.");
+    DBG_PRINTLN("=== Hold Heading Test (PD) ===");
+    DBG_PRINTLN("Rotate the robot by hand, it should fight back.");
 
     compass.reset();
 
@@ -14,10 +15,10 @@ void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CManager&) {
 
         motorDriver.driveDegrees(0, 0, rotation);
 
-        Serial.print("Offset: ");
-        Serial.print(compass.getOffset(), 1);
-        Serial.print(" | Rotation: ");
-        Serial.println(rotation, 1);
+        DBG_PRINT("Offset: ");
+        DBG_PRINT(compass.getOffset(), 1);
+        DBG_PRINT(" | Rotation: ");
+        DBG_PRINTLN(rotation, 1);
 
         delay(10);
     }
