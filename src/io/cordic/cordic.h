@@ -5,6 +5,10 @@
 
 #include "optimizations/optimizations.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define PI_F      3.14159265358979f
 #define INV_PI_F  (1.0f / PI_F)
 
@@ -127,5 +131,9 @@ float cordic_atanh(float x);
 
 float cordic_ln(float x);
 float cordic_sqrt(float x);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BUCKY_CORDIC_H

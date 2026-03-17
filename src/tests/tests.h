@@ -2,8 +2,8 @@
 #define BUCKY_TESTS_H
 
 #include "../motor/MotorDriver.h"
-#include "../pos/Compass.h"
-#include "../pos/Sonar.h"
+#include "../sensors/pos/Compass.h"
+#include "../sensors/pos/Sonar.h"
 #include "io/i2c/I2CDMA.h"
 
 struct TestContext {

@@ -1,7 +1,7 @@
 #include "Compass.h"
 #include "debug.h"
-#include "../optimizations/bitboard.h"
-#include "io/cordic/cordic.h"
+#include "../../optimizations/bitboard.h"
+#include "../../io/cordic/cordic.h"
 
 void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
     i2c_dma_write_reg(bus, LIS2MDL_ADDR, reg, value);

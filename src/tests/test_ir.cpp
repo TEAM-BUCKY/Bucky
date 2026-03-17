@@ -1,7 +1,7 @@
 #include "tests.h"
 #include "debug.h"
 #include <Arduino.h>
-#include "../ir/IRSensor.h"
+#include "../sensors/ir/IRSensor.h"
 
 void testIR(TestContext&) {
     DBG_PRINTLN("=== IR Sensor Test (DMA) ===");

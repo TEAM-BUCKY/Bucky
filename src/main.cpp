@@ -2,8 +2,8 @@
 
 #include "motor/MotorDriver.h"
 #include "io/i2c/I2CDMA.h"
-#include "pos/Compass.h"
-#include "pos/Sonar.h"
+#include "sensors/pos/Compass.h"
+#include "sensors/pos/Sonar.h"
 #include "io/cordic/cordic.h"
 #include "tests/tests.h"
 
