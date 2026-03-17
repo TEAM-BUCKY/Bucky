@@ -30,16 +30,16 @@ void setupEnvironment() {
                   DMA1, DMA1_Channel6, DMAMUX1_Channel5,
                   DMAMUX_REQ_I2C1_RX, DMA1_Channel6_IRQn);
 
-    // compass.begin(i2c1);
+    compass.begin(i2c1);
 
-    // SonarPins sonarPins = {.trigPin = PXX, .echoPins = {PXX, PXX, PXX, PXX}};
-    // sonar.begin(sonarPins);
+    constexpr SonarPins sonarPins = {.trigPin = PB11, .echoPins = {PA10, PC10, PC11, PC12}};
+    sonar.begin(sonarPins);
 
     analogReadResolution(12);
 
     motorDriver.init();
 
-    // while (!compass.tick()) {}
+    while (!compass.tick()) {}
 }
 
 int main() {
