@@ -60,10 +60,10 @@ bool Sonar::isReadComplete() const {
 
     if (micros() - trigStart >= SONAR_TIMEOUT_US) return true;
 
-    for (int i = 0; i < SONAR_COUNT; i++) {
+    for (int i = 0; i < SONAR_COUNT; i++)
         if (echoPinNumbers[i] >= 0 && !done[i])
             return false;
-    }
+
     return true;
 }
 
@@ -73,11 +73,14 @@ SonarReading Sonar::processRead() {
     SonarReading r;
     for (int i = 0; i < SONAR_COUNT; i++)
         r.distance[i] = 0.017f * duration[i];
+
     return r;
 }
 
 SonarReading Sonar::read() {
     startRead();
+
     while (!isReadComplete()) {}
+
     return processRead();
 }

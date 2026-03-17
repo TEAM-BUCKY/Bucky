@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include "../ir/IRSensor.h"
 
-void testIR(MotorDriver&, Compass&, I2CDMABus&) {
+void testIR(TestContext&) {
     DBG_PRINTLN("=== IR Sensor Test (DMA) ===");
     DBG_PRINTLN("Move IR ball around the robot.");
     DBG_PRINTLN();

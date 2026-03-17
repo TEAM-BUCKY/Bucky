@@ -3,6 +3,7 @@
 #include "motor/MotorDriver.h"
 #include "io/i2c/I2CDMA.h"
 #include "pos/Compass.h"
+#include "pos/Sonar.h"
 #include "io/cordic/cordic.h"
 #include "tests/tests.h"
 
@@ -15,6 +16,7 @@ MotorPin m3 = {PB6, PB7};
 MotorDriver motorDriver(m1, m2, m3);
 I2CDMABus i2c1;
 Compass compass;
+Sonar sonar;
 
 I2C_DMA_RX_HANDLER(1, 6, i2c1)
 
@@ -30,6 +32,9 @@ void setupEnvironment() {
 
     // compass.begin(i2c1);
 
+    // SonarPins sonarPins = {.trigPin = PXX, .echoPins = {PXX, PXX, PXX, PXX}};
+    // sonar.begin(sonarPins);
+
     analogReadResolution(12);
 
     motorDriver.init();
@@ -40,9 +45,10 @@ void setupEnvironment() {
 int main() {
     setupEnvironment();
 
+    TestContext ctx = {motorDriver, compass, sonar, i2c1};
 
 #ifdef RUN_TEST
-    RUN_TEST(motorDriver, compass, i2c1);
+    RUN_TEST(ctx);
 #else
     while (true) {
         // const float rotation = compass.computeRotation(0);

@@ -2,21 +2,21 @@
 #include "debug.h"
 #include <Arduino.h>
 
-void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CDMABus&) {
+void testHoldHeading(const TestContext& ctx) {
     DBG_PRINTLN("=== Hold Heading Test (PD) ===");
     DBG_PRINTLN("Rotate the robot by hand, it should fight back.");
 
-    compass.reset();
+    ctx.compass.reset();
 
     while (true) {
-        compass.update();
+        ctx.compass.update();
 
-        const float rotation = compass.computeRotation(0);
+        const float rotation = ctx.compass.computeRotation(0);
 
-        motorDriver.driveDegrees(0, 0, rotation);
+        ctx.motorDriver.driveDegrees(0, 0, rotation);
 
         DBG_PRINT("Offset: ");
-        DBG_PRINT(compass.getOffset(), 1);
+        DBG_PRINT(ctx.compass.getOffset(), 1);
         DBG_PRINT(" | Rotation: ");
         DBG_PRINTLN(rotation, 1);
 

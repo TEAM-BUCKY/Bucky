@@ -3,11 +3,20 @@
 
 #include "../motor/MotorDriver.h"
 #include "../pos/Compass.h"
+#include "../pos/Sonar.h"
 #include "io/i2c/I2CDMA.h"
 
-void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CDMABus& i2c);
-void testIR(MotorDriver& motorDriver, Compass& compass, I2CDMABus& i2c);
-void testI2CScan(MotorDriver& motorDriver, Compass& compass, I2CDMABus& i2c);
-void testDriveForward(MotorDriver& motorDriver, Compass& compass, I2CDMABus& i2c);
+struct TestContext {
+    MotorDriver& motorDriver;
+    Compass& compass;
+    Sonar& sonar;
+    I2CDMABus& i2c;
+};
+
+void testHoldHeading(const TestContext& ctx);
+void testIR(TestContext& ctx);
+void testI2CScan(const TestContext& ctx);
+void testDriveForward(const TestContext& ctx);
+void testSonar(const TestContext& ctx);
 
 #endif //BUCKY_TESTS_H

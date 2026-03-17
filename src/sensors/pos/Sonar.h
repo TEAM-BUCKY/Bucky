@@ -17,7 +17,7 @@ struct SonarReading {
 };
 
 class Sonar {
-        GpioPin trigGpio = {NULL, 0};
+        GpioPin trigGpio = {nullptr, 0};
 
         uint32_t trigStart = 0;
         bool reading = false;
