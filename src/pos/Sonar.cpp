@@ -1,8 +1,6 @@
 #include "Sonar.h"
-#include "io/gpio/gpio.h"
 
-static GpioPin trigGpio = {NULL, 0};
-static GpioPin echoGpio[SONAR_COUNT] = {{NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}};
+static GpioPin echoGpio[SONAR_COUNT];
 static int echoPinNumbers[SONAR_COUNT];
 
 static volatile uint32_t riseTime[SONAR_COUNT];
@@ -25,7 +23,7 @@ static void echoISR3() { echoISR(3); }
 
 static constexpr void (*const isrTable[SONAR_COUNT])() = {echoISR0, echoISR1, echoISR2, echoISR3};
 
-void setupSonar(const SonarPins& pins) {
+void Sonar::begin(const SonarPins& pins) {
     trigGpio = gpio_pin_init(pins.trigPin);
     gpio_mode(trigGpio, OUTPUT);
     gpio_low(trigGpio);
@@ -35,19 +33,17 @@ void setupSonar(const SonarPins& pins) {
         if (echoPinNumbers[i] >= 0) {
             echoGpio[i] = gpio_pin_init(echoPinNumbers[i]);
             gpio_mode(echoGpio[i], INPUT);
+            attachInterrupt(digitalPinToInterrupt(echoPinNumbers[i]), isrTable[i], CHANGE);
         }
     }
 }
 
-SonarReading readSonars() {
+void Sonar::startRead() {
     for (int i = 0; i < SONAR_COUNT; i++) {
         riseTime[i] = 0;
         duration[i] = 0;
         done[i] = false;
     }
-
-    for (int i = 0; i < SONAR_COUNT; i++)
-        attachInterrupt(digitalPinToInterrupt(echoPinNumbers[i]), isrTable[i], CHANGE);
 
     gpio_low(trigGpio);
     delayMicroseconds(2);
@@ -55,23 +51,33 @@ SonarReading readSonars() {
     delayMicroseconds(10);
     gpio_low(trigGpio);
 
-    const uint32_t start = micros();
-    bool allDone = false;
-    while (!allDone && micros() - start < SONAR_TIMEOUT_US) {
-        allDone = true;
-        for (int i = 0; i < SONAR_COUNT; i++) {
-            if (echoPinNumbers[i] >= 0 && !done[i]) {
-                allDone = false;
-            }
-        }
+    trigStart = micros();
+    reading = true;
+}
+
+bool Sonar::isReadComplete() const {
+    if (!reading) return true;
+
+    if (micros() - trigStart >= SONAR_TIMEOUT_US) return true;
+
+    for (int i = 0; i < SONAR_COUNT; i++) {
+        if (echoPinNumbers[i] >= 0 && !done[i])
+            return false;
     }
+    return true;
+}
 
-    for (const auto pin : echoPinNumbers)
-        detachInterrupt(digitalPinToInterrupt(pin));
+SonarReading Sonar::processRead() {
+    reading = false;
 
-    SonarReading reading;
+    SonarReading r;
     for (int i = 0; i < SONAR_COUNT; i++)
-        reading.distance[i] = 0.034f * duration[i] / 2.0f;
+        r.distance[i] = 0.017f * duration[i];
+    return r;
+}
 
-    return reading;
+SonarReading Sonar::read() {
+    startRead();
+    while (!isReadComplete()) {}
+    return processRead();
 }

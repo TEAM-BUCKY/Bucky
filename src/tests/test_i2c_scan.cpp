@@ -2,16 +2,14 @@
 #include "debug.h"
 #include <Arduino.h>
 
-static void scanBus(const char* name, TwoWire& wire) {
+static void scanBus(const char* name, I2CDMABus& bus) {
     DBG_PRINT("--- ");
     DBG_PRINT(name);
     DBG_PRINTLN(" ---");
 
     uint8_t found = 0;
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-        wire.beginTransmission(addr);
-        uint8_t err = wire.endTransmission();
-        if (err == 0) {
+        if (i2c_dma_probe(&bus, addr)) {
             DBG_PRINT("  0x");
             if (addr < 0x10) DBG_PRINT('0');
             DBG_PRINT(addr, HEX);
@@ -38,14 +36,13 @@ static void scanBus(const char* name, TwoWire& wire) {
     DBG_PRINTLN();
 }
 
-void testI2CScan(MotorDriver&, Compass&, I2CManager& i2c) {
+void testI2CScan(MotorDriver&, Compass&, I2CDMABus& i2c) {
     DBG_PRINTLN();
     DBG_PRINTLN("=== I2C Bus Scanner ===");
     DBG_PRINTLN("Scanning all configured buses...");
     DBG_PRINTLN();
 
-    scanBus("BUS1 (SDA=PB9, SCL=PA15)", i2c.getBus(I2CBus::BUS1));
-    scanBus("BUS3 (SDA=PC9, SCL=PC8)", i2c.getBus(I2CBus::BUS3));
+    scanBus("BUS1 (SDA=PB9, SCL=PA15)", i2c);
 
     DBG_PRINTLN("Scan complete. Rescanning every 5 seconds...");
     DBG_PRINTLN();
@@ -53,7 +50,6 @@ void testI2CScan(MotorDriver&, Compass&, I2CManager& i2c) {
     while (true) {
         delay(5000);
         DBG_PRINTLN("--- Rescan ---");
-        scanBus("BUS1", i2c.getBus(I2CBus::BUS1));
-        scanBus("BUS3", i2c.getBus(I2CBus::BUS3));
+        scanBus("BUS1", i2c);
     }
 }

@@ -4,22 +4,15 @@
 #include "io/cordic/cordic.h"
 
 void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
-    wire->beginTransmission(LIS2MDL_ADDR);
-    wire->write(reg);
-    wire->write(value);
-    wire->endTransmission();
+    i2c_dma_write_reg(bus, LIS2MDL_ADDR, reg, value);
 }
 
 uint8_t Compass::readReg(const uint8_t reg) const {
-    wire->beginTransmission(LIS2MDL_ADDR);
-    wire->write(reg);
-    wire->endTransmission(false);
-    wire->requestFrom(static_cast<uint8_t>(LIS2MDL_ADDR), static_cast<uint8_t>(1));
-    return wire->read();
+    return i2c_dma_read_reg_blocking(bus, LIS2MDL_ADDR, reg);
 }
 
-void Compass::begin(TwoWire& wireRef) {
-    wire = &wireRef;
+void Compass::begin(I2CDMABus& busRef) {
+    bus = &busRef;
     state = CompassState::BOOT_WAIT;
     stateStart = millis();
 }
@@ -88,25 +81,17 @@ bool Compass::tick() {
     return state == CompassState::READY || state == CompassState::FAILED;
 }
 
-void Compass::update() {
-    wire->beginTransmission(LIS2MDL_ADDR);
-    wire->write(LIS2MDL_OUTX_L_REG);
-    wire->endTransmission(false);
+void Compass::startRead() {
+    i2c_dma_read_reg(bus, LIS2MDL_ADDR, LIS2MDL_OUTX_L_REG, rx_buf, 6);
+}
 
-    const uint8_t count = wire->requestFrom(static_cast<uint8_t>(LIS2MDL_ADDR), static_cast<uint8_t>(6));
-    if (count < 6) {
-        return;
-    }
+bool Compass::isReadComplete() const {
+    return !i2c_dma_is_busy(bus);
+}
 
-    const uint8_t xl = wire->read();
-    const uint8_t xh = wire->read();
-    const uint8_t yl = wire->read();
-    const uint8_t yh = wire->read();
-    const uint8_t zl = wire->read();
-    const uint8_t zh = wire->read();
-
-    const auto rawX = static_cast<int16_t>(combineBytes(xh, xl));
-    const auto rawY = static_cast<int16_t>(combineBytes(yh, yl));
+void Compass::processRead() {
+    const auto rawX = static_cast<int16_t>(combineBytes(rx_buf[1], rx_buf[0]));
+    const auto rawY = static_cast<int16_t>(combineBytes(rx_buf[3], rx_buf[2]));
 
     const float x = rawX * 1.5f * 0.1f;
     const float y = rawY * 1.5f * 0.1f;
@@ -118,6 +103,12 @@ void Compass::update() {
         startHeading = heading;
         hasStartHeading = true;
     }
+}
+
+void Compass::update() {
+    startRead();
+    while (!isReadComplete()) {}
+    processRead();
 }
 
 float Compass::getHeading() const {

@@ -5,7 +5,8 @@
 #ifndef BUCKY_COMPASS_H
 #define BUCKY_COMPASS_H
 
-#include <Wire.h>
+#include <Arduino.h>
+#include "io/i2c/I2CDMA.h"
 
 #define LIS2MDL_ADDR 0x1E
 #define LIS2MDL_WHO_AM_I_REG 0x4F
@@ -27,7 +28,8 @@ enum class CompassState : uint8_t {
 
 class Compass
 {
-        TwoWire* wire = nullptr;
+        I2CDMABus* bus = nullptr;
+        volatile uint8_t rx_buf[6] = {};
         float heading = 0;
         float startHeading = 0;
         bool hasStartHeading = false;
@@ -49,11 +51,16 @@ class Compass
         uint8_t readReg(uint8_t reg) const;
 
     public:
-        void begin(TwoWire& wireRef);
+        void begin(I2CDMABus& busRef);
         bool tick();
         bool isReady() const { return state == CompassState::READY; }
         bool isFailed() const { return state == CompassState::FAILED; }
-        void update();
+
+        void update();                 // blocking: start DMA read, wait, process
+        void startRead();              // non-blocking: kick off DMA read
+        bool isReadComplete() const;   // check if DMA transfer finished
+        void processRead();            // convert rx_buf into heading
+
         float getHeading() const;
         float getOffset() const;
         float computeRotation(float targetDegrees);

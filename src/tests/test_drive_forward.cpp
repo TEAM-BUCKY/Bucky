@@ -2,7 +2,7 @@
 #include "debug.h"
 #include <Arduino.h>
 
-void testDriveForward(MotorDriver& motorDriver, Compass&, I2CManager&) {
+void testDriveForward(MotorDriver& motorDriver, Compass&, I2CDMABus&) {
     DBG_PRINTLN("=== Drive Forward Test ===");
 
     while (true) {

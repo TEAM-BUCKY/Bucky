@@ -2,7 +2,7 @@
 #include "debug.h"
 #include <Arduino.h>
 
-void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CManager&) {
+void testHoldHeading(MotorDriver& motorDriver, Compass& compass, I2CDMABus&) {
     DBG_PRINTLN("=== Hold Heading Test (PD) ===");
     DBG_PRINTLN("Rotate the robot by hand, it should fight back.");
 
