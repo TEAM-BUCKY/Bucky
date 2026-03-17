@@ -45,9 +45,10 @@ void setupEnvironment() {
 int main() {
     setupEnvironment();
 
-    TestContext ctx = {motorDriver, compass, sonar, i2c1};
 
 #ifdef RUN_TEST
+    TestContext ctx = {motorDriver, compass, sonar, i2c1};
+
     RUN_TEST(ctx);
 #else
     while (true) {
