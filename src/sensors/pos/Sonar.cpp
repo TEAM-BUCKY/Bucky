@@ -1,4 +1,5 @@
 #include "Sonar.h"
+#include "io/gpio/gpio.h"
 
 static GpioPin echoGpio[SONAR_COUNT];
 static int echoPinNumbers[SONAR_COUNT];

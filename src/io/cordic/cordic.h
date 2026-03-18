@@ -94,7 +94,7 @@ static FORCE_INLINE void cordic_compute_res2(uint32_t csr, int32_t arg, int32_t 
     );
 }
 
-static FORCE_INLINE void cordic_compute2_res2(uint32_t csr, int32_t arg1, int32_t arg2, const int32_t *res1, int32_t *res2)
+static FORCE_INLINE void cordic_compute2_res2(uint32_t csr, int32_t arg1, int32_t arg2, int32_t *res1, int32_t *res2)
 {
     asm volatile(
         "STR %[csr], [%[base], %[csr_off]]\n\t"

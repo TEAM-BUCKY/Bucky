@@ -5,6 +5,7 @@
 #include <stm32g4xx.h>
 
 #include "optimizations/bitboard.h"
+#include "optimizations/optimizations.h"
 
 typedef struct {
     GPIO_TypeDef *port;

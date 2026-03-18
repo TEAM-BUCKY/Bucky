@@ -1,4 +1,4 @@
-#include "ir/IRSensor.h"
+#include "sensors/IRSensor.h"
 
 #include "optimizations/optimizations.h"
 #include "io/dma/DMA.h"
