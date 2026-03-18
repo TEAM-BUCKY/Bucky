@@ -12,12 +12,12 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed)
     pw2 = {pwm_pin_init(m2.inA), pwm_pin_init(m2.inB)};
     pw3 = {pwm_pin_init(m3.inA), pwm_pin_init(m3.inB)};
 
-    pwm_init(&pw1.inA, m1.inA, 1000, 255);
-    pwm_init(&pw1.inB, m1.inB, 1000, 255);
-    pwm_init(&pw2.inA, m2.inA, 1000, 255);
-    pwm_init(&pw2.inB, m2.inB, 1000, 255);
-    pwm_init(&pw3.inA, m3.inA, 1000, 255);
-    pwm_init(&pw3.inB, m3.inB, 1000, 255);
+    pwm_init(&pw1.inA, m1.inA, 5000, 255);
+    pwm_init(&pw1.inB, m1.inB, 5000, 255);
+    pwm_init(&pw2.inA, m2.inA, 5000, 255);
+    pwm_init(&pw2.inB, m2.inB, 5000, 255);
+    pwm_init(&pw3.inA, m3.inA, 5000, 255);
+    pwm_init(&pw3.inB, m3.inB, 5000, 255);
 
     pwm_write(&pw1.inA, 0);
     pwm_write(&pw1.inB, 0);
