@@ -5,7 +5,7 @@
 #include "io/gpio/pwm.h"
 
 #define MIN_SPEED 1700
-#define MAX_SPEED 3300
+#define MAX_SPEED 3399
 
 struct MotorPin {
     int inA;
