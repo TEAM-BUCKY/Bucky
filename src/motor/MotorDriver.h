@@ -4,8 +4,8 @@
 #include <Arduino.h>
 #include "io/gpio/pwm.h"
 
-#define MIN_SPEED 130
-#define MAX_SPEED 250
+#define MIN_SPEED 1700
+#define MAX_SPEED 3300
 
 struct MotorPin {
     int inA;
@@ -52,8 +52,8 @@ class MotorDriver {
 
     SpeedRange speedRange = {MIN_SPEED, MAX_SPEED};
 
-    static void setMotorSpeed(const MotorPwm& motor, float targetSpeed);
-    static void updateMotor(const Motor& motor);
+    void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
+    void updateMotor(const Motor& motor) const;
     static void drive(Motor& motor, float speed, float totalSpeed);
 
     void stageMotorSpeed(const MotorPwm& motor, float targetSpeed) const;

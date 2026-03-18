@@ -12,12 +12,12 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed)
     pw2 = {pwm_pin_init(m2.inA), pwm_pin_init(m2.inB)};
     pw3 = {pwm_pin_init(m3.inA), pwm_pin_init(m3.inB)};
 
-    pwm_init(&pw1.inA, m1.inA, 5000, 255);
-    pwm_init(&pw1.inB, m1.inB, 5000, 255);
-    pwm_init(&pw2.inA, m2.inA, 5000, 255);
-    pwm_init(&pw2.inB, m2.inB, 5000, 255);
-    pwm_init(&pw3.inA, m3.inA, 5000, 255);
-    pwm_init(&pw3.inB, m3.inB, 5000, 255);
+    pwm_init(&pw1.inA, m1.inA, 5000, 3400);
+    pwm_init(&pw1.inB, m1.inB, 5000, 3400);
+    pwm_init(&pw2.inA, m2.inA, 5000, 3400);
+    pwm_init(&pw2.inB, m2.inB, 5000, 3400);
+    pwm_init(&pw3.inA, m3.inA, 5000, 3400);
+    pwm_init(&pw3.inB, m3.inB, 5000, 3400);
 
     pwm_write(&pw1.inA, 0);
     pwm_write(&pw1.inB, 0);
@@ -41,7 +41,8 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed)
     motor3 = {pw3, 0, 0, 0, currentTime};
 }
 
-void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) {
+void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
+{
     if (targetSpeed > 100 || targetSpeed < -100) {
         DBG_PRINTLN("Error: speedPercentage must be between -100 and 100");
         return;
@@ -54,7 +55,7 @@ void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) 
         return;
     }
     // Map -100%-100% to an actual speed value
-    const float speed = map(static_cast<long>(abs(targetSpeed)), 0, 100, MIN_SPEED, MAX_SPEED);
+    const float speed = abs(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
 
     if (targetSpeed < 0) {
         pwm_write(&motor.inA, 0);
@@ -71,15 +72,19 @@ constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed
 // New implementation using Hermite smoothstep
 float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time)
 {
-    if (time > fabsf(begin - totalSpeed) * timePer100) {
+    const float difference = fabsf(begin - target);
+    const auto floatTime = static_cast<float>(time);
+    if (floatTime > difference * timePer100) {
         return target;
     }
-    const float t = time / (fabsf(begin - totalSpeed) * timePer100); // Normalize time to [0, 1]
+    const float t = floatTime / (difference * timePer100); // Normalize time to [0, 1]
     const float smoothStep = t * t * (3 - 2 * t); // Hermite smoothstep function
     return begin + smoothStep * (target - begin);
 }
 
-void MotorDriver::updateMotor(const Motor &motor) { // Update the Motor to drive at the right speed following the smoothing function
+// Update the Motor to drive at the right speed following the smoothing function
+void MotorDriver::updateMotor(const Motor &motor) const
+{
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
     setMotorSpeed(motor.motor, getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth));
 }
