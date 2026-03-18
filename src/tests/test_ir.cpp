@@ -8,12 +8,14 @@ void testIR(TestContext&) {
     DBG_PRINTLN("Move IR ball around the robot.");
     DBG_PRINTLN();
 
-    const volatile uint16_t* buf1 = ir_get_buffer(1);
-    const volatile uint16_t* buf2 = ir_get_buffer(2);
     const uint32_t count1 = ir_get_sensor_count(1);
     const uint32_t count2 = ir_get_sensor_count(2);
 
     while (true) {
+        // Fetch the current safe buffer each iteration (pointer changes on DMA half-cycle)
+        const uint16_t* buf1 = ir_get_buffer(1);
+        const uint16_t* buf2 = ir_get_buffer(2);
+
         if (IR_BOARD1_ENABLED) {
             for (uint32_t s = 0; s < IR_SWEEPS_PER_CYCLE; s++) {
                 DBG_PRINT("B1 S");

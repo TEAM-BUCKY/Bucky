@@ -31,7 +31,7 @@ static constexpr uint32_t IR_ADC_BUFFER_SIZE =
 
 void ir_sensor_init();
 
-volatile uint16_t* ir_get_buffer(uint8_t board);
+const uint16_t* ir_get_buffer(uint8_t board);
 uint32_t ir_get_sensor_count(uint8_t board);
 
 #endif // BUCKY_IRSENSOR_H

@@ -19,11 +19,11 @@ static FORCE_INLINE void tim_start(TIM_TypeDef* tim) {
 }
 
 static FORCE_INLINE void tim_set_trgo(TIM_TypeDef* tim, const uint32_t mms) {
-    tim->CR2 = (tim->CR2 & ~TIM_CR2_MMS_Msk) | (mms << TIM_CR2_MMS_Pos);
+    tim->CR2 = tim->CR2 & ~TIM_CR2_MMS_Msk | mms << TIM_CR2_MMS_Pos;
 }
 
 static FORCE_INLINE void tim_set_dma_burst(TIM_TypeDef* tim, const uint32_t base_reg, const uint32_t count) {
-    tim->DCR = (count - 1) << TIM_DCR_DBL_Pos | (base_reg << TIM_DCR_DBA_Pos);
+    tim->DCR = (count - 1) << TIM_DCR_DBL_Pos | base_reg << TIM_DCR_DBA_Pos;
 }
 
 static FORCE_INLINE void tim_enable_update_dma(TIM_TypeDef* tim) {
@@ -52,8 +52,43 @@ static constexpr bool is_silence_idx(const uint32_t i) {
 
 static uint32_t tim4_dma_buf[IR_BOARD1_ENABLED ? IR_CYCLE_COUNT * 3 : 1];
 static uint32_t tim3_dma_buf[IR_BOARD2_ENABLED ? IR_CYCLE_COUNT * 4 : 1];
-static volatile uint16_t board1_adc_buffer[IR_ADC_BUFFER_SIZE];
-static volatile uint16_t board2_adc_buffer[IR_ADC_BUFFER_SIZE];
+
+static volatile uint16_t board1_dma_buf[IR_BOARD1_ENABLED ? 2 * IR_ADC_BUFFER_SIZE : 1];
+static volatile uint16_t board2_dma_buf[IR_BOARD2_ENABLED ? 2 * IR_ADC_BUFFER_SIZE : 1];
+
+static volatile uint16_t* volatile board1_ready = board1_dma_buf;
+static volatile uint16_t* volatile board2_ready = board2_dma_buf;
+
+static constexpr uint32_t DMA_HTIF(const uint32_t ch) { return 1U << ((ch - 1) * 4 + 2); }
+static constexpr uint32_t DMA_TCIF(const uint32_t ch) { return 1U << ((ch - 1) * 4 + 1); }
+
+extern "C" {
+
+void DMA1_Channel2_IRQHandler(void) {
+    const uint32_t isr = DMA1->ISR;
+    if (isr & DMA_HTIF(2)) {
+        board1_ready = board1_dma_buf;
+        DMA1->IFCR = DMA_HTIF(2);
+    }
+    if (isr & DMA_TCIF(2)) {
+        board1_ready = board1_dma_buf + IR_ADC_BUFFER_SIZE;
+        DMA1->IFCR = DMA_TCIF(2);
+    }
+}
+
+void DMA1_Channel4_IRQHandler(void) {
+    const uint32_t isr = DMA1->ISR;
+    if (isr & DMA_HTIF(4)) {
+        board2_ready = board2_dma_buf;
+        DMA1->IFCR = DMA_HTIF(4);
+    }
+    if (isr & DMA_TCIF(4)) {
+        board2_ready = board2_dma_buf + IR_ADC_BUFFER_SIZE;
+        DMA1->IFCR = DMA_TCIF(4);
+    }
+}
+
+}
 
 static void fill_timer_dma_buf(uint32_t* buf, const uint32_t words_per_entry, const uint32_t ccr_offset) {
     for (uint32_t i = 0; i < IR_CYCLE_COUNT; i++) {
@@ -71,7 +106,6 @@ static void init_timer_pwm(TIM_TypeDef* tim, const uint8_t channel) {
     tim->PSC = IR_TIM_PSC;
     tim->ARR = IR_FAST_ARR;
 
-    // PWM mode 1 + preload enable (OC1M=110, OC1PE=1)
     volatile uint32_t* ccmr = &tim->CCMR1 + (channel >> 1);
     const uint8_t shift = (channel & 1) * 8;
     writeField(*ccmr, 0xFFU, shift, 0x68U);
@@ -102,8 +136,9 @@ template<> struct BoardCfg<1> {
     static auto dmamux_tim() { return DMAMUX1_Channel0; }
     static auto dma_adc()    { return DMA1_Channel2; }
     static auto dmamux_adc() { return DMAMUX1_Channel1; }
+    static constexpr IRQn_Type dma_adc_irqn = DMA1_Channel2_IRQn;
     static auto tim_buf()    { return tim4_dma_buf; }
-    static auto adc_buf()    { return board1_adc_buffer; }
+    static auto adc_buf()    { return board1_dma_buf; }
 };
 
 template<> struct BoardCfg<2> {
@@ -122,8 +157,9 @@ template<> struct BoardCfg<2> {
     static auto dmamux_tim() { return DMAMUX1_Channel2; }
     static auto dma_adc()    { return DMA1_Channel4; }
     static auto dmamux_adc() { return DMAMUX1_Channel3; }
+    static constexpr IRQn_Type dma_adc_irqn = DMA1_Channel4_IRQn;
     static auto tim_buf()    { return tim3_dma_buf; }
-    static auto adc_buf()    { return board2_adc_buffer; }
+    static auto adc_buf()    { return board2_dma_buf; }
 };
 
 template<uint8_t Board, bool Enabled>
@@ -143,7 +179,11 @@ static void init_board() {
                               IR_CYCLE_COUNT * board::burst_words, board::dma_tim_mux);
     dma_init_periph_to_mem_16(board::dma_adc(), board::dmamux_adc(),
                               &board::adc()->DR, board::adc_buf(),
-                              IR_ADC_BUFFER_SIZE, board::dma_adc_mux);
+                              2 * IR_ADC_BUFFER_SIZE, board::dma_adc_mux);
+
+    setMask(board::dma_adc()->CCR, DMA_CCR_HTIE | DMA_CCR_TCIE);
+    NVIC_SetPriority(board::dma_adc_irqn, 3);
+    NVIC_EnableIRQ(board::dma_adc_irqn);
 
     dma_enable(board::dma_tim());
     dma_enable(board::dma_adc());
@@ -157,8 +197,8 @@ static void init_board() {
     tim_start(board::timer());
 }
 
-volatile uint16_t* ir_get_buffer(const uint8_t board) {
-    return board == 1 ? board1_adc_buffer : board2_adc_buffer;
+const uint16_t* ir_get_buffer(const uint8_t board) {
+    return const_cast<const uint16_t*>(board == 1 ? board1_ready : board2_ready);
 }
 
 uint32_t ir_get_sensor_count(const uint8_t board) {
@@ -171,8 +211,8 @@ void ir_sensor_init() {
     setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_TIM4EN);
     __DSB();
 
-    ADC12_COMMON->CCR = (ADC12_COMMON->CCR & ~ADC_CCR_CKMODE_Msk)
-                      | (3U << ADC_CCR_CKMODE_Pos); // AHB/4 = 42.5 MHz
+    ADC12_COMMON->CCR = ADC12_COMMON->CCR & ~ADC_CCR_CKMODE_Msk
+        | 3U << ADC_CCR_CKMODE_Pos;
 
     init_board<1, IR_BOARD1_ENABLED>();
     init_board<2, IR_BOARD2_ENABLED>();
