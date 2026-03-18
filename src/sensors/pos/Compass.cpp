@@ -125,7 +125,7 @@ float Compass::getOffset() const {
 float Compass::computeRotation(const float targetDegrees) {
     const unsigned long now = millis();
     const auto dtMs = static_cast<float>(now - lastTime);
-    const float dtS = dtMs / 1000.0f;
+    const float dtS = dtMs * 0.001f;
     lastTime = now;
 
     float error = getOffset() - targetDegrees;

@@ -3,10 +3,13 @@
 #include "io/cordic/cordic.h"
 #include <cmath>
 
+#include "optimizations/logic.h"
+
 void MotorDriver::init(const float minSpeed, const float maxSpeed)
 {
     speedRange.min = minSpeed;
     speedRange.max = maxSpeed;
+    speedRange.scale = (maxSpeed - minSpeed) / 100.0f;
 
     pw1 = {pwm_pin_init(m1.inA), pwm_pin_init(m1.inB)};
     pw2 = {pwm_pin_init(m2.inA), pwm_pin_init(m2.inB)};
@@ -41,30 +44,36 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed)
     motor3 = {pw3, 0, 0, 0, currentTime};
 }
 
+template<bool stage>
+void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const int speedB)
+{
+    if constexpr (stage) {
+        pwm_stage(&motor.inA, speedA);
+        pwm_stage(&motor.inB, speedB);
+    } else
+    {
+        pwm_write(&motor.inA, speedA);
+        pwm_write(&motor.inB, speedB);
+    }
+}
+
+template<bool stage>
 void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
 {
-    if (targetSpeed > 100 || targetSpeed < -100) {
-        DBG_PRINTLN("Error: speedPercentage must be between -100 and 100");
-        return;
-    }
-
     if (targetSpeed == 0)
     {
-        pwm_write(&motor.inA, 0);
-        pwm_write(&motor.inB, 0);
+        writeMotorSpeed<stage>(motor, 0, 0);
         return;
     }
-    // Map -100%-100% to an actual speed value
-    const float speed = fabsf(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
+
+    const float speed = fabsf(targetSpeed) * speedRange.scale + speedRange.min;
 
     if (targetSpeed < 0) {
-        pwm_write(&motor.inA, 0);
-        pwm_write(&motor.inB, static_cast<int>(round(speed)));
+        writeMotorSpeed<stage>(motor, 0, static_cast<int>(speed));
         return;
     }
 
-    pwm_write(&motor.inA, static_cast<int>(round(speed)));
-    pwm_write(&motor.inB, 0);
+    writeMotorSpeed<stage>(motor, static_cast<int>(speed), 0);
 }
 
 constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
@@ -82,43 +91,19 @@ float getSmoothFunction(const float begin, const float target, const float total
     return begin + smoothStep * (target - begin);
 }
 
-// Update the Motor to drive at the right speed following the smoothing function
+template<bool stage>
 void MotorDriver::updateMotor(Motor &motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
     const float speed = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
     motor.motor.currentSpeed = speed;
-    setMotorSpeed(motor.motor, speed);
+    setMotorSpeed<stage>(motor.motor, speed);
 }
 
 void MotorDriver::updateAllMotors() {
-    updateMotor(motor1);
-    updateMotor(motor2);
-    updateMotor(motor3);
-}
-
-void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const float targetSpeed) const {
-    if (targetSpeed > 100 || targetSpeed < -100) {
-        DBG_PRINTLN("Error: speedPercentage must be between -100 and 100");
-        return;
-    }
-
-    if (targetSpeed == 0) {
-        pwm_stage(&motor.inA, 0);
-        pwm_stage(&motor.inB, 0);
-        return;
-    }
-
-    const float speed = fabsf(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
-
-    if (targetSpeed < 0) {
-        pwm_stage(&motor.inA, 0);
-        pwm_stage(&motor.inB, static_cast<int>(round(speed)));
-        return;
-    }
-
-    pwm_stage(&motor.inA, static_cast<int>(round(speed)));
-    pwm_stage(&motor.inB, 0);
+    updateMotor<false>(motor1);
+    updateMotor<false>(motor2);
+    updateMotor<false>(motor3);
 }
 
 void MotorDriver::syncUpdateMotor(Motor& motor) const
@@ -126,7 +111,7 @@ void MotorDriver::syncUpdateMotor(Motor& motor) const
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
     const float speed = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
     motor.motor.currentSpeed = speed;
-    stageMotorSpeed(motor.motor, speed);
+    setMotorSpeed<true>(motor.motor, speed);
 }
 
 void MotorDriver::syncUpdateAllMotors() {
@@ -160,9 +145,9 @@ void MotorDriver::driveRadians(const float radians, const float scale, const flo
     float m2Speed = -sinDegrees * scale + scaledRotation;
     float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
 
-    m1Speed = constrain(m1Speed, -100.0f, 100.0f);
-    m2Speed = constrain(m2Speed, -100.0f, 100.0f);
-    m3Speed = constrain(m3Speed, -100.0f, 100.0f);
+    m1Speed = constrain_value(m1Speed, -100.0f, 100.0f);
+    m2Speed = constrain_value(m2Speed, -100.0f, 100.0f);
+    m3Speed = constrain_value(m3Speed, -100.0f, 100.0f);
 
     drive(this->motor1, m1Speed, scale);
     drive(this->motor2, m2Speed, scale);

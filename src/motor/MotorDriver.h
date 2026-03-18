@@ -35,6 +35,7 @@ struct VectorXY
 struct SpeedRange {
     float min;
     float max;
+    float scale = 1;
 };
 
 class MotorDriver {
@@ -50,13 +51,14 @@ class MotorDriver {
     Motor motor2;
     Motor motor3;
 
-    SpeedRange speedRange = {MIN_SPEED, MAX_SPEED};
+    SpeedRange speedRange = {MIN_SPEED, MAX_SPEED, (MAX_SPEED - MIN_SPEED) / 100.0f};
 
+    template<bool stage>
     void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
+    template<bool stage>
     void updateMotor(Motor& motor) const;
     static void drive(Motor& motor, float speed, float totalSpeed);
 
-    void stageMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
     void syncUpdateMotor(Motor& motor) const;
 
 public:

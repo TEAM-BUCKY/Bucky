@@ -9,9 +9,15 @@
 
 #define DEFAULT_PRECISION 6
 
-static FORCE_INLINE int32_t to_q31(const float x)
+static FORCE_INLINE int32_t to_q31(float x)
 {
-    return x >= 1.0f ? 0x7FFFFFFF : (int32_t)(x * Q31_SCALE);
+    int32_t result;
+    asm volatile(
+        "VCVT.S32.F32 %[x], %[x], #31\n\t"
+        "VMOV %[r], %[x]"
+        : [x] "+t" (x), [r] "=r" (result)
+    );
+    return result;
 }
 
 static FORCE_INLINE float from_q31(int32_t x)
