@@ -24,7 +24,7 @@ void setupEnvironment() {
     init();
     cordic_init();
 
-    i2c_dma_init(&i2c1, I2C1,
+    i2c_dma_init<I2CFrequency::FMP_3M4>(&i2c1, I2C1,
                   GPIOB, 9, 4,    // SDA: PB9  AF4
                   GPIOA, 15, 4,   // SCL: PA15 AF4
                   DMA1, DMA1_Channel6, DMAMUX1_Channel5,

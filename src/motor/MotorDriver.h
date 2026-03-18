@@ -53,25 +53,25 @@ class MotorDriver {
     SpeedRange speedRange = {MIN_SPEED, MAX_SPEED};
 
     void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
-    void updateMotor(const Motor& motor) const;
+    void updateMotor(Motor& motor) const;
     static void drive(Motor& motor, float speed, float totalSpeed);
 
     void stageMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
-    void syncUpdateMotor(const Motor& motor) const;
+    void syncUpdateMotor(Motor& motor) const;
 
 public:
     MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : m1(m1), m2(m2), m3(m3) {};
 
     void init(float minSpeed = MIN_SPEED, float maxSpeed = MAX_SPEED);
 
-    void updateAllMotors() const;
-    void syncUpdateAllMotors() const;
+    void updateAllMotors();
+    void syncUpdateAllMotors();
 
     void driveDegrees(float degrees, float scale = 100, float rotation = 0);
     void driveRadians(float radians, float scale = 100, float rotation = 0);
     void driveVector(VectorXY vector, float rotation = 0);
 
-    void changeSpeed(const int minSpeed = MIN_SPEED, const int maxSpeed = MAX_SPEED) {
+    void changeSpeed(const float minSpeed = MIN_SPEED, const float maxSpeed = MAX_SPEED) {
         this->speedRange.min = minSpeed;
         this->speedRange.max = maxSpeed;
     }

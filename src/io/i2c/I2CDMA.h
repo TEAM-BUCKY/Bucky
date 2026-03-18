@@ -16,6 +16,8 @@
 #define DMAMUX_REQ_I2C3_TX  21
 
 #define I2C_TIMING_FM_400K  0x4052193AU
+#define I2C_TIMING_FMP_1M   0x00805054U
+#define I2C_TIMING_FMP_3M4  0x0020131BU
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,12 +32,13 @@ typedef struct {
     volatile bool        busy;
 } I2CDMABus;
 
-void i2c_dma_init(I2CDMABus* bus, I2C_TypeDef* i2c,
-                   GPIO_TypeDef* sda_port, uint8_t sda_pin, uint8_t sda_af,
-                   GPIO_TypeDef* scl_port, uint8_t scl_pin, uint8_t scl_af,
-                   DMA_TypeDef* dma, DMA_Channel_TypeDef* dma_rx,
-                   DMAMUX_Channel_TypeDef* dma_mux_rx,
-                   uint32_t mux_rx, IRQn_Type dma_rx_irqn);
+void i2c_dma_init_raw(I2CDMABus* bus, I2C_TypeDef* i2c,
+                      GPIO_TypeDef* sda_port, uint8_t sda_pin, uint8_t sda_af,
+                      GPIO_TypeDef* scl_port, uint8_t scl_pin, uint8_t scl_af,
+                      DMA_TypeDef* dma, DMA_Channel_TypeDef* dma_rx,
+                      DMAMUX_Channel_TypeDef* dma_mux_rx,
+                      uint32_t mux_rx, IRQn_Type dma_rx_irqn,
+                      uint32_t timing);
 
 void i2c_dma_read_reg(I2CDMABus* bus, uint8_t addr, uint8_t reg,
                        volatile uint8_t* buf, uint8_t len);
@@ -70,6 +73,28 @@ static FORCE_INLINE void i2c_dma_rx_isr(I2CDMABus* bus) {
 
 #ifdef __cplusplus
 }
+
+enum class I2CFrequency { FM_400K, FMP_1M, FMP_3M4 };
+
+template<I2CFrequency Freq = I2CFrequency::FM_400K>
+inline void i2c_dma_init(I2CDMABus* bus, I2C_TypeDef* i2c,
+                          GPIO_TypeDef* sda_port, uint8_t sda_pin, uint8_t sda_af,
+                          GPIO_TypeDef* scl_port, uint8_t scl_pin, uint8_t scl_af,
+                          DMA_TypeDef* dma, DMA_Channel_TypeDef* dma_rx,
+                          DMAMUX_Channel_TypeDef* dma_mux_rx,
+                          uint32_t mux_rx, IRQn_Type dma_rx_irqn)
+{
+    constexpr uint32_t timing = (Freq == I2CFrequency::FMP_3M4) ? I2C_TIMING_FMP_3M4
+                               : (Freq == I2CFrequency::FMP_1M)  ? I2C_TIMING_FMP_1M
+                                                                  : I2C_TIMING_FM_400K;
+    i2c_dma_init_raw(bus, i2c,
+                     sda_port, sda_pin, sda_af,
+                     scl_port, scl_pin, scl_af,
+                     dma, dma_rx, dma_mux_rx,
+                     mux_rx, dma_rx_irqn,
+                     timing);
+}
+
 #endif
 
 #endif /* BUCKY_I2C_DMA_H */

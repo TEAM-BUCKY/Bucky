@@ -46,6 +46,7 @@ void cordic_sin_cos(const float angle_rad, float *sin_out, float *cos_out)
     const uint32_t csr = CORDIC_FUNC_COSINE << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NRES;
+
     int32_t r1, r2;
     cordic_compute_res2(csr, to_q31(n), &r1, &r2);
     *cos_out = from_q31(r1);

@@ -83,13 +83,15 @@ float getSmoothFunction(const float begin, const float target, const float total
 }
 
 // Update the Motor to drive at the right speed following the smoothing function
-void MotorDriver::updateMotor(const Motor &motor) const
+void MotorDriver::updateMotor(Motor &motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
-    setMotorSpeed(motor.motor, getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth));
+    const float speed = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
+    motor.motor.currentSpeed = speed;
+    setMotorSpeed(motor.motor, speed);
 }
 
-void MotorDriver::updateAllMotors() const {
+void MotorDriver::updateAllMotors() {
     updateMotor(motor1);
     updateMotor(motor2);
     updateMotor(motor3);
@@ -119,13 +121,15 @@ void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const float targetSpeed
     pwm_stage(&motor.inB, 0);
 }
 
-void MotorDriver::syncUpdateMotor(const Motor& motor) const
+void MotorDriver::syncUpdateMotor(Motor& motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
-    stageMotorSpeed(motor.motor, getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth));
+    const float speed = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
+    motor.motor.currentSpeed = speed;
+    stageMotorSpeed(motor.motor, speed);
 }
 
-void MotorDriver::syncUpdateAllMotors() const {
+void MotorDriver::syncUpdateAllMotors() {
     syncUpdateMotor(motor1);
     syncUpdateMotor(motor2);
     syncUpdateMotor(motor3);

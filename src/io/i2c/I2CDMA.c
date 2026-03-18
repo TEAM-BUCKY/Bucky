@@ -89,12 +89,13 @@ static FORCE_INLINE void i2c_finish(I2C_TypeDef* i2c)
 }
 
 
-void i2c_dma_init(I2CDMABus* bus, I2C_TypeDef* i2c,
-                   GPIO_TypeDef* sda_port, const uint8_t sda_pin, const uint8_t sda_af,
-                   GPIO_TypeDef* scl_port, const uint8_t scl_pin, const uint8_t scl_af,
-                   DMA_TypeDef* dma, DMA_Channel_TypeDef* dma_rx,
-                   DMAMUX_Channel_TypeDef* dma_mux_rx,
-                   const uint32_t mux_rx, const IRQn_Type dma_rx_irqn) {
+void i2c_dma_init_raw(I2CDMABus* bus, I2C_TypeDef* i2c,
+                      GPIO_TypeDef* sda_port, const uint8_t sda_pin, const uint8_t sda_af,
+                      GPIO_TypeDef* scl_port, const uint8_t scl_pin, const uint8_t scl_af,
+                      DMA_TypeDef* dma, DMA_Channel_TypeDef* dma_rx,
+                      DMAMUX_Channel_TypeDef* dma_mux_rx,
+                      const uint32_t mux_rx, const IRQn_Type dma_rx_irqn,
+                      const uint32_t timing) {
 
     bus->i2c    = i2c;
     bus->dma    = dma;
@@ -117,8 +118,15 @@ void i2c_dma_init(I2CDMABus* bus, I2C_TypeDef* i2c,
     gpio_init_i2c_pin(sda_port, sda_pin, sda_af);
     gpio_init_i2c_pin(scl_port, scl_pin, scl_af);
 
+    if (timing != I2C_TIMING_FM_400K) {
+        setMask(RCC->APB2ENR, RCC_APB2ENR_SYSCFGEN);
+        if      (i2c == I2C1) setMask(SYSCFG->CFGR1, 1U << 23 | 1U << 24);
+        else if (i2c == I2C2) setMask(SYSCFG->CFGR1, 1U << 25);
+        else if (i2c == I2C3) setMask(SYSCFG->CFGR1, 1U << 26);
+    }
+
     clearMask(i2c->CR1, I2C_CR1_PE);
-    i2c->TIMINGR = I2C_TIMING_FM_400K;
+    i2c->TIMINGR = timing;
     setMask(i2c->CR1, I2C_CR1_PE);
 
     dma_rx->CCR   = 0;
