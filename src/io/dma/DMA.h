@@ -4,6 +4,7 @@
 #include <stm32g4xx.h>
 
 #include "optimizations/bitboard.h"
+#include "optimizations/optimizations.h"
 
 /* DMAMUX request IDs (RM0440 Table 91) */
 #define DMAMUX_REQ_ADC_1    5
@@ -33,7 +34,7 @@ void dma_init_periph_to_mem_16(DMA_Channel_TypeDef* channel,
 }
 #endif
 
-static inline void dma_enable(DMA_Channel_TypeDef* channel)
+static FORCE_INLINE void dma_enable(DMA_Channel_TypeDef* channel)
 {
     setMask(channel->CCR, DMA_CCR_EN);
 }

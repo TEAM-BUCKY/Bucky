@@ -32,7 +32,7 @@ typedef struct {
     uint8_t timerCount;
 } PwmSyncState;
 
-extern PwmSyncState pwm_sync;
+inline PwmSyncState pwm_sync = {nullptr};
 
 static FORCE_INLINE void timer_enable(TIM_TypeDef *tim)
 {
@@ -44,7 +44,7 @@ static FORCE_INLINE void timer_disable(TIM_TypeDef *tim)
     clearMask(tim->CR1, TIM_CR1_CEN);
 }
 
-static inline PwmPin pwm_pin_init(const int pin)
+static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
 {
     const PinName pn = digitalPinToPinName(pin);
     const uint32_t func = pinmap_function(pn, PinMap_TIM);
@@ -59,7 +59,7 @@ static inline PwmPin pwm_pin_init(const int pin)
 
 static FORCE_INLINE void pwm_enable_clock(const TIM_TypeDef *tim)
 {
-    switch ((uintptr_t)tim) {
+    switch (reinterpret_cast<uintptr_t>(tim)) {
         case TIM2_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM2EN);  break;
         case TIM3_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM3EN);  break;
         case TIM4_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM4EN);  break;

@@ -11,18 +11,18 @@ typedef struct {
     uint16_t mask;
 } GpioPin;
 
-static inline GpioPin gpio_pin_init(int pin)
+static FORCE_INLINE GpioPin gpio_pin_init(const int pin)
 {
-    PinName pn = digitalPinToPinName(pin);
+    const PinName pn = digitalPinToPinName(pin);
     GpioPin gp;
     gp.port = get_GPIO_Port(STM_PORT(pn));
     gp.mask = 1U << STM_PIN(pn);
     return gp;
 }
 
-static inline void gpio_mode(GpioPin gp, int mode)
+static FORCE_INLINE void gpio_mode(const GpioPin gp, const int mode)
 {
-    uint8_t pos = GetLSB(gp.mask);
+    const uint8_t pos = GetLSB(gp.mask);
     writeField(gp.port->MODER, 0x3U, pos * 2, mode == OUTPUT ? 1U : 0U);
 
     if (mode == INPUT_PULLUP)
@@ -33,27 +33,27 @@ static inline void gpio_mode(GpioPin gp, int mode)
         clearField(gp.port->PUPDR, 0x3U, pos * 2);
 }
 
-static inline void gpio_write(GpioPin gp, int high)
+static FORCE_INLINE void gpio_write(const GpioPin gp, const int high)
 {
-    gp.port->BSRR = high ? gp.mask : (uint32_t)gp.mask << 16;
+    gp.port->BSRR = high ? gp.mask : static_cast<uint32_t>(gp.mask) << 16;
 }
 
-static inline int gpio_read(GpioPin gp)
+static FORCE_INLINE int gpio_read(const GpioPin gp)
 {
     return (gp.port->IDR & gp.mask) != 0;
 }
 
-static inline void gpio_high(GpioPin gp)
+static FORCE_INLINE void gpio_high(const GpioPin gp)
 {
     gp.port->BSRR = gp.mask;
 }
 
-static inline void gpio_low(GpioPin gp)
+static FORCE_INLINE void gpio_low(const GpioPin gp)
 {
-    gp.port->BSRR = (uint32_t)gp.mask << 16;
+    gp.port->BSRR = static_cast<uint32_t>(gp.mask) << 16;
 }
 
-static inline void gpio_toggle(GpioPin gp)
+static FORCE_INLINE void gpio_toggle(const GpioPin gp)
 {
     toggleMask(gp.port->ODR, gp.mask);
 }
