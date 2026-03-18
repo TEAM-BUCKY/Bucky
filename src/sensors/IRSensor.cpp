@@ -5,8 +5,6 @@
 #include "io/adc/ADC.h"
 #include "optimizations/bitboard.h"
 
-// ---- Register helpers ----
-
 static FORCE_INLINE void gpio_set_af(GPIO_TypeDef* gpio, const uint8_t pin, const uint8_t af) {
     writeField(gpio->MODER, 3U, pin * 2, 2U);
     writeField(gpio->AFR[pin >> 3], 0xFU, (pin & 7) * 4, af);
@@ -52,14 +50,10 @@ static constexpr bool is_silence_idx(const uint32_t i) {
     return i % 17 == 14;
 }
 
-// ---- Buffers ----
-
 static uint32_t tim4_dma_buf[IR_BOARD1_ENABLED ? IR_CYCLE_COUNT * 3 : 1];
 static uint32_t tim3_dma_buf[IR_BOARD2_ENABLED ? IR_CYCLE_COUNT * 4 : 1];
 static volatile uint16_t board1_adc_buffer[IR_ADC_BUFFER_SIZE];
 static volatile uint16_t board2_adc_buffer[IR_ADC_BUFFER_SIZE];
-
-// ---- Internal helpers ----
 
 static void fill_timer_dma_buf(uint32_t* buf, const uint32_t words_per_entry, const uint32_t ccr_offset) {
     for (uint32_t i = 0; i < IR_CYCLE_COUNT; i++) {

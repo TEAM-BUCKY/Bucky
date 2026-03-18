@@ -55,7 +55,7 @@ void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) 
         return;
     }
     // Map -100%-100% to an actual speed value
-    const float speed = abs(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
+    const float speed = fabsf(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
 
     if (targetSpeed < 0) {
         pwm_write(&motor.inA, 0);
@@ -72,7 +72,7 @@ constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed
 // New implementation using Hermite smoothstep
 float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time)
 {
-    const float difference = fabsf(begin - target);
+    const float difference = fabsf(begin - totalSpeed);
     const auto floatTime = static_cast<float>(time);
     if (floatTime > difference * timePer100) {
         return target;
@@ -109,7 +109,7 @@ void MotorDriver::stageMotorSpeed(const MotorPwm& motor, const float targetSpeed
         return;
     }
 
-    const float speed = abs(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
+    const float speed = fabsf(targetSpeed) * (speedRange.max - speedRange.min) / 100.0f + speedRange.min;
 
     if (targetSpeed < 0) {
         pwm_stage(&motor.inA, 0);
@@ -146,23 +146,7 @@ void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed)
 constexpr float SIN_60 = 0.8660254037844f;
 
 void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
-    const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
-    const float scaledRotation = rotation * rotationScale;
-
-    float sinDegrees, cosDegrees;
-    cordic_sin_cos(degrees * PI_F / 180, &sinDegrees, &cosDegrees);
-
-    float m1Speed = (0.5f * sinDegrees - SIN_60 * cosDegrees) * scale + scaledRotation;
-    float m2Speed = -sinDegrees * scale + scaledRotation;
-    float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
-
-    m1Speed = constrain(m1Speed, -100.0f, 100.0f);
-    m2Speed = constrain(m2Speed, -100.0f, 100.0f);
-    m3Speed = constrain(m3Speed, -100.0f, 100.0f);
-
-    drive(this->motor1, m1Speed, scale);
-    drive(this->motor2, m2Speed, scale);
-    drive(this->motor3, m3Speed, scale);
+    driveRadians(degrees * (PI_F / 180.0f), scale, rotation);
 }
 
 void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
