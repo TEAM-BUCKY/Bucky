@@ -3,7 +3,7 @@
 #include "io/cordic/cordic.h"
 #include <cmath>
 
-void MotorDriver::init(const int minSpeed, const int maxSpeed)
+void MotorDriver::init(const float minSpeed, const float maxSpeed)
 {
     speedRange.min = minSpeed;
     speedRange.max = maxSpeed;
