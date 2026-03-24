@@ -66,10 +66,17 @@ static FORCE_INLINE void i2c_dma_rx_isr(I2CDMABus* bus) {
     bus->busy = false;
 }
 
+#if defined(__cplusplus)
+#define I2C_DMA_RX_HANDLER(dma_n, ch, bus) \
+    extern "C" void DMA##dma_n##_Channel##ch##_IRQHandler(void) { \
+        i2c_dma_rx_isr(&(bus)); \
+    }
+#else
 #define I2C_DMA_RX_HANDLER(dma_n, ch, bus) \
     void DMA##dma_n##_Channel##ch##_IRQHandler(void) { \
         i2c_dma_rx_isr(&(bus)); \
     }
+#endif
 
 #ifdef __cplusplus
 }
