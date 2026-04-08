@@ -122,6 +122,9 @@ void MotorDriver::syncUpdateAllMotors() {
 }
 
 void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed) {
+    if (motor.targetSpeed == speed && motor.totalSpeed == totalSpeed) {
+        return;
+    }
     motor.beginSpeed = motor.motor.currentSpeed;
     motor.targetSpeed = speed;
     motor.totalSpeed = totalSpeed;
