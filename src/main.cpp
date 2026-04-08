@@ -1,13 +1,16 @@
 #include <Arduino.h>
 
 #include "motor/MotorDriver.h"
+#include "control/EKF.h"
+#include "control/IRBallTracker.h"
 #include "io/i2c/I2CDMA.h"
 #include "sensors/pos/Compass.h"
 #include "sensors/pos/Sonar.h"
 #include "io/cordic/cordic.h"
+#include "sensors/IRSensor.h"
 #include "tests/tests.h"
 
-// #define RUN_TEST testHoldHeading
+// #define RUN_TEST testIR
 
 MotorPin m1 = {PA8, PA9};
 MotorPin m2 = {PA10, PC10};
@@ -39,11 +42,21 @@ void setupEnvironment() {
 
     motorDriver.init();
 
+    // Initialize IR
+
+    ir_sensor_init();
+
     while (!compass.tick()) {}
 }
 
-int main() {
+[[noreturn]] int main() {
     setupEnvironment();
+
+    IRBallTracker ballTracker;
+    EKF ballEkf;
+    ballEkf.reset();
+    ballEkf.setProcessNoise(120.0f);
+    ballEkf.setMeasurementNoise(18.0f, 10.0f);
 
 
 #ifdef RUN_TEST
@@ -51,10 +64,41 @@ int main() {
 
     RUN_TEST(ctx);
 #else
-    while (true) {
-        // const float rotation = compass.computeRotation(0);
 
-        motorDriver.driveDegrees(0, 30, 0);
+    VectorXY driveVector = {0.0f, 0.0f};
+    float rotation = 0.0f;
+    uint32_t lastTick = HAL_GetTick();
+
+    while (true) {
+        const uint32_t now = HAL_GetTick();
+        const float dt = static_cast<float>(now - lastTick) * 0.001f;
+        lastTick = now;
+
+        ballEkf.predict(dt);
+
+        compass.update();
+        rotation = compass.computeRotation(0.0f);
+
+        IRBallObservation bestObservation = {};
+        for (const uint8_t board : {static_cast<uint8_t>(1), static_cast<uint8_t>(2)}) {
+            const uint16_t* raw = ir_get_buffer(board);
+            const uint32_t sensorCount = ir_get_sensor_count(board);
+            const IRBallObservation observation = ballTracker.process(raw, sensorCount);
+            if (!observation.valid) {
+                continue;
+            }
+
+            const float confidenceDelta = observation.confidence - bestObservation.confidence;
+            if (!bestObservation.valid || confidenceDelta > 1.0e-6f ||
+                (confidenceDelta > -1.0e-6f && observation.strength > bestObservation.strength)) {
+                bestObservation = observation;
+            }
+        }
+
+        ballEkf.updateObservation(bestObservation);
+
+        driveVector = {ballEkf.getX(), ballEkf.getY()};
+        motorDriver.driveVector(driveVector, rotation);
         motorDriver.updateAllMotors();
     }
 #endif

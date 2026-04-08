@@ -93,10 +93,10 @@ void Compass::processRead() {
     const auto rawX = static_cast<int16_t>(combineBytes(rx_buf[1], rx_buf[0]));
     const auto rawY = static_cast<int16_t>(combineBytes(rx_buf[3], rx_buf[2]));
 
-    const float x = rawX * 1.5f * 0.1f;
-    const float y = rawY * 1.5f * 0.1f;
+    // const float x = rawX * 1.5f * 0.1f;
+    // const float y = rawY * 1.5f * 0.1f;
 
-    heading = cordic_atan2(y, x) * 180.0f / PI_F;
+    heading = cordic_atan2(rawY, rawX) * 180.0f / PI_F;
     if (heading < 0) heading += 360.0f;
 
     if (!hasStartHeading) {

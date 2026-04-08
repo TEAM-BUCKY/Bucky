@@ -16,21 +16,21 @@ void testIR(TestContext&) {
         const uint16_t* buf1 = ir_get_buffer(1);
         const uint16_t* buf2 = ir_get_buffer(2);
 
-        if (IR_BOARD1_ENABLED) {
-            for (uint32_t s = 0; s < IR_SWEEPS_PER_CYCLE; s++) {
-                DBG_PRINT("B1 S");
-                DBG_PRINT(s);
-                DBG_PRINT(": ");
-                for (uint32_t i = 0; i < count1; i++) {
-                    if (i > 0) DBG_PRINT('\t');
-                    DBG_PRINT(buf1[s * IR_MUX_CHANNELS + i]);
-                }
-                DBG_PRINTLN();
-            }
-        }
+        // if (IR_BOARD1_ENABLED) {
+        //     for (uint32_t s = 0; s < IR_SWEEPS_PER_CYCLE; s++) {
+        //         DBG_PRINT("B1 S");
+        //         DBG_PRINT(s);
+        //         DBG_PRINT(": ");
+        //         for (uint32_t i = 0; i < count1; i++) {
+        //             if (i > 0) DBG_PRINT('\t');
+        //             DBG_PRINT(buf1[s * IR_MUX_CHANNELS + i]);
+        //         }
+        //         DBG_PRINTLN();
+        //     }
+        // }
 
         if (IR_BOARD2_ENABLED) {
-            for (uint32_t s = 0; s < IR_SWEEPS_PER_CYCLE; s++) {
+            for (uint32_t s = 0; s < 1; s++) {
                 DBG_PRINT("B2 S");
                 DBG_PRINT(s);
                 DBG_PRINT(": ");
