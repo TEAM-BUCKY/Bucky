@@ -2,6 +2,7 @@
 #include "debug.h"
 #include "../../optimizations/bitboard.h"
 #include "../../io/cordic/cordic.h"
+#include "helpers/Math.h"
 
 void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
     i2c_dma_write_reg(bus, LIS2MDL_ADDR, reg, value);
@@ -96,7 +97,7 @@ void Compass::processRead() {
     // const float x = rawX * 1.5f * 0.1f;
     // const float y = rawY * 1.5f * 0.1f;
 
-    heading = cordic_atan2(rawY, rawX) * 180.0f / PI_F;
+    heading = Math::radiansToDegrees(cordic_atan2(rawY, rawX));
     if (heading < 0) heading += 360.0f;
 
     if (!hasStartHeading) {

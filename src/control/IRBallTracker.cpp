@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include "../io/cordic/cordic.h"
+#include "helpers/Math.h"
 
 namespace
 {
@@ -116,26 +117,6 @@ void IRBallTracker::setDefaultDistanceCalibration(float minDistanceCm, float max
     lutCount_ = LUT_SIZE;
 }
 
-float IRBallTracker::wrapDegrees(const float degrees)
-{
-    float value = degrees;
-
-    while (value >= 360.0f) value -= 360.0f;
-    while (value < 0.0f) value += 360.0f;
-
-    return value;
-}
-
-float IRBallTracker::degreesToRadians(const float degrees)
-{
-    return degrees * (PI_F / 180.0f);
-}
-
-float IRBallTracker::radiansToDegrees(const float radians)
-{
-    return radians * (180.0f / PI_F);
-}
-
 float IRBallTracker::lookupDistanceFromAmplitude(const float* amplitudes, const float* distances, const uint32_t count,
                                                  const float amplitude)
 {
@@ -228,7 +209,7 @@ IRBallObservation IRBallTracker::process(const uint16_t* raw, const uint32_t sen
             top3 = value;
 
         const float w = value * value;
-        const float angle = degreesToRadians(360.0f * static_cast<float>(i) / static_cast<float>(n));
+        const float angle = Math::degreesToRadians(360.0f * static_cast<float>(i) / static_cast<float>(n));
         float s = 0.0f;
         float c = 0.0f;
         cordic_sin_cos(angle, &s, &c);
@@ -247,14 +228,14 @@ IRBallObservation IRBallTracker::process(const uint16_t* raw, const uint32_t sen
 
     obs.valid = true;
     obs.peakSensor = peakIndex;
-    obs.bearingDeg = wrapDegrees(radiansToDegrees(angleRad));
+    obs.bearingDeg = Math::wrapDegrees(Math::radiansToDegrees(angleRad));
     obs.rangeCm = rangeCm;
     obs.strength = strength;
     obs.confidence = clampf((vectorMagnitude / totalWeight) * (strength / (strength + 250.0f)), 0.0f, 1.0f);
 
     float sinB = 0.0f;
     float cosB = 0.0f;
-    cordic_sin_cos(degreesToRadians(obs.bearingDeg), &sinB, &cosB);
+    cordic_sin_cos(Math::degreesToRadians(obs.bearingDeg), &sinB, &cosB);
     obs.x = rangeCm * cosB;
     obs.y = rangeCm * sinB;
 

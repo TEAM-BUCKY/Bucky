@@ -10,6 +10,7 @@
 #include <variant_generic.h>
 #include <wiring_analog.h>
 
+#include "helpers/Math.h"
 #include "io/cordic/cordic.h"
 #include "motor/MotorDriver.h"
 
@@ -47,7 +48,7 @@ JoystickVector readJoystick()
     // Square for finer low-speed control
     const float curved = scaled * scaled;
 
-    angle = angle * (180.0f / PI_F) + ANGLE_OFFSET;
+    angle = Math::radiansToDegrees(angle) + ANGLE_OFFSET;
     if (angle < 0)   angle += 360.0f;
     if (angle >= 360) angle -= 360.0f;
 

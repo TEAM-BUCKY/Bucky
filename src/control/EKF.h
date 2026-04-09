@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "IRBallTracker.h"
+#include "helpers/Math.h"
 
 class EKF
 {
@@ -15,7 +16,7 @@ class EKF
             float vy;
         };
 
-        EKF();
+        EKF() { reset(); }
 
         void reset(float x = 0.0f, float y = 0.0f, float vx = 0.0f, float vy = 0.0f);
         void setProcessNoise(float accelStdDevCmS2);
@@ -25,18 +26,18 @@ class EKF
         void updatePolar(float rangeCm, float bearingDeg, float confidence = 1.0f);
         void updateObservation(const IRBallObservation& observation);
 
-        [[nodiscard]] State getState() const;
-        [[nodiscard]] float getX() const;
-        [[nodiscard]] float getY() const;
-        [[nodiscard]] float getVx() const;
-        [[nodiscard]] float getVy() const;
-        [[nodiscard]] float getRange() const;
-        [[nodiscard]] float getBearing() const;
-        [[nodiscard]] bool isInitialized() const;
+        [[nodiscard]] FORCE_INLINE State getState() const { return {state_[0], state_[1], state_[2], state_[3]}; }
+        [[nodiscard]] FORCE_INLINE float getX() const { return state_[0]; }
+        [[nodiscard]] FORCE_INLINE float getY() const { return state_[1]; }
+        [[nodiscard]] FORCE_INLINE float getVx() const { return state_[2]; }
+        [[nodiscard]] FORCE_INLINE float getVy() const { return state_[3]; }
+        [[nodiscard]] FORCE_INLINE float getRange() const { return sqrtf(state_[0] * state_[0] + state_[1] * state_[1]); }
+        [[nodiscard]] FORCE_INLINE float getBearing() const { return Math::radiansToDegrees(atan2f(state_[1], state_[0])); }
+        [[nodiscard]] FORCE_INLINE bool isInitialized() const { return initialized_; }
 
     private:
-        float state_[4];
-        float covariance_[4][4];
+        Math::Vec4 state_;
+        Math::Mat44 covariance_;
 
         float processAccelStdDev_ = 80.0f;
         float rangeStdDevCm_ = 20.0f;
@@ -46,11 +47,7 @@ class EKF
         float lastRangeCm_ = 0.0f;
         float lastBearingDeg_ = 0.0f;
 
-        static float wrapRadians(float radians);
-        static float radiansToDegrees(float radians);
-        static float degreesToRadians(float degrees);
-
-        void applyLinearUpdate(const float H[2][4], const float residual[2], const float R[2][2]);
+        void applyLinearUpdate(const Math::Mat24& H, const Math::Vec2& residual, const Math::Mat22& R);
         void updateRangeMeasurement(float rangeCm, float noiseCm, float confidence);
         void updateBearingMeasurement(float bearingDeg, float noiseDeg, float confidence);
         void symmetrizeCovariance();

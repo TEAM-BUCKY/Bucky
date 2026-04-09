@@ -3,73 +3,22 @@
 #include <Arduino.h>
 #include <cmath>
 
+#include "helpers/MatrixMultiplyArm.h"
+
 namespace
 {
-    constexpr float PI_F = 3.14159265358979323846f;
-
-    float clampConfidence(const float value)
+    FORCE_INLINE float clampConfidence(const float value)
     {
         return value < 0.1f ? 0.1f : (value > 1.0f ? 1.0f : value);
-    }
-
-    void zeroMatrix4(float m[4][4])
-    {
-        for (int i = 0; i < 4; ++i)
-        {
-            for (int j = 0; j < 4; ++j)
-            {
-                m[i][j] = 0.0f;
-            }
-        }
-    }
-
-    void identityMatrix4(float m[4][4])
-    {
-        zeroMatrix4(m);
-        for (int i = 0; i < 4; ++i)
-        {
-            m[i][i] = 1.0f;
-        }
-    }
-
-    void zeroMatrix2(float m[2][2])
-    {
-        for (int i = 0; i < 2; ++i)
-        {
-            for (int j = 0; j < 2; ++j)
-            {
-                m[i][j] = 0.0f;
-            }
-        }
-    }
-
-    void identityMatrix2(float m[2][2])
-    {
-        zeroMatrix2(m);
-        m[0][0] = 1.0f;
-        m[1][1] = 1.0f;
     }
 } // namespace
 
 EKF ekf;
 
-EKF::EKF()
-{
-    reset();
-}
-
 void EKF::reset(const float x, const float y, const float vx, const float vy)
 {
-    state_[0] = x;
-    state_[1] = y;
-    state_[2] = vx;
-    state_[3] = vy;
-
-    zeroMatrix4(covariance_);
-    covariance_[0][0] = 10000.0f;
-    covariance_[1][1] = 10000.0f;
-    covariance_[2][2] = 2500.0f;
-    covariance_[3][3] = 2500.0f;
+    state_ = Math::vec4(x, y, vx, vy);
+    covariance_ = Math::diag4(10000.0f, 10000.0f, 2500.0f, 2500.0f);
 
     initialized_ = true;
     lastRangeCm_ = 0.0f;
@@ -79,9 +28,7 @@ void EKF::reset(const float x, const float y, const float vx, const float vy)
 void EKF::setProcessNoise(const float accelStdDevCmS2)
 {
     if (accelStdDevCmS2 > 0.0f)
-    {
         processAccelStdDev_ = accelStdDevCmS2;
-    }
 }
 
 void EKF::setMeasurementNoise(const float rangeStdDevCm, const float bearingStdDevDeg)
@@ -92,23 +39,6 @@ void EKF::setMeasurementNoise(const float rangeStdDevCm, const float bearingStdD
         bearingStdDevDeg_ = bearingStdDevDeg;
 }
 
-float EKF::wrapRadians(float radians)
-{
-    while (radians > PI_F) radians -= 2.0f * PI_F;
-    while (radians < -PI_F) radians += 2.0f * PI_F;
-    return radians;
-}
-
-float EKF::radiansToDegrees(const float radians)
-{
-    return radians * (180.0f / PI_F);
-}
-
-float EKF::degreesToRadians(const float degrees)
-{
-    return degrees * (PI_F / 180.0f);
-}
-
 void EKF::predict(const float dt)
 {
     if (!(dt > 0.0f))
@@ -117,60 +47,30 @@ void EKF::predict(const float dt)
     state_[0] += state_[2] * dt;
     state_[1] += state_[3] * dt;
 
-    float F[4][4];
-    identityMatrix4(F);
+    Math::Mat44 F = Math::identity4();
     F[0][2] = dt;
     F[1][3] = dt;
 
-    float FP[4][4] = {};
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 4; ++k)
-            {
-                acc += F[i][k] * covariance_[k][j];
-            }
-            FP[i][j] = acc;
-        }
-    }
+    Math::Mat44 FP = {};
+    ArmMatrix::multiply4x4(F.data(), covariance_.data(), FP.data());
 
-    float newP[4][4] = {};
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 4; ++k)
-            {
-                acc += FP[i][k] * F[j][k];
-            }
-            newP[i][j] = acc;
-        }
-    }
+    Math::Mat44 newP = {};
+    ArmMatrix::multiply4x4ByTransposed(FP.data(), F.data(), newP.data());
 
     const float q = processAccelStdDev_ * processAccelStdDev_;
     const float dt2 = dt * dt;
     const float dt3 = dt2 * dt;
     const float dt4 = dt2 * dt2;
 
-    newP[0][0] += 0.25f * dt4 * q;
-    newP[0][2] += 0.5f * dt3 * q;
-    newP[1][1] += 0.25f * dt4 * q;
-    newP[1][3] += 0.5f * dt3 * q;
-    newP[2][0] += 0.5f * dt3 * q;
-    newP[2][2] += dt2 * q;
-    newP[3][1] += 0.5f * dt3 * q;
-    newP[3][3] += dt2 * q;
+    const Math::Mat44 Q = Math::mat4(
+        0.25f * dt4 * q, 0.0f,           0.5f * dt3 * q, 0.0f,
+        0.0f,            0.25f * dt4 * q, 0.0f,           0.5f * dt3 * q,
+        0.5f * dt3 * q,  0.0f,            dt2 * q,        0.0f,
+        0.0f,            0.5f * dt3 * q,  0.0f,           dt2 * q
+    );
+    Math::addMatrix4(newP, Q);
 
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            covariance_[i][j] = newP[i][j];
-        }
-    }
+    covariance_ = newP;
 
     symmetrizeCovariance();
 }
@@ -178,9 +78,7 @@ void EKF::predict(const float dt)
 void EKF::updateObservation(const IRBallObservation& observation)
 {
     if (!observation.valid)
-    {
         return;
-    }
 
     updatePolar(observation.rangeCm, observation.bearingDeg, observation.confidence);
 }
@@ -192,16 +90,11 @@ void EKF::updatePolar(const float rangeCm, const float bearingDeg, const float c
     const float r2 = state_[0] * state_[0] + state_[1] * state_[1];
     if (rangeCm > 0.0f && r2 <= 1.0e-6f)
     {
-        const float bearingRad = degreesToRadians(bearingDeg);
-        state_[0] = rangeCm * cosf(bearingRad);
-        state_[1] = rangeCm * sinf(bearingRad);
-        state_[2] = 0.0f;
-        state_[3] = 0.0f;
+        const float bearingRad = Math::degreesToRadians(bearingDeg);
+        state_ = Math::vec4(rangeCm * cosf(bearingRad), rangeCm * sinf(bearingRad), 0.0f, 0.0f);
 
-        covariance_[0][0] = rangeStdDevCm_ * rangeStdDevCm_;
-        covariance_[1][1] = rangeStdDevCm_ * rangeStdDevCm_;
-        covariance_[2][2] = 2500.0f;
-        covariance_[3][3] = 2500.0f;
+        const float rangeVariance = rangeStdDevCm_ * rangeStdDevCm_;
+        covariance_ = Math::diag4(rangeVariance, rangeVariance, 2500.0f, 2500.0f);
     }
 
     if (rangeCm > 0.0f)
@@ -224,16 +117,12 @@ void EKF::updateRangeMeasurement(const float rangeCm, const float noiseCm, const
     if (!(r > 1.0e-6f))
         return;
 
-    const float H[2][4] = {
-        {x / r, y / r, 0.0f, 0.0f},
-        {0.0f, 0.0f, 0.0f, 0.0f}
-    };
-    const float residual[2] = {rangeCm - r, 0.0f};
-    float R[2][2];
-
-    identityMatrix2(R);
-    R[0][0] = noiseCm * noiseCm;
-    R[1][1] = 1.0e12f;
+    const Math::Mat24 H = Math::mat2x4(
+        x / r, y / r, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f
+    );
+    const Math::Vec2 residual = Math::vec2(rangeCm - r, 0.0f);
+    const Math::Mat22 R = Math::diag2(noiseCm * noiseCm, 1.0e12f);
     applyLinearUpdate(H, residual, R);
 }
 
@@ -249,168 +138,59 @@ void EKF::updateBearingMeasurement(const float bearingDeg, const float noiseDeg,
         return;
 
     const float predictedBearing = atan2f(y, x);
-    const float measuredBearing = degreesToRadians(bearingDeg);
-    const float residualAngle = wrapRadians(measuredBearing - predictedBearing);
+    const float measuredBearing = Math::degreesToRadians(bearingDeg);
+    const float residualAngle = Math::wrapRadians(measuredBearing - predictedBearing);
 
-    const float H[2][4] = {
-        {-y / r2, x / r2, 0.0f, 0.0f},
-        {0.0f, 0.0f, 0.0f, 0.0f}
-    };
-    const float residual[2] = {residualAngle, 0.0f};
+    const Math::Mat24 H = Math::mat2x4(
+        -y / r2, x / r2, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 0.0f
+    );
+    const Math::Vec2 residual = Math::vec2(residualAngle, 0.0f);
 
-    float R[2][2];
-    identityMatrix2(R);
-    const float bearingNoiseRad = degreesToRadians(noiseDeg);
-    R[0][0] = bearingNoiseRad * bearingNoiseRad;
-    R[1][1] = 1.0e12f;
+    const float bearingNoiseRad = Math::degreesToRadians(noiseDeg);
+    const Math::Mat22 R = Math::diag2(bearingNoiseRad * bearingNoiseRad, 1.0e12f);
 
     applyLinearUpdate(H, residual, R);
 }
 
-void EKF::applyLinearUpdate(const float H[2][4], const float residual[2], const float R[2][2])
+void EKF::applyLinearUpdate(const Math::Mat24& H, const Math::Vec2& residual, const Math::Mat22& R)
 {
-    float PHt[4][2] = {};
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 2; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 4; ++k)
-            {
-                acc += covariance_[i][k] * H[j][k];
-            }
-            PHt[i][j] = acc;
-        }
-    }
+    Math::Mat42 PHt = {};
+    ArmMatrix::multiply4x2ByTransposed(covariance_.data(), H.data(), PHt.data());
 
-    float S[2][2] = {};
-    for (int i = 0; i < 2; ++i)
-    {
-        for (int j = 0; j < 2; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 4; ++k)
-            {
-                acc += H[i][k] * PHt[k][j];
-            }
-            S[i][j] = acc + R[i][j];
-        }
-    }
+    Math::Mat22 S = {};
+    ArmMatrix::multiply2x2(H.data(), PHt.data(), S.data());
+    Math::addMatrix2(S, R);
 
     const float det = S[0][0] * S[1][1] - S[0][1] * S[1][0];
     if (fabsf(det) < 1.0e-9f)
         return;
 
     const float invDet = 1.0f / det;
-    const float SInv[2][2] = {
-        {S[1][1] * invDet, -S[0][1] * invDet},
-        {-S[1][0] * invDet, S[0][0] * invDet}
-    };
+    const Math::Mat22 SInv = Math::mat2(
+        S[1][1] * invDet, -S[0][1] * invDet,
+        -S[1][0] * invDet, S[0][0] * invDet
+    );
 
-    float K[4][2] = {};
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 2; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 2; ++k)
-            {
-                acc += PHt[i][k] * SInv[k][j];
-            }
-            K[i][j] = acc;
-        }
-    }
+    Math::Mat42 K = {};
+    ArmMatrix::multiply4x2(PHt.data(), SInv.data(), K.data());
 
-    for (int i = 0; i < 4; ++i)
-        state_[i] += K[i][0] * residual[0] + K[i][1] * residual[1];
+    Math::Vec4 stateDelta = {};
+    ArmMatrix::multiply4x2Vector(K.data(), residual.data(), stateDelta.data());
+    Math::addVector4(state_, stateDelta);
 
-    float KH[4][4] = {};
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 2; ++k)
-            {
-                acc += K[i][k] * H[k][j];
-            }
-            KH[i][j] = acc;
-        }
-    }
+    Math::Mat44 KH = {};
+    ArmMatrix::multiply4x4From4x2And2x4(K.data(), H.data(), KH.data());
 
-    float IminusKH[4][4];
-    identityMatrix4(IminusKH);
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            IminusKH[i][j] -= KH[i][j];
-        }
-    }
+    Math::Mat44 IminusKH = {};
+    Math::subtractFromIdentity4(IminusKH, KH);
 
-    float newP[4][4] = {};
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < 4; ++k)
-            {
-                acc += IminusKH[i][k] * covariance_[k][j];
-            }
-            newP[i][j] = acc;
-        }
-    }
+    Math::Mat44 newP = {};
+    ArmMatrix::multiply4x4(IminusKH.data(), covariance_.data(), newP.data());
 
-    for (int i = 0; i < 4; ++i)
-    {
-        for (int j = 0; j < 4; ++j)
-        {
-            covariance_[i][j] = newP[i][j];
-        }
-    }
+    covariance_ = newP;
 
     symmetrizeCovariance();
-}
-
-EKF::State EKF::getState() const
-{
-    return {state_[0], state_[1], state_[2], state_[3]};
-}
-
-float EKF::getX() const
-{
-    return state_[0];
-}
-
-float EKF::getY() const
-{
-    return state_[1];
-}
-
-float EKF::getVx() const
-{
-    return state_[2];
-}
-
-float EKF::getVy() const
-{
-    return state_[3];
-}
-
-float EKF::getRange() const
-{
-    return sqrtf(state_[0] * state_[0] + state_[1] * state_[1]);
-}
-
-float EKF::getBearing() const
-{
-    return radiansToDegrees(atan2f(state_[1], state_[0]));
-}
-
-bool EKF::isInitialized() const
-{
-    return initialized_;
 }
 
 void EKF::symmetrizeCovariance()

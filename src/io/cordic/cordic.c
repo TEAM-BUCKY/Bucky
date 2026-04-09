@@ -1,6 +1,7 @@
 #include "cordic.h"
 #include <math.h>
 
+#include "helpers/Constants.h"
 #include "optimizations/optimizations.h"
 
 #define Q31_SCALE 2147483648.0f
@@ -46,7 +47,7 @@ static FORCE_INLINE float from_uq31(uint32_t x)
 
 void cordic_sin_cos(const float angle_rad, float *sin_out, float *cos_out)
 {
-    float n = angle_rad * INV_PI_F;
+    float n = angle_rad * _INV_PI_F;
     n -= 2.0f * floorf((n + 1.0f) * 0.5f);
 
     const uint32_t csr = CORDIC_FUNC_COSINE << CORDIC_CSR_FUNC_Pos
@@ -84,7 +85,7 @@ float cordic_atan2(const float y, const float x)
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos
         | CORDIC_CSR_NARGS;
 
-    return from_q31(cordic_compute2(csr, to_q31(x * inv), to_q31(y * inv))) * PI_F;
+    return from_q31(cordic_compute2(csr, to_q31(x * inv), to_q31(y * inv))) * _PI_F;
 }
 
 void cordic_atan2_mod(const float y, const float x, float *angle_out, float *mod_out)
@@ -104,7 +105,7 @@ void cordic_atan2_mod(const float y, const float x, float *angle_out, float *mod
         | CORDIC_CSR_NARGS | CORDIC_CSR_NRES;
     int32_t r1, r2;
     cordic_compute2_res2(csr, to_q31(x * inv), to_q31(y * inv), &r1, &r2);
-    *angle_out = from_q31(r1) * PI_F;
+    *angle_out = from_q31(r1) * _PI_F;
     *mod_out = from_uq31((uint32_t)r2) * max;
 }
 
@@ -127,7 +128,7 @@ float cordic_atan(const float x)
     const uint32_t csr = CORDIC_FUNC_ARCTAN << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos;
 
-    return from_q31(cordic_compute(csr, to_q31(x))) * PI_F;
+    return from_q31(cordic_compute(csr, to_q31(x))) * _PI_F;
 }
 
 void cordic_sinh_cosh(const float x, float *sinh_out, float *cosh_out)

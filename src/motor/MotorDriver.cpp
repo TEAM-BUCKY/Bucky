@@ -3,6 +3,7 @@
 #include "io/cordic/cordic.h"
 #include <cmath>
 
+#include "helpers/Math.h"
 #include "optimizations/logic.h"
 
 void MotorDriver::init(const float minSpeed, const float maxSpeed)
@@ -134,7 +135,7 @@ void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed)
 constexpr float SIN_60 = 0.8660254037844f;
 
 void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
-    driveRadians(degrees * (PI_F / 180.0f), scale, rotation);
+    driveRadians(Math::degreesToRadians(degrees), scale, rotation);
 }
 
 void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {

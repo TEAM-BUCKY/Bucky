@@ -40,9 +40,6 @@ class IRBallTracker
         uint32_t lutCount_ = LUT_SIZE;
         float thresholdRatio_ = 0.30f;
 
-        static float wrapDegrees(float degrees);
-        static float degreesToRadians(float degrees);
-        static float radiansToDegrees(float radians);
         static float lookupDistanceFromAmplitude(const float* amplitudes, const float* distances, uint32_t count, float amplitude);
 };
 

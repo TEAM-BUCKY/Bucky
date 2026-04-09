@@ -9,9 +9,6 @@
 extern "C" {
 #endif
 
-#define PI_F      3.14159265358979f
-#define INV_PI_F  (1.0f / PI_F)
-
 #define CORDIC_FUNC_COSINE  0
 #define CORDIC_FUNC_SINE    1
 #define CORDIC_FUNC_PHASE   2
