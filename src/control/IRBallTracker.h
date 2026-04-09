@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "../sensors/IRSensor.h"
 
+// A single ball estimate produced from the IR sensor ring.
 struct IRBallObservation {
     bool valid = false;
     float bearingDeg = 0.0f;
@@ -22,6 +23,7 @@ class IRBallTracker
         static constexpr uint32_t MAX_SENSORS = 32;
         static constexpr uint32_t LUT_SIZE = 24;
 
+        // Configure sensor calibration and convert raw readings into an observation.
         IRBallTracker();
 
         void reset();
@@ -33,10 +35,10 @@ class IRBallTracker
         [[nodiscard]] IRBallObservation process(const uint16_t* raw, uint32_t sensorCount) const;
 
     private:
-        float gains_[MAX_SENSORS];
-        float baselines_[MAX_SENSORS];
-        float amplitudeLut_[LUT_SIZE];
-        float distanceLut_[LUT_SIZE];
+        float gains_[MAX_SENSORS] = {};
+        float baselines_[MAX_SENSORS] = {};
+        float amplitudeLut_[LUT_SIZE] = {};
+        float distanceLut_[LUT_SIZE] = {};
         uint32_t lutCount_ = LUT_SIZE;
         float thresholdRatio_ = 0.30f;
 

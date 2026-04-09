@@ -17,6 +17,7 @@ EKF ekf;
 
 void EKF::reset(const float x, const float y, const float vx, const float vy)
 {
+    // Reset the filter state and uncertainty.
     state_ = Math::vec4(x, y, vx, vy);
     covariance_ = Math::diag4(10000.0f, 10000.0f, 2500.0f, 2500.0f);
 
@@ -90,6 +91,7 @@ void EKF::updatePolar(const float rangeCm, const float bearingDeg, const float c
     const float r2 = state_[0] * state_[0] + state_[1] * state_[1];
     if (rangeCm > 0.0f && r2 <= 1.0e-6f)
     {
+        // Bootstrap the state from the first valid polar measurement.
         const float bearingRad = Math::degreesToRadians(bearingDeg);
         state_ = Math::vec4(rangeCm * cosf(bearingRad), rangeCm * sinf(bearingRad), 0.0f, 0.0f);
 
@@ -117,6 +119,7 @@ void EKF::updateRangeMeasurement(const float rangeCm, const float noiseCm, const
     if (!(r > 1.0e-6f))
         return;
 
+    // Use the range residual to correct position.
     const Math::Mat24 H = Math::mat2x4(
         x / r, y / r, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f
@@ -141,6 +144,7 @@ void EKF::updateBearingMeasurement(const float bearingDeg, const float noiseDeg,
     const float measuredBearing = Math::degreesToRadians(bearingDeg);
     const float residualAngle = Math::wrapRadians(measuredBearing - predictedBearing);
 
+    // Use the bearing residual to correct position.
     const Math::Mat24 H = Math::mat2x4(
         -y / r2, x / r2, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f
@@ -172,19 +176,24 @@ void EKF::applyLinearUpdate(const Math::Mat24& H, const Math::Vec2& residual, co
         -S[1][0] * invDet, S[0][0] * invDet
     );
 
+    // K maps the residual into a state correction.
     Math::Mat42 K = {};
     ArmMatrix::multiply4x2(PHt.data(), SInv.data(), K.data());
 
+    // StateDelta is the correction applied to the estimate.
     Math::Vec4 stateDelta = {};
     ArmMatrix::multiply4x2Vector(K.data(), residual.data(), stateDelta.data());
     Math::addVector4(state_, stateDelta);
 
+    // KH is the Kalman gain applied to the measurement model.
     Math::Mat44 KH = {};
     ArmMatrix::multiply4x4From4x2And2x4(K.data(), H.data(), KH.data());
 
+    // IminusKH updates the covariance after the correction.
     Math::Mat44 IminusKH = {};
     Math::subtractFromIdentity4(IminusKH, KH);
 
+    // newP stores the updated covariance.
     Math::Mat44 newP = {};
     ArmMatrix::multiply4x4(IminusKH.data(), covariance_.data(), newP.data());
 

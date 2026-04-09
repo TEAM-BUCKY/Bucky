@@ -384,6 +384,11 @@ namespace Math
 		while (degrees < 0.0f) degrees += 360.0f;
 		return degrees;
 	}
+
+	FORCE_INLINE float clampf(const float value, const float minValue, const float maxValue)
+	{
+		return value < minValue ? minValue : (value > maxValue ? maxValue : value);
+	}
 } // namespace Math
 
 #endif //BUCKY_MATH_H
