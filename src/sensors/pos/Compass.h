@@ -47,22 +47,22 @@ class Compass
         float maxRotation = 25.0f;
         float deadzone = 3.0f;
 
-        void writeReg(uint8_t reg, uint8_t value) const;
-        uint8_t readReg(uint8_t reg) const;
+        void writeReg(const uint8_t reg, const uint8_t value) const { i2c_dma_write_reg(bus, LIS2MDL_ADDR, reg, value); }
+        [[nodiscard]] uint8_t readReg(const uint8_t reg) const { return i2c_dma_read_reg_blocking(bus, LIS2MDL_ADDR, reg); }
 
     public:
         void begin(I2CDMABus& busRef);
         bool tick();
-        bool isReady() const { return state == CompassState::READY; }
-        bool isFailed() const { return state == CompassState::FAILED; }
+        [[nodiscard]] bool isReady() const { return state == CompassState::READY; }
+        [[nodiscard]] bool isFailed() const { return state == CompassState::FAILED; }
 
         void update();                 // blocking: start DMA read, wait, process
-        void startRead();              // non-blocking: kick off DMA read
-        bool isReadComplete() const;   // check if DMA transfer finished
+        void startRead() { i2c_dma_read_reg(bus, LIS2MDL_ADDR, LIS2MDL_OUTX_L_REG, rx_buf, 6); }
+        [[nodiscard]] bool isReadComplete() const { return !i2c_dma_is_busy(bus);}
         void processRead();            // convert rx_buf into heading
 
-        float getHeading() const;
-        float getOffset() const;
+        [[nodiscard]] float getHeading() const { return heading; }
+        [[nodiscard]] float getOffset() const;
         float computeRotation(float targetDegrees);
         void setPD(float kp, float kd, float maxRotation, float deadzone);
         void reset();

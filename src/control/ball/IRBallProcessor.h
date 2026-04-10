@@ -2,7 +2,7 @@
 #define BUCKY_IRBALLTRACKER_H
 
 #include <cstdint>
-#include "../sensors/IRSensor.h"
+#include "../../sensors/IRSensor.h"
 
 // A single ball estimate produced from the IR sensor ring.
 struct IRBallObservation {
@@ -17,14 +17,14 @@ struct IRBallObservation {
     uint8_t peakSensor = 0;
 };
 
-class IRBallTracker
+class IRBallProcessor
 {
     public:
         static constexpr uint32_t MAX_SENSORS = 32;
         static constexpr uint32_t LUT_SIZE = 24;
 
         // Configure sensor calibration and convert raw readings into an observation.
-        IRBallTracker();
+        IRBallProcessor();
 
         void reset();
         void setThresholdRatio(float ratio);

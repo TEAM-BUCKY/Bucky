@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "Constants.h"
+#include "optimizations/logic.h"
 #include "optimizations/optimizations.h"
 
 constexpr float PI_F = _PI_F;
@@ -19,7 +20,7 @@ namespace Math
 		FORCE_INLINE float& operator[](const std::size_t i) { return v[i]; }
 		FORCE_INLINE const float& operator[](const std::size_t i) const { return v[i]; }
 		FORCE_INLINE float* data() { return v; }
-		FORCE_INLINE const float* data() const { return v; }
+		[[nodiscard]] FORCE_INLINE const float* data() const { return v; }
 	};
 
 	template <std::size_t Rows, std::size_t Cols>
@@ -30,7 +31,7 @@ namespace Math
 		FORCE_INLINE float* operator[](const std::size_t i) { return m[i]; }
 		FORCE_INLINE const float* operator[](const std::size_t i) const { return m[i]; }
 		FORCE_INLINE float (*data())[Cols] { return m; }
-		FORCE_INLINE const float (*data() const)[Cols] { return m; }
+		[[nodiscard]] FORCE_INLINE const float (*data() const)[Cols] { return m; }
 	};
 
 	using Vec2 = Vector<2>;
@@ -92,32 +93,22 @@ namespace Math
 	inline void zeroMatrix4(float m[4][4])
 	{
 		for (std::size_t i = 0; i < 4; ++i)
-		{
 			for (std::size_t j = 0; j < 4; ++j)
-			{
 				m[i][j] = 0.0f;
-			}
-		}
 	}
 
 	inline void identityMatrix4(float m[4][4])
 	{
 		zeroMatrix4(m);
 		for (std::size_t i = 0; i < 4; ++i)
-		{
 			m[i][i] = 1.0f;
-		}
 	}
 
 	inline void zeroMatrix2(float m[2][2])
 	{
 		for (std::size_t i = 0; i < 2; ++i)
-		{
 			for (std::size_t j = 0; j < 2; ++j)
-			{
 				m[i][j] = 0.0f;
-			}
-		}
 	}
 
 	inline void identityMatrix2(float m[2][2])
@@ -200,12 +191,8 @@ namespace Math
 	FORCE_INLINE void copyMatrix4(float dst[4][4], const float src[4][4])
 	{
 		for (std::size_t i = 0; i < 4; ++i)
-		{
 			for (std::size_t j = 0; j < 4; ++j)
-			{
 				dst[i][j] = src[i][j];
-			}
-		}
 	}
 
 	FORCE_INLINE void copyMatrix4(Mat44& dst, const Mat44& src)
@@ -232,36 +219,24 @@ namespace Math
 	FORCE_INLINE void addMatrix4(Mat44& lhs, const Mat44& rhs)
 	{
 		for (std::size_t i = 0; i < 4; ++i)
-		{
 			for (std::size_t j = 0; j < 4; ++j)
-			{
 				lhs[i][j] += rhs[i][j];
-			}
-		}
 	}
 
 	FORCE_INLINE void subtractFromIdentity4(float out[4][4], const float rhs[4][4])
 	{
 		identityMatrix4(out);
 		for (std::size_t i = 0; i < 4; ++i)
-		{
 			for (std::size_t j = 0; j < 4; ++j)
-			{
 				out[i][j] -= rhs[i][j];
-			}
-		}
 	}
 
 	FORCE_INLINE void subtractFromIdentity4(Mat44& out, const Mat44& rhs)
 	{
 		out = identity4();
 		for (std::size_t i = 0; i < 4; ++i)
-		{
 			for (std::size_t j = 0; j < 4; ++j)
-			{
 				out[i][j] -= rhs[i][j];
-			}
-		}
 	}
 
 	template <std::size_t Rows, std::size_t Inner, std::size_t Cols>
@@ -383,11 +358,6 @@ namespace Math
 		while (degrees > 360.0f) degrees -= 360.0f;
 		while (degrees < 0.0f) degrees += 360.0f;
 		return degrees;
-	}
-
-	FORCE_INLINE float clampf(const float value, const float minValue, const float maxValue)
-	{
-		return value < minValue ? minValue : (value > maxValue ? maxValue : value);
 	}
 } // namespace Math
 

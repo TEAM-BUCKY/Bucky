@@ -4,14 +4,6 @@
 #include "../../io/cordic/cordic.h"
 #include "helpers/Math.h"
 
-void Compass::writeReg(const uint8_t reg, const uint8_t value) const {
-    i2c_dma_write_reg(bus, LIS2MDL_ADDR, reg, value);
-}
-
-uint8_t Compass::readReg(const uint8_t reg) const {
-    return i2c_dma_read_reg_blocking(bus, LIS2MDL_ADDR, reg);
-}
-
 void Compass::begin(I2CDMABus& busRef) {
     bus = &busRef;
     state = CompassState::BOOT_WAIT;
@@ -82,20 +74,9 @@ bool Compass::tick() {
     return state == CompassState::READY || state == CompassState::FAILED;
 }
 
-void Compass::startRead() {
-    i2c_dma_read_reg(bus, LIS2MDL_ADDR, LIS2MDL_OUTX_L_REG, rx_buf, 6);
-}
-
-bool Compass::isReadComplete() const {
-    return !i2c_dma_is_busy(bus);
-}
-
 void Compass::processRead() {
     const auto rawX = static_cast<int16_t>(combineBytes(rx_buf[1], rx_buf[0]));
     const auto rawY = static_cast<int16_t>(combineBytes(rx_buf[3], rx_buf[2]));
-
-    // const float x = rawX * 1.5f * 0.1f;
-    // const float y = rawY * 1.5f * 0.1f;
 
     heading = Math::radiansToDegrees(cordic_atan2(rawY, rawX));
     if (heading < 0) heading += 360.0f;
@@ -110,10 +91,6 @@ void Compass::update() {
     startRead();
     while (!isReadComplete()) {}
     processRead();
-}
-
-float Compass::getHeading() const {
-    return heading;
 }
 
 float Compass::getOffset() const {

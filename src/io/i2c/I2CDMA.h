@@ -3,7 +3,6 @@
 
 #include <stm32g4xx.h>
 #include <stdbool.h>
-#include <stddef.h>
 
 #include "optimizations/optimizations.h"
 #include "optimizations/bitboard.h"
@@ -84,7 +83,7 @@ static FORCE_INLINE void i2c_dma_rx_isr(I2CDMABus* bus) {
 enum class I2CFrequency { FM_400K, FMP_1M, FMP_3M4 };
 
 template<I2CFrequency Freq = I2CFrequency::FM_400K>
-inline void i2c_dma_init(I2CDMABus* bus, I2C_TypeDef* i2c,
+FORCE_INLINE void i2c_dma_init(I2CDMABus* bus, I2C_TypeDef* i2c,
                           GPIO_TypeDef* sda_port, uint8_t sda_pin, uint8_t sda_af,
                           GPIO_TypeDef* scl_port, uint8_t scl_pin, uint8_t scl_af,
                           DMA_TypeDef* dma, DMA_Channel_TypeDef* dma_rx,

@@ -58,6 +58,8 @@ static volatile uint16_t board2_dma_buf[IR_BOARD2_ENABLED ? 2 * IR_ADC_BUFFER_SI
 
 static volatile uint16_t* volatile board1_ready = board1_dma_buf;
 static volatile uint16_t* volatile board2_ready = board2_dma_buf;
+static volatile uint32_t board1_frame_seq = 0;
+static volatile uint32_t board2_frame_seq = 0;
 
 static constexpr uint32_t DMA_HTIF(const uint32_t ch) { return 1U << ((ch - 1) * 4 + 2); }
 static constexpr uint32_t DMA_TCIF(const uint32_t ch) { return 1U << ((ch - 1) * 4 + 1); }
@@ -68,10 +70,12 @@ void DMA1_Channel2_IRQHandler(void) {
     const uint32_t isr = DMA1->ISR;
     if (isr & DMA_HTIF(2)) {
         board1_ready = board1_dma_buf;
+        ++board1_frame_seq;
         DMA1->IFCR = DMA_HTIF(2);
     }
     if (isr & DMA_TCIF(2)) {
         board1_ready = board1_dma_buf + IR_ADC_BUFFER_SIZE;
+        ++board1_frame_seq;
         DMA1->IFCR = DMA_TCIF(2);
     }
 }
@@ -80,10 +84,12 @@ void DMA1_Channel4_IRQHandler(void) {
     const uint32_t isr = DMA1->ISR;
     if (isr & DMA_HTIF(4)) {
         board2_ready = board2_dma_buf;
+        ++board2_frame_seq;
         DMA1->IFCR = DMA_HTIF(4);
     }
     if (isr & DMA_TCIF(4)) {
         board2_ready = board2_dma_buf + IR_ADC_BUFFER_SIZE;
+        ++board2_frame_seq;
         DMA1->IFCR = DMA_TCIF(4);
     }
 }
@@ -216,4 +222,14 @@ void ir_sensor_init() {
 
     init_board<1, IR_BOARD1_ENABLED>();
     init_board<2, IR_BOARD2_ENABLED>();
+}
+
+uint32_t ir_get_frame_sequence(const uint8_t board)
+{
+    return board == 1 ? board1_frame_seq : board2_frame_seq;
+}
+
+bool ir_has_new_frame(const uint8_t board, const uint32_t lastSequence)
+{
+    return ir_get_frame_sequence(board) != lastSequence;
 }

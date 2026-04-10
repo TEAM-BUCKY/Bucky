@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <stm32g4xx.h>
 
+#include "optimizations/optimizations.h"
+
 enum class IRBallMode : uint8_t { MODE_D, MODE_A };
 
 // Select IR ball protocol at compile time:
@@ -33,5 +35,8 @@ void ir_sensor_init();
 
 const uint16_t* ir_get_buffer(uint8_t board);
 uint32_t ir_get_sensor_count(uint8_t board);
+
+uint32_t ir_get_frame_sequence(uint8_t board);
+bool ir_has_new_frame(uint8_t board, uint32_t lastSequence);
 
 #endif // BUCKY_IRSENSOR_H

@@ -1,0 +1,95 @@
+#ifndef BUCKY_DIGITALFIELD_H
+#define BUCKY_DIGITALFIELD_H
+
+#include <cmath>
+#include <cstdint>
+
+#include "helpers/Math.h"
+
+enum BallMode : uint8_t {
+    BALL_MODE_FREE = 0,
+    BALL_MODE_FRIENDLY = 1,
+    BALL_MODE_ENEMY = 2,
+};
+
+typedef struct DigitalField_s {
+    struct {
+        float x = 0.0f;
+        float y = 0.0f;
+        float theta = 0.0f;
+        float vx = 0.0f;
+        float vy = 0.0f;
+        float omega = 0.0f;
+        float P_xy = 0.0f;
+    } self;
+
+    struct {
+        float bx = 0.0f;
+        float by = 0.0f;
+        float bvx = 0.0f;
+        float bvy = 0.0f;
+        float mu[3] = {1.0f, 0.0f, 0.0f};
+        float P_xy = 0.0f;
+        float innovation_mag = 0.0f;
+        uint8_t visible = 0;
+        uint16_t lost_ms = 0;
+    } ball;
+
+    struct {
+        float x = 0.0f;
+        float y = 0.0f;
+        float vx = 0.0f;
+        float vy = 0.0f;
+        float confidence = 0.0f;
+    } enemy[2];
+
+    struct {
+        float x_min = -1.2f;
+        float x_max = 1.2f;
+        float y_min = -0.9f;
+        float y_max = 0.9f;
+        float goal_width = 0.40f;
+    } field;
+
+    struct {
+        float x = 0.0f;
+        float y = 0.0f;
+        float theta = 0.0f;
+        uint8_t role = 0;
+        uint8_t state = 0;
+        uint8_t valid = 0;
+    } teammate;
+
+    uint32_t timestamp_ms = 0;
+} DigitalField;
+
+FORCE_INLINE float fieldClampX(const DigitalField& field, const float x)
+{
+    return clampf(x, field.field.x_min + 0.05f, field.field.x_max - 0.05f);
+}
+
+FORCE_INLINE float fieldClampY(const DigitalField& field, const float y)
+{
+    return clampf(y, field.field.y_min + 0.05f, field.field.y_max - 0.05f);
+}
+
+FORCE_INLINE void bodyToField(const float vxBody, const float vyBody, const float theta,
+                              float* vxField, float* vyField)
+{
+    const float c = cosf(theta);
+    const float s = sinf(theta);
+    *vxField = vxBody * c - vyBody * s;
+    *vyField = vxBody * s + vyBody * c;
+}
+
+FORCE_INLINE void fieldToBody(const float vxField, const float vyField, const float theta,
+                              float* vxBody, float* vyBody)
+{
+    const float c = cosf(theta);
+    const float s = sinf(theta);
+    *vxBody = vxField * c + vyField * s;
+    *vyBody = -vxField * s + vyField * c;
+}
+
+#endif // BUCKY_DIGITALFIELD_H
+

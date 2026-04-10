@@ -17,7 +17,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply4x4(const float lhs[4][4], const float rhs[4][4], float out[4][4])
+    FORCE_INLINE void multiply4x4(const float lhs[4][4], const float rhs[4][4], float out[4][4])
     {
         for (int i = 0; i < 4; ++i)
         {
@@ -28,7 +28,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply4x4ByTransposed(const float lhs[4][4], const float rhs[4][4], float out[4][4])
+    FORCE_INLINE void multiply4x4ByTransposed(const float lhs[4][4], const float rhs[4][4], float out[4][4])
     {
         for (int i = 0; i < 4; ++i)
         {
@@ -39,7 +39,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply4x2ByTransposed(const float lhs[4][4], const float rhs[2][4], float out[4][2])
+    FORCE_INLINE void multiply4x2ByTransposed(const float lhs[4][4], const float rhs[2][4], float out[4][2])
     {
         for (int i = 0; i < 4; ++i)
         {
@@ -48,7 +48,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply2x2(const float lhs[2][4], const float rhs[4][2], float out[2][2])
+    FORCE_INLINE void multiply2x2(const float lhs[2][4], const float rhs[4][2], float out[2][2])
     {
         for (int i = 0; i < 2; ++i)
         {
@@ -59,7 +59,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply4x2(const float lhs[4][2], const float rhs[2][2], float out[4][2])
+    FORCE_INLINE void multiply4x2(const float lhs[4][2], const float rhs[2][2], float out[4][2])
     {
         const float rhsCol0[2] = {rhs[0][0], rhs[1][0]};
         const float rhsCol1[2] = {rhs[0][1], rhs[1][1]};
@@ -71,7 +71,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply4x4From4x2And2x4(const float lhs[4][2], const float rhs[2][4], float out[4][4])
+    FORCE_INLINE void multiply4x4From4x2And2x4(const float lhs[4][2], const float rhs[2][4], float out[4][4])
     {
         for (int i = 0; i < 4; ++i)
         {
@@ -82,7 +82,7 @@ namespace ArmMatrix
         }
     }
 
-    void multiply4x2Vector(const float lhs[4][2], const float rhs[2], float out[4])
+    FORCE_INLINE void multiply4x2Vector(const float lhs[4][2], const float rhs[2], float out[4])
     {
         for (int i = 0; i < 4; ++i)
         {

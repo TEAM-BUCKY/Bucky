@@ -1,7 +1,7 @@
-#include "IRBallTracker.h"
+#include "IRBallProcessor.h"
 
 #include <cmath>
-#include "../io/cordic/cordic.h"
+#include "../../io/cordic/cordic.h"
 #include "helpers/Math.h"
 
 constexpr float minAmplitude = 40.0f;
@@ -15,17 +15,17 @@ FORCE_INLINE float safePow(const float value, const float exponent)
 
 FORCE_INLINE uint32_t clampSensorCount(const uint32_t sensorCount)
 {
-    return sensorCount > IRBallTracker::MAX_SENSORS ? IRBallTracker::MAX_SENSORS : sensorCount;
+    return sensorCount > IRBallProcessor::MAX_SENSORS ? IRBallProcessor::MAX_SENSORS : sensorCount;
 }
 
-IRBallTracker::IRBallTracker()
+IRBallProcessor::IRBallProcessor()
 {
     // Start with default calibration data.
     reset();
     setDefaultDistanceCalibration();
 }
 
-void IRBallTracker::reset()
+void IRBallProcessor::reset()
 {
     // Restore per-sensor gain and baseline defaults.
     for (uint32_t i = 0; i < MAX_SENSORS; ++i)
@@ -35,13 +35,13 @@ void IRBallTracker::reset()
     }
 }
 
-void IRBallTracker::setThresholdRatio(const float ratio)
+void IRBallProcessor::setThresholdRatio(const float ratio)
 {
     // Keep the threshold ratio in a safe range.
-    thresholdRatio_ = Math::clampf(ratio, 0.0f, 0.95f);
+    thresholdRatio_ = clampf(ratio, 0.0f, 0.95f);
 }
 
-void IRBallTracker::setSensorCalibration(const float* gains, const float* baselines, const uint32_t count)
+void IRBallProcessor::setSensorCalibration(const float* gains, const float* baselines, const uint32_t count)
 {
     if (gains != nullptr)
     {
@@ -64,7 +64,7 @@ void IRBallTracker::setSensorCalibration(const float* gains, const float* baseli
     }
 }
 
-void IRBallTracker::setDistanceCalibration(const float* amplitudes, const float* distances, const uint32_t count)
+void IRBallProcessor::setDistanceCalibration(const float* amplitudes, const float* distances, const uint32_t count)
 {
     // Load a custom amplitude-to-distance table.
     const uint32_t n = count > LUT_SIZE ? LUT_SIZE : count;
@@ -97,11 +97,11 @@ void IRBallTracker::setDistanceCalibration(const float* amplitudes, const float*
     }
 }
 
-void IRBallTracker::setDefaultDistanceCalibration(float minDistanceCm, float maxDistanceCm)
+void IRBallProcessor::setDefaultDistanceCalibration(float minDistanceCm, float maxDistanceCm)
 {
     // Build a simple default amplitude-to-distance curve.
-    minDistanceCm = Math::clampf(minDistanceCm, 1.0f, maxDistanceCm);
-    maxDistanceCm = Math::clampf(maxDistanceCm, minDistanceCm + 1.0f, 1000.0f);
+    minDistanceCm = clampf(minDistanceCm, 1.0f, maxDistanceCm);
+    maxDistanceCm = clampf(maxDistanceCm, minDistanceCm + 1.0f, 1000.0f);
 
     for (uint32_t i = 0; i < LUT_SIZE; ++i)
     {
@@ -116,7 +116,7 @@ void IRBallTracker::setDefaultDistanceCalibration(float minDistanceCm, float max
     lutCount_ = LUT_SIZE;
 }
 
-float IRBallTracker::lookupDistanceFromAmplitude(const float* amplitudes, const float* distances, const uint32_t count,
+float IRBallProcessor::lookupDistanceFromAmplitude(const float* amplitudes, const float* distances, const uint32_t count,
                                                  const float amplitude)
 {
     // Interpolate the distance from the calibrated amplitude table.
@@ -146,7 +146,7 @@ float IRBallTracker::lookupDistanceFromAmplitude(const float* amplitudes, const 
     return distances[count - 1];
 }
 
-IRBallObservation IRBallTracker::process(const uint16_t* raw, const uint32_t sensorCount) const
+IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t sensorCount) const
 {
     // Turn raw sweeps into a single ball observation.
     IRBallObservation obs;
@@ -235,7 +235,7 @@ IRBallObservation IRBallTracker::process(const uint16_t* raw, const uint32_t sen
     obs.bearingDeg = Math::wrapDegrees(Math::radiansToDegrees(angleRad));
     obs.rangeCm = rangeCm;
     obs.strength = strength;
-    obs.confidence = Math::clampf((vectorMagnitude / totalWeight) * (strength / (strength + 250.0f)), 0.0f, 1.0f);
+    obs.confidence = clampf((vectorMagnitude / totalWeight) * (strength / (strength + 250.0f)), 0.0f, 1.0f);
 
     // Convert the final bearing and range into Cartesian coordinates.
     float sinB = 0.0f;

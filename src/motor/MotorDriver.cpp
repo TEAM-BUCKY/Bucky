@@ -132,11 +132,11 @@ void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed)
     motor.beginTimeMs = micros();
 }
 
-constexpr float SIN_60 = 0.8660254037844f;
-
 void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
     driveRadians(Math::degreesToRadians(degrees), scale, rotation);
 }
+
+constexpr float SIN_60 = 0.8660254037844f;
 
 void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
     const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
@@ -149,9 +149,9 @@ void MotorDriver::driveRadians(const float radians, const float scale, const flo
     float m2Speed = -sinDegrees * scale + scaledRotation;
     float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
 
-    m1Speed = constrain_value(m1Speed, -100.0f, 100.0f);
-    m2Speed = constrain_value(m2Speed, -100.0f, 100.0f);
-    m3Speed = constrain_value(m3Speed, -100.0f, 100.0f);
+    m1Speed = clampf(m1Speed, -100.0f, 100.0f);
+    m2Speed = clampf(m2Speed, -100.0f, 100.0f);
+    m3Speed = clampf(m3Speed, -100.0f, 100.0f);
 
     drive(this->motor1, m1Speed, scale);
     drive(this->motor2, m2Speed, scale);

@@ -1,14 +1,19 @@
 #include <Arduino.h>
+#include <cmath>
 
 #include "motor/MotorDriver.h"
-#include "control/EKF.h"
-#include "control/IRBallTracker.h"
-#include "io/i2c/I2CDMA.h"
-#include "sensors/pos/Compass.h"
-#include "sensors/pos/Sonar.h"
-#include "io/cordic/cordic.h"
-#include "sensors/IRSensor.h"
-#include "tests/tests.h"
+#include "control/pos/EnemyTracker.h"
+#include "control/ball/IMMBallTracker.h"
+#include "control/ball/IRBallProcessor.h"
+#include <control/pos/SelfLocalizationEKF.h>
+#include <field/DigitalField.h>
+#include <io/i2c/I2CDMA.h>
+#include <sensors/pos/Compass.h>
+#include <sensors/pos/Sonar.h>
+#include <io/cordic/cordic.h>
+#include <sensors/IRSensor.h>
+#include <strategy/StrategyFSM.h>
+#include <tests/tests.h>
 
 // #define RUN_TEST testIR
 
@@ -49,14 +54,21 @@ void setupEnvironment() {
     while (!compass.tick()) {}
 }
 
+constexpr uint8_t boardIR = 1;
+
 [[noreturn]] int main() {
     setupEnvironment();
 
-    IRBallTracker ballTracker;
-    EKF ballEkf;
-    ballEkf.reset();
-    ballEkf.setProcessNoise(120.0f);
-    ballEkf.setMeasurementNoise(18.0f, 10.0f);
+    IRBallProcessor ballTracker;
+    SelfLocalizationFilter selfLoc = {};
+    IMMBallTracker ballImm;
+    EnemyTracker enemyTracker;
+    StrategyFSM strategy;
+    DigitalField field = {};
+
+    selfloc_reset(&selfLoc, 0.0f, -0.2f, 0.0f);
+    ballImm.reset();
+    enemyTracker.reset();
 
 
 #ifdef RUN_TEST
@@ -67,41 +79,99 @@ void setupEnvironment() {
 
     VectorXY driveVector = {0.0f, 0.0f};
     float rotation = 0.0f;
+    GameState_t gameState = STATE_FIND_BALL;
     uint32_t lastTick = HAL_GetTick();
+    uint32_t lastIrSeq = ir_get_frame_sequence(boardIR);
+
+    constexpr float kCmdToMps = 0.012f;
+    constexpr float kCmdToRadS = 0.02f;
 
     while (true) {
         const uint32_t now = HAL_GetTick();
         const float dt = static_cast<float>(now - lastTick) * 0.001f;
         lastTick = now;
 
-        ballEkf.predict(dt);
+        selfloc_predict(&selfLoc, dt, driveVector.x * kCmdToMps, driveVector.y * kCmdToMps, rotation * kCmdToRadS);
 
-        compass.update();
-        rotation = compass.computeRotation(0.0f);
+        if (compass.isReadComplete()) {
+            const float headingRad = Math::degreesToRadians(compass.getOffset());
+            selfloc_update_compass(&selfLoc, headingRad);
 
-        IRBallObservation bestObservation = {};
-        for (const uint8_t board : {static_cast<uint8_t>(1), static_cast<uint8_t>(2)}) {
-            const uint16_t* raw = ir_get_buffer(board);
-            const uint32_t sensorCount = ir_get_sensor_count(board);
-            const IRBallObservation observation = ballTracker.process(raw, sensorCount);
-            if (!observation.valid) {
-                continue;
+            compass.startRead();
+        }
+
+        if (sonar.isReadComplete()) {
+            auto [distance] = sonar.read();
+            for (uint8_t i = 0; i < SONAR_COUNT; ++i) {
+                const float distanceM = distance[i] * 0.01f;
+                if (const SonarUpdateResult result = selfloc_update_sonar(&selfLoc, i, distanceM); result.anomaly_detected)
+                    enemyTracker.update(result.obstacle_x, result.obstacle_y, now);
             }
+            enemyTracker.decay(now);
 
-            const float confidenceDelta = observation.confidence - bestObservation.confidence;
-            if (!bestObservation.valid || confidenceDelta > 1.0e-6f ||
-                (confidenceDelta > -1.0e-6f && observation.strength > bestObservation.strength)) {
-                bestObservation = observation;
+            sonar.startRead();
+        }
+
+        const SelfLocState selfState = selfloc_get_state(&selfLoc);
+        const EnemyState enemyState = enemyTracker.getState();
+
+        bool hasBallMeasurement = false;
+        float ballMx = 0.0f;
+        float ballMy = 0.0f;
+        float ballRangeM = 0.0f;
+
+        if (ir_has_new_frame(boardIR, lastIrSeq)) {
+            lastIrSeq = ir_get_frame_sequence(boardIR);
+            const uint16_t* raw = ir_get_buffer(boardIR);
+            const uint32_t sensorCount = ir_get_sensor_count(boardIR);
+
+            if (const IRBallObservation observation = ballTracker.process(raw, sensorCount); observation.valid) {
+                const float alpha = selfState.theta + Math::degreesToRadians(observation.bearingDeg);
+                ballRangeM = observation.rangeCm * 0.01f;
+                ballMx = selfState.x + ballRangeM * cosf(alpha);
+                ballMy = selfState.y + ballRangeM * sinf(alpha);
+                hasBallMeasurement = true;
             }
         }
 
-        ballEkf.updateObservation(bestObservation);
+        ballImm.setPossessionHint((enemyState.confidence > 0.35f) ? BALL_MODE_ENEMY : BALL_MODE_FREE);
+        ballImm.step(dt, hasBallMeasurement, ballMx, ballMy, ballRangeM, selfState, enemyState, now);
 
-        driveVector = {ballEkf.getX(), ballEkf.getY()};
+        const auto [bx, by, bvx, bvy, P, mu, innovation_mag, visible, lost_ms] = ballImm.getEstimate();
+
+        field.self.x = selfState.x;
+        field.self.y = selfState.y;
+        field.self.theta = selfState.theta;
+        field.self.vx = selfState.vx;
+        field.self.vy = selfState.vy;
+        field.self.omega = selfState.omega;
+        field.self.P_xy = selfState.P_xy;
+        field.ball.bx = bx;
+        field.ball.by = by;
+        field.ball.bvx = bvx;
+        field.ball.bvy = bvy;
+        field.ball.mu[0] = mu[0];
+        field.ball.mu[1] = mu[1];
+        field.ball.mu[2] = mu[2];
+        field.ball.P_xy = P[0][0] + P[1][1];
+        field.ball.innovation_mag = innovation_mag;
+        field.ball.visible = visible;
+        field.ball.lost_ms = lost_ms;
+        field.enemy[0].x = enemyState.x;
+        field.enemy[0].y = enemyState.y;
+        field.enemy[0].vx = enemyState.vx;
+        field.enemy[0].vy = enemyState.vy;
+        field.enemy[0].confidence = enemyState.confidence;
+        field.timestamp_ms = now;
+
+        const auto [drive, _rotation, state] = strategy.update(field, gameState, false, false);
+        gameState = state;
+
+        driveVector = drive;
+        rotation = _rotation;
+
         motorDriver.driveVector(driveVector, rotation);
         motorDriver.updateAllMotors();
     }
 #endif
-
-    return 0;
 }
