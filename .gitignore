@@ -4,6 +4,9 @@
 .vscode/launch.json
 .vscode/ipch
 
+CMakeFiles
+build
+
 .idea
 
 .claude

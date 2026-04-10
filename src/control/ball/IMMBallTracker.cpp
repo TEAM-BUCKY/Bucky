@@ -197,8 +197,9 @@ void IMMBallTracker::step(const float dt,
 
     if (possessionHint_ == BALL_MODE_FRIENDLY)
     {
-        transition[BALL_MODE_FREE][BALL_MODE_ENEMY] = 0.05f;
-        transition[BALL_MODE_FREE][BALL_MODE_FREE] = 0.945f;
+        transition[BALL_MODE_FREE][BALL_MODE_FRIENDLY] = 0.15f;
+        transition[BALL_MODE_FREE][BALL_MODE_ENEMY] = 0.005f;
+        transition[BALL_MODE_FREE][BALL_MODE_FREE] = 0.845f;
     }
 
     float cBar[3] = {};

@@ -26,12 +26,13 @@ struct StrategyCommand {
 class StrategyFSM
 {
 public:
-    StrategyCommand update(const DigitalField& field, GameState_t current, bool lineDetected, bool stuckDetected);
+    static StrategyCommand update(const DigitalField& field, GameState_t current, bool lineDetected, bool stuckDetected);
 
 private:
     static void moveToFieldPoint(const DigitalField& field, float tx, float ty, float speed,
                                  float* vxBody, float* vyBody);
-    static void computeOrbitVelocity(const DigitalField& field, float* vxBody, float* vyBody);
+    static void computeParabolicApproach(const DigitalField& field, float speed,
+                                         float* vxBody, float* vyBody);
 };
 
 #endif // BUCKY_STRATEGYFSM_H

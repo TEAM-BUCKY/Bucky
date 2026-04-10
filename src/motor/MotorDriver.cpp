@@ -84,9 +84,10 @@ float getSmoothFunction(const float begin, const float target, const float total
 {
     const float difference = fabsf(begin - totalSpeed);
     const auto floatTime = static_cast<float>(time);
-    if (floatTime > difference * timePer100) {
+    
+    if (floatTime > difference * timePer100)
         return target;
-    }
+
     const float t = floatTime / (difference * timePer100); // Normalize time to [0, 1]
     const float smoothStep = t * t * (3 - 2 * t); // Hermite smoothstep function
     return begin + smoothStep * (target - begin);

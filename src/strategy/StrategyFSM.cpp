@@ -24,29 +24,60 @@ void StrategyFSM::moveToFieldPoint(const DigitalField& field,
     fieldToBody(vFieldX, vFieldY, field.self.theta, vxBody, vyBody);
 }
 
-void StrategyFSM::computeOrbitVelocity(const DigitalField& field, float* vxBody, float* vyBody)
+void StrategyFSM::computeParabolicApproach(const DigitalField& field,
+                                           const float speed,
+                                           float* vxBody,
+                                           float* vyBody)
 {
+    // Parabolic approach: the robot curves behind the ball and scoops it
+    // into the front cage in one smooth motion.
+    //
+    // The velocity field is shaped so that:
+    //   - Lateral (vx): steers the robot toward the ball's x position
+    //   - Forward (vy): ramps up quadratically with lateral alignment
+    //
+    // When far off laterally: mostly sideways movement (getting aligned)
+    // When aligned: mostly forward movement (approaching from behind)
+    // The resulting path traces a parabola: y ∝ x²
+
     const float dx = field.ball.bx - field.self.x;
     const float dy = field.ball.by - field.self.y;
-    const float dist = sqrtf(dx * dx + dy * dy);
+    const float absDx = fabsf(dx);
 
-    const float ballToGoal = atan2f(0.9f - field.ball.by, 0.0f - field.ball.bx);
-    const float robotToBall = atan2f(dy, dx);
-    const float idealApproach = Math::wrapRadians(ballToGoal + PI_F);
-    const float err = Math::wrapRadians(robotToBall - idealApproach);
-    const float orbitSign = (err >= 0.0f) ? 1.0f : -1.0f;
+    // Lateral alignment: 1.0 when perfectly aligned, 0.0 at ≥50cm offset
+    constexpr float kAlignDist = 0.5f;
+    const float alignment = fmaxf(0.0f, 1.0f - absDx / kAlignDist);
 
-    const float tangentialWeight = fminf(fabsf(err), 1.0f);
-    const float radialWeight = 1.0f - tangentialWeight;
+    float vFieldX, vFieldY;
 
-    const float tangAngle = robotToBall + orbitSign * (0.5f * PI_F);
-    const float moveAngle = atan2f(
-        tangentialWeight * sinf(tangAngle) + radialWeight * sinf(robotToBall),
-        tangentialWeight * cosf(tangAngle) + radialWeight * cosf(robotToBall));
+    if (dy > -0.05f)
+    {
+        // Ball is ahead or roughly at the same y: parabolic approach
+        // Lateral: proportional control toward ball's x
+        vFieldX = clampf(dx * 200.0f, -speed, speed);
 
-    const float speed = fminf(dist * 220.0f, 70.0f);
-    const float vFieldX = speed * cosf(moveAngle);
-    const float vFieldY = speed * sinf(moveAngle);
+        // Forward: quadratic ramp with alignment = parabolic path shape
+        // alignment² ensures the robot only drives forward when laterally aligned
+        vFieldY = speed * alignment * alignment;
+
+        // Ensure some forward progress toward the ball even when offset
+        vFieldY = fmaxf(vFieldY, fminf(dy * 40.0f, speed * 0.3f));
+    }
+    else
+    {
+        // Ball is behind: drive backward to get behind it, then curve
+        vFieldX = clampf(dx * 150.0f, -speed * 0.7f, speed * 0.7f);
+        vFieldY = clampf(dy * 80.0f, -speed, 0.0f);
+    }
+
+    // Normalize to speed limit
+    const float vMag = sqrtf(vFieldX * vFieldX + vFieldY * vFieldY);
+    if (vMag > speed)
+    {
+        vFieldX *= speed / vMag;
+        vFieldY *= speed / vMag;
+    }
+
     fieldToBody(vFieldX, vFieldY, field.self.theta, vxBody, vyBody);
 }
 
@@ -61,9 +92,6 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
     const float dx = field.ball.bx - field.self.x;
     const float dy = field.ball.by - field.self.y;
     const float ballDist = sqrtf(dx * dx + dy * dy);
-    const float ballToGoal = atan2f(0.9f - field.ball.by, -field.ball.bx);
-    const float myToBall = atan2f(dy, dx);
-    const float approachError = fabsf(Math::wrapRadians(myToBall - ballToGoal - PI_F));
 
     if (lineDetected)
         out.state = STATE_LINE_AVOID;
@@ -74,16 +102,11 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
     else if (field.ball.mu[BALL_MODE_FRIENDLY] > 0.6f)
     {
         const float ballDistToGoal = hypotf(0.0f - field.ball.bx, 0.9f - field.ball.by);
-        if (approachError < 0.35f && ballDistToGoal < 0.6f) out.state = STATE_SHOOT;
-        else if (approachError < 0.5f) out.state = STATE_DRIBBLE;
-        else out.state = STATE_ORBIT_BALL;
+        if (ballDistToGoal < 0.6f) out.state = STATE_SHOOT;
+        else out.state = STATE_DRIBBLE;
     }
     else if (!field.ball.visible)
         out.state = (current == STATE_FIND_BALL) ? STATE_FIND_BALL : STATE_RETURN_POSITION;
-    else if (ballDist > 0.5f)
-        out.state = STATE_CHASE_BALL;
-    else if (approachError > 0.6f)
-        out.state = STATE_ORBIT_BALL;
     else
         out.state = STATE_CHASE_BALL;
 
@@ -98,23 +121,19 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
             break;
 
         case STATE_CHASE_BALL:
-            moveToFieldPoint(field, field.ball.bx, field.ball.by, 80.0f, &vxBody, &vyBody);
-            rot = clampf(Math::radiansToDegrees(Math::wrapRadians(myToBall - field.self.theta)) * 0.35f, -25.0f, 25.0f);
+            computeParabolicApproach(field, 80.0f, &vxBody, &vyBody);
             break;
 
         case STATE_ORBIT_BALL:
-            computeOrbitVelocity(field, &vxBody, &vyBody);
-            rot = clampf(Math::radiansToDegrees(Math::wrapRadians(myToBall - field.self.theta)) * 0.30f, -20.0f, 20.0f);
+            computeParabolicApproach(field, 70.0f, &vxBody, &vyBody);
             break;
 
         case STATE_DRIBBLE:
             moveToFieldPoint(field, 0.0f, 0.9f, 65.0f, &vxBody, &vyBody);
-            rot = 0.0f;
             break;
 
         case STATE_SHOOT:
             moveToFieldPoint(field, 0.0f, 0.9f, 100.0f, &vxBody, &vyBody);
-            rot = 0.0f;
             break;
 
         case STATE_DEFEND: {
@@ -127,7 +146,6 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
             const float ty = goalY + (gy / gd) * fminf(0.30f, gd * 0.4f);
             tx = clampf(tx, -0.4f, 0.4f);
             moveToFieldPoint(field, tx, ty, 60.0f, &vxBody, &vyBody);
-            rot = clampf(Math::radiansToDegrees(Math::wrapRadians(myToBall - field.self.theta)) * 0.4f, -20.0f, 20.0f);
             break;
         }
 
@@ -157,4 +175,3 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
     out.rotation = clampf(rot, -35.0f, 35.0f);
     return out;
 }
-
