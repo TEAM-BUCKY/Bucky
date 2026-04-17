@@ -2,83 +2,82 @@
 
 #include <cmath>
 
-void StrategyFSM::moveToFieldPoint(const DigitalField& field,
-                                   const float tx,
-                                   const float ty,
-                                   const float speed,
-                                   float* vxBody,
-                                   float* vyBody)
+// Command scale: cmd 100 → 100 * 0.012 = 1.2 m/s = 1200 mm/s.
+// So mm/s → cmd = mm/s / 12.0, and cmd → mm/s = cmd * 12.0.
+static constexpr float kMmSToCmd = 1.0f / 12.0f;
+static constexpr float kCmdToMmS = 12.0f;
+
+// Shared drive config — tuned once, used by all states.
+static const DriveConfig kDriveCfg = drive_default_config();
+
+namespace
 {
+float wrapAnglePi(float a)
+{
+    while (a > PI_F) a -= 2.0f * PI_F;
+    while (a < -PI_F) a += 2.0f * PI_F;
+    return a;
+}
+} // namespace
+
+void StrategyFSM::driveToFieldPoint(const DigitalField& field,
+                                    const float tx, const float ty,
+                                    const float speedMmS,
+                                    float* vxBody, float* vyBody)
+{
+    // Convert field-frame target to body-frame, in mm.
     const float dx = tx - field.self.x;
     const float dy = ty - field.self.y;
-    const float dist = sqrtf(dx * dx + dy * dy);
-    if (dist < 1.0e-4f)
-    {
-        *vxBody = 0.0f;
-        *vyBody = 0.0f;
-        return;
-    }
+    float bx, by;
+    fieldToBody(dx, dy, field.self.theta, &bx, &by);
+    bx *= 1000.0f;  // m → mm
+    by *= 1000.0f;
 
-    const float vFieldX = (dx / dist) * speed;
-    const float vFieldY = (dy / dist) * speed;
-    fieldToBody(vFieldX, vFieldY, field.self.theta, vxBody, vyBody);
+    // Use a temporary config with the requested speed.
+    DriveConfig cfg = kDriveCfg;
+    cfg.max_speed = speedMmS;
+
+    DriveCmd cmd = drive_to_waypoint(bx, by, field.sonar_mm, &cfg);
+
+    // Convert mm/s output back to command scale (0..100).
+    *vxBody = cmd.vx * kMmSToCmd;
+    *vyBody = cmd.vy * kMmSToCmd;
 }
 
-void StrategyFSM::computeParabolicApproach(const DigitalField& field,
-                                           const float speed,
-                                           float* vxBody,
-                                           float* vyBody)
+void StrategyFSM::driveToBall(const DigitalField& field,
+                               const float speedMmS,
+                               float* vxBody, float* vyBody)
 {
-    // Parabolic approach: the robot curves behind the ball and scoops it
-    // into the front cage in one smooth motion.
-    //
-    // The velocity field is shaped so that:
-    //   - Lateral (vx): steers the robot toward the ball's x position
-    //   - Forward (vy): ramps up quadratically with lateral alignment
-    //
-    // When far off laterally: mostly sideways movement (getting aligned)
-    // When aligned: mostly forward movement (approaching from behind)
-    // The resulting path traces a parabola: y ∝ x²
-
+    // Convert ball position from field frame to body frame, in mm.
     const float dx = field.ball.bx - field.self.x;
     const float dy = field.ball.by - field.self.y;
-    const float absDx = fabsf(dx);
+    float bx, by;
+    fieldToBody(dx, dy, field.self.theta, &bx, &by);
+    bx *= 1000.0f;
+    by *= 1000.0f;
 
-    // Lateral alignment: 1.0 when perfectly aligned, 0.0 at ≥50cm offset
-    constexpr float kAlignDist = 0.5f;
-    const float alignment = fmaxf(0.0f, 1.0f - absDx / kAlignDist);
+    DriveConfig cfg = kDriveCfg;
+    cfg.max_speed = speedMmS;
 
-    float vFieldX, vFieldY;
+    DriveCmd cmd = drive_to_point(bx, by, field.sonar_mm, &cfg);
 
-    if (dy > -0.05f)
-    {
-        // Ball is ahead or roughly at the same y: parabolic approach
-        // Lateral: proportional control toward ball's x
-        vFieldX = clampf(dx * 200.0f, -speed, speed);
+    *vxBody = cmd.vx * kMmSToCmd;
+    *vyBody = cmd.vy * kMmSToCmd;
+}
 
-        // Forward: quadratic ramp with alignment = parabolic path shape
-        // alignment² ensures the robot only drives forward when laterally aligned
-        vFieldY = speed * alignment * alignment;
+float StrategyFSM::computeGoalHeadingRate(const DigitalField& field,
+                                           const float gain,
+                                           const float maxRate)
+{
+    constexpr float kGoalX = 0.0f;
+    constexpr float kGoalY = 0.9f;
+    const float gx = kGoalX - field.self.x;
+    const float gy = kGoalY - field.self.y;
+    const float goalYaw = atan2f(gy, gx);
 
-        // Ensure some forward progress toward the ball even when offset
-        vFieldY = fmaxf(vFieldY, fminf(dy * 40.0f, speed * 0.3f));
-    }
-    else
-    {
-        // Ball is behind: drive backward to get behind it, then curve
-        vFieldX = clampf(dx * 150.0f, -speed * 0.7f, speed * 0.7f);
-        vFieldY = clampf(dy * 80.0f, -speed, 0.0f);
-    }
-
-    // Normalize to speed limit
-    const float vMag = sqrtf(vFieldX * vFieldX + vFieldY * vFieldY);
-    if (vMag > speed)
-    {
-        vFieldX *= speed / vMag;
-        vFieldY *= speed / vMag;
-    }
-
-    fieldToBody(vFieldX, vFieldY, field.self.theta, vxBody, vyBody);
+    const float forwardYaw = (PI_F * 0.5f) - field.self.theta;
+    const float err = wrapAnglePi(goalYaw - forwardYaw);
+    return clampf(gain * err, -maxRate, maxRate);
 }
 
 StrategyCommand StrategyFSM::update(const DigitalField& field,
@@ -89,9 +88,17 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
     StrategyCommand out = {};
     out.state = current;
 
-    const float dx = field.ball.bx - field.self.x;
-    const float dy = field.ball.by - field.self.y;
-    const float ballDist = sqrtf(dx * dx + dy * dy);
+    // Direct proximity check: ball close and in front of cage → we have it,
+    // regardless of what the IMM mode probability says.
+    const float bdx = field.ball.bx - field.self.x;
+    const float bdy = field.ball.by - field.self.y;
+    const float ballDist = hypotf(bdx, bdy);
+    float bxBody = 0.0f, byBody = 0.0f;
+    fieldToBody(bdx, bdy, field.self.theta, &bxBody, &byBody);
+    const bool ballInCage = (ballDist < 0.15f && byBody > 0.0f
+                             && fabsf(bxBody) < 0.05f);
+
+    const bool hasBall = (field.ball.mu[BALL_MODE_FRIENDLY] > 0.6f) || ballInCage;
 
     if (lineDetected)
         out.state = STATE_LINE_AVOID;
@@ -99,7 +106,7 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
         out.state = STATE_STUCK_RECOVERY;
     else if (field.ball.mu[BALL_MODE_ENEMY] > 0.6f)
         out.state = STATE_DEFEND;
-    else if (field.ball.mu[BALL_MODE_FRIENDLY] > 0.6f)
+    else if (hasBall)
     {
         const float ballDistToGoal = hypotf(0.0f - field.ball.bx, 0.9f - field.ball.by);
         if (ballDistToGoal < 0.6f) out.state = STATE_SHOOT;
@@ -108,7 +115,9 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
     else if (!field.ball.visible)
         out.state = (current == STATE_FIND_BALL) ? STATE_FIND_BALL : STATE_RETURN_POSITION;
     else
+    {
         out.state = STATE_CHASE_BALL;
+    }
 
     float vxBody = 0.0f;
     float vyBody = 0.0f;
@@ -121,19 +130,19 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
             break;
 
         case STATE_CHASE_BALL:
-            computeParabolicApproach(field, 80.0f, &vxBody, &vyBody);
-            break;
-
-        case STATE_ORBIT_BALL:
-            computeParabolicApproach(field, 70.0f, &vxBody, &vyBody);
+            // cmd 80 → 80 * 12 = 960 mm/s
+            driveToBall(field, 80.0f * kCmdToMmS, &vxBody, &vyBody);
+            rot = computeGoalHeadingRate(field, 20.0f, 30.0f);
             break;
 
         case STATE_DRIBBLE:
-            moveToFieldPoint(field, 0.0f, 0.9f, 65.0f, &vxBody, &vyBody);
+            driveToFieldPoint(field, 0.0f, 0.9f, 65.0f * kCmdToMmS, &vxBody, &vyBody);
+            rot = computeGoalHeadingRate(field, 25.0f, 30.0f);
             break;
 
         case STATE_SHOOT:
-            moveToFieldPoint(field, 0.0f, 0.9f, 100.0f, &vxBody, &vyBody);
+            driveToFieldPoint(field, 0.0f, 0.9f, 100.0f * kCmdToMmS, &vxBody, &vyBody);
+            rot = computeGoalHeadingRate(field, 30.0f, 35.0f);
             break;
 
         case STATE_DEFEND: {
@@ -145,17 +154,19 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
             float tx = goalX + (gx / gd) * fminf(0.30f, gd * 0.4f);
             const float ty = goalY + (gy / gd) * fminf(0.30f, gd * 0.4f);
             tx = clampf(tx, -0.4f, 0.4f);
-            moveToFieldPoint(field, tx, ty, 60.0f, &vxBody, &vyBody);
+            driveToFieldPoint(field, tx, ty, 60.0f * kCmdToMmS, &vxBody, &vyBody);
             break;
         }
 
         case STATE_INTERCEPT:
-            moveToFieldPoint(field, field.ball.bx + field.ball.bvx * 0.20f, field.ball.by + field.ball.bvy * 0.20f,
-                             80.0f, &vxBody, &vyBody);
+            driveToFieldPoint(field,
+                              field.ball.bx + field.ball.bvx * 0.20f,
+                              field.ball.by + field.ball.bvy * 0.20f,
+                              80.0f * kCmdToMmS, &vxBody, &vyBody);
             break;
 
         case STATE_RETURN_POSITION:
-            moveToFieldPoint(field, 0.0f, -0.3f, 50.0f, &vxBody, &vyBody);
+            driveToFieldPoint(field, 0.0f, -0.3f, 50.0f * kCmdToMmS, &vxBody, &vyBody);
             break;
 
         case STATE_LINE_AVOID:
@@ -168,6 +179,9 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
             vxBody = 0.0f;
             vyBody = -70.0f;
             rot = 25.0f;
+            break;
+
+        default:
             break;
     }
 

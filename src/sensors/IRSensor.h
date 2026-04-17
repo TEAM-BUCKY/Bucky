@@ -16,7 +16,7 @@ static constexpr auto IR_MODE = IRBallMode::MODE_A;
 
 static constexpr uint32_t IR_MUX_CHANNELS = 16;
 
-static constexpr bool IR_BOARD1_ENABLED = true;
+static constexpr bool IR_BOARD1_ENABLED = false;
 static constexpr bool IR_BOARD2_ENABLED = true;
 
 // Number of IR sensors physically connected per board (1-16).

@@ -2,9 +2,6 @@
 #include <Arduino.h>
 #include "optimizations/bitboard.h"
 
-#ifndef ADC_CR_BOOST
-#define ADC_CR_BOOST (1UL << 8)
-#endif
 
 void adc_disable(ADC_TypeDef* adc) {
     if (testMask(adc->CR, ADC_CR_ADSTART)) {
@@ -17,15 +14,12 @@ void adc_disable(ADC_TypeDef* adc) {
     }
 }
 
-void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t extsel) {
+void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t extsel, const uint32_t smp) {
     clearMask(adc->CR, ADC_CR_DEEPPWD);
 
     // Enable internal voltage regulator
     setMask(adc->CR, ADC_CR_ADVREGEN);
     delayMicroseconds(20); // tADCVREG_STUP
-
-    // Boost mode required for fADC > 20 MHz (we use 42.5 MHz)
-    setMask(adc->CR, ADC_CR_BOOST);
 
     // Single-ended calibration
     clearMask(adc->CR, ADC_CR_ADCALDIF);
@@ -45,10 +39,10 @@ void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t
 
     if (channel < 10) {
         const uint32_t shift = channel * 3;
-        writeField(adc->SMPR1, 7U, shift, 2U);
+        writeField(adc->SMPR1, 7U, shift, smp);
     } else {
         const uint32_t shift = (channel - 10) * 3;
-        writeField(adc->SMPR2, 7U, shift, 2U);
+        writeField(adc->SMPR2, 7U, shift, smp);
     }
 
     adc->ISR = ADC_ISR_ADRDY;

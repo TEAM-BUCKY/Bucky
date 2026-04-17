@@ -42,7 +42,9 @@ struct GroundTruth {
     static constexpr float GAP_HALF_WIDTH = 0.04f;
 
     // Robot always faces the enemy goal (positive Y).
-    static constexpr float HEADING_TOWARD_ENEMY_GOAL = static_cast<float>(M_PI) * 0.5f;
+    // theta = 0 aligns body +Y with field +Y (toward enemy goal),
+    // matching the strategy code convention.
+    static constexpr float HEADING_TOWARD_ENEMY_GOAL = 0.0f;
 
     void reset()
     {
@@ -97,9 +99,9 @@ struct GroundTruth {
         // --- Ball physics ---
         if (ball.captured)
         {
-            // Ball rides in the dribble gap
-            float frontX = robot.x + (ROBOT_RADIUS - GAP_DEPTH + BALL_RADIUS) * cosf(robot.theta);
-            float frontY = robot.y + (ROBOT_RADIUS - GAP_DEPTH + BALL_RADIUS) * sinf(robot.theta);
+            // Ball rides in the dribble gap (body +Y = forward)
+            float frontX = robot.x + (ROBOT_RADIUS - GAP_DEPTH + BALL_RADIUS) * (-sinf(robot.theta));
+            float frontY = robot.y + (ROBOT_RADIUS - GAP_DEPTH + BALL_RADIUS) * cosf(robot.theta);
 
             // Release if the ball would go past a wall boundary
             if (frontX > X_MAX || frontX < X_MIN || frontY > Y_MAX || frontY < Y_MIN)
@@ -119,8 +121,8 @@ struct GroundTruth {
                 ball.vy = robot.vy;
             }
 
-            // Release if the robot is moving backward
-            float forwardSpeed = robot.vx * cosf(robot.theta) + robot.vy * sinf(robot.theta);
+            // Release if the robot is moving backward (body +Y = forward)
+            float forwardSpeed = -robot.vx * sinf(robot.theta) + robot.vy * cosf(robot.theta);
             if (forwardSpeed < -0.05f)
                 ball.captured = false;
         }
@@ -166,8 +168,9 @@ struct GroundTruth {
 
         if (!ball.captured && bdist < ROBOT_RADIUS + BALL_RADIUS + 0.01f && bdist > 0.001f)
         {
-            float fwd = dbx * cosf(robot.theta) + dby * sinf(robot.theta);
-            float lat = -dbx * sinf(robot.theta) + dby * cosf(robot.theta);
+            // Project onto body +Y (forward) and body +X (lateral)
+            float fwd = -dbx * sinf(robot.theta) + dby * cosf(robot.theta);
+            float lat = dbx * cosf(robot.theta) + dby * sinf(robot.theta);
 
             if (fwd > 0.0f && fabsf(lat) < GAP_HALF_WIDTH)
             {

@@ -16,6 +16,8 @@ set(ROBOT_SOURCES
     ${BUCKY_ROOT}/src/control/ball/IMMBallTracker.cpp
     ${BUCKY_ROOT}/src/control/ball/IRBallProcessor.cpp
     ${BUCKY_ROOT}/src/strategy/StrategyFSM.cpp
+    ${BUCKY_ROOT}/src/robot/RobotBrain.cpp
+    ${BUCKY_ROOT}/src/drive/drive.c
 )
 
 # --- Simulation sources ---

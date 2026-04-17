@@ -197,9 +197,14 @@ void IMMBallTracker::step(const float dt,
 
     if (possessionHint_ == BALL_MODE_FRIENDLY)
     {
-        transition[BALL_MODE_FREE][BALL_MODE_FRIENDLY] = 0.15f;
-        transition[BALL_MODE_FREE][BALL_MODE_ENEMY] = 0.005f;
-        transition[BALL_MODE_FREE][BALL_MODE_FREE] = 0.845f;
+        // Dribbler contact confirmed — ramp FRIENDLY probability fast.
+        transition[BALL_MODE_FREE][BALL_MODE_FRIENDLY]   = 0.40f;
+        transition[BALL_MODE_FREE][BALL_MODE_ENEMY]      = 0.002f;
+        transition[BALL_MODE_FREE][BALL_MODE_FREE]       = 0.598f;
+
+        transition[BALL_MODE_ENEMY][BALL_MODE_FRIENDLY]  = 0.30f;
+        transition[BALL_MODE_ENEMY][BALL_MODE_ENEMY]     = 0.690f;
+        transition[BALL_MODE_ENEMY][BALL_MODE_FREE]      = 0.010f;
     }
 
     float cBar[3] = {};

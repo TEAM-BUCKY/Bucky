@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "io/gpio/pwm.h"
+#include "io/encoder/Encoder.h"
 
 #define MIN_SPEED 1700
 #define MAX_SPEED 3399
@@ -13,9 +14,13 @@ struct MotorPin {
 };
 
 struct MotorPwm {
-    PwmPin inA;
-    PwmPin inB;
+    PwmPin inA{};
+    PwmPin inB{};
     float currentSpeed = 0;
+};
+
+struct MotorPI {
+    float integral = 0.0f;
 };
 
 struct Motor {
@@ -24,6 +29,8 @@ struct Motor {
     float targetSpeed = 0;
     float totalSpeed = 0;
     uint32_t beginTimeMs = 0;
+    uint8_t encoderIndex = 0;
+    MotorPI pi;
 };
 
 struct VectorXY
@@ -53,6 +60,12 @@ class MotorDriver {
 
     SpeedRange speedRange = {MIN_SPEED, MAX_SPEED, (MAX_SPEED - MIN_SPEED) / 100.0f};
 
+    bool encodersEnabled = false;
+    float kP = 0.5f;
+    float kI = 0.05f;
+    float piIntegralMax = 30.0f;
+    float maxTicksPerSec[3] = {1200.0f, 1200.0f, 1200.0f};
+
     template<bool stage>
     void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
     template<bool stage>
@@ -64,7 +77,8 @@ class MotorDriver {
 public:
     MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : m1(m1), m2(m2), m3(m3) {};
 
-    void init(float minSpeed = MIN_SPEED, float maxSpeed = MAX_SPEED);
+    void init(float minSpeed = MIN_SPEED, float maxSpeed = MAX_SPEED,
+              const EncoderPins enc[3] = nullptr);
 
     void updateAllMotors();
     void syncUpdateAllMotors();
@@ -72,6 +86,7 @@ public:
     void driveDegrees(float degrees, float scale = 100, float rotation = 0);
     void driveRadians(float radians, float scale = 100, float rotation = 0);
     void driveVector(VectorXY vector, float rotation = 0);
+    void driveMotorsDirect(float m1Speed, float m2Speed, float m3Speed);
 
     void changeSpeed(const float minSpeed = MIN_SPEED, const float maxSpeed = MAX_SPEED) {
         this->speedRange.min = minSpeed;
@@ -83,7 +98,19 @@ public:
         return this->speedRange;
     }
 
+    void setPIGains(const float kp, const float ki, const float iMax) {
+        this->kP = kp;
+        this->kI = ki;
+        this->piIntegralMax = iMax;
+    }
 
+    void setMaxTicksPerSec(const float tps) {
+        maxTicksPerSec[0] = maxTicksPerSec[1] = maxTicksPerSec[2] = tps;
+    }
+
+    void setMaxTicksPerSec(const uint8_t motor, const float tps) {
+        if (motor < 3) maxTicksPerSec[motor] = tps;
+    }
 };
 
 #endif //BUCKY_MOTORDRIVER_H

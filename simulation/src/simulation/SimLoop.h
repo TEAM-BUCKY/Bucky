@@ -3,13 +3,7 @@
 
 #include "GroundTruth.h"
 #include "SensorSim.h"
-
-#include "control/pos/SelfLocalizationEKF.h"
-#include "control/pos/EnemyTracker.h"
-#include "control/ball/IMMBallTracker.h"
-#include "control/ball/IRBallProcessor.h"
-#include "strategy/StrategyFSM.h"
-#include "field/DigitalField.h"
+#include "robot/RobotBrain.h"
 
 class SimLoop {
 public:
@@ -20,8 +14,8 @@ public:
 
     GroundTruth& groundTruth() { return truth_; }
     const GroundTruth& groundTruth() const { return truth_; }
-    const DigitalField& belief() const { return field_; }
-    GameState_t gameState() const { return gameState_; }
+    const DigitalField& belief() const { return brain_.field(); }
+    GameState_t gameState() const { return brain_.gameState(); }
     const char* gameStateName() const;
 
     SensorSim& sensorSim() { return sensorSim_; }
@@ -33,17 +27,10 @@ public:
 private:
     GroundTruth truth_;
     SensorSim sensorSim_;
-
-    // Robot algorithm instances (actual code from Bucky/src/)
-    SelfLocalizationFilter selfLoc_ = {};
-    IMMBallTracker ballImm_;
-    EnemyTracker enemyTracker_;
-    StrategyFSM strategy_;
-    DigitalField field_ = {};
+    RobotBrain brain_;
 
     VectorXY driveCmd_ = {0.0f, 0.0f};
     float rotationCmd_ = 0.0f;
-    GameState_t gameState_ = STATE_FIND_BALL;
 };
 
 #endif // BUCKY_SIMLOOP_H

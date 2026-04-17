@@ -14,9 +14,16 @@ struct TestContext {
 };
 
 void testHoldHeading(const TestContext& ctx);
-void testIR(TestContext& ctx);
+void testIR(const TestContext& ctx);
 void testI2CScan(const TestContext& ctx);
 void testDriveForward(const TestContext& ctx);
 void testSonar(const TestContext& ctx);
+void testEncoder(const TestContext& ctx);
+void testCalibrate(const TestContext& ctx);
+void testADCRaw(const TestContext& ctx);
+
+// Load calibration from EEPROM (saved by testCalibrate).
+// Returns true if valid calibration was found and applied.
+bool loadCalibration(MotorDriver& md);
 
 #endif //BUCKY_TESTS_H

@@ -2,7 +2,11 @@
 #define BUCKY_STRATEGYFSM_H
 
 #include "field/DigitalField.h"
+#include "drive/drive.h"
+
+#ifndef BUCKY_MOTORDRIVER_H
 #include "motor/MotorDriver.h"
+#endif
 
 enum GameState_t : uint8_t {
     STATE_FIND_BALL = 0,
@@ -26,14 +30,17 @@ struct StrategyCommand {
 class StrategyFSM
 {
 public:
-    static StrategyCommand update(const DigitalField& field, GameState_t current, bool lineDetected, bool stuckDetected);
+    static StrategyCommand update(const DigitalField& field, GameState_t current,
+                                  bool lineDetected, bool stuckDetected);
 
 private:
-    static void moveToFieldPoint(const DigitalField& field, float tx, float ty, float speed,
-                                 float* vxBody, float* vyBody);
-    static void computeParabolicApproach(const DigitalField& field, float speed,
-                                         float* vxBody, float* vyBody);
+    // Convert field-frame target to body-frame mm and call drive_to_waypoint.
+    static void driveToFieldPoint(const DigitalField& field, float tx, float ty,
+                                  float speedMmS, float* vxBody, float* vyBody);
+    // Convert ball to body-frame mm and call drive_to_point.
+    static void driveToBall(const DigitalField& field, float speedMmS,
+                            float* vxBody, float* vyBody);
+    static float computeGoalHeadingRate(const DigitalField& field, float gain, float maxRate);
 };
 
 #endif // BUCKY_STRATEGYFSM_H
-

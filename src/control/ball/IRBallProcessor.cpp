@@ -166,7 +166,7 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
         for (uint32_t sweep = 0; sweep < IR_SWEEPS_PER_CYCLE; ++sweep)
         {
             const uint32_t idx = sweep * IR_MUX_CHANNELS + i;
-            value = fmaxf(value, raw[idx]);
+            value = fmaxf(value, 4095.0f - static_cast<float>(raw[idx]));
         }
 
         value = (value - baselines_[i]) * gains_[i];

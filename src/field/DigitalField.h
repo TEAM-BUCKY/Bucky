@@ -60,6 +60,10 @@ typedef struct DigitalField_s {
         uint8_t valid = 0;
     } teammate;
 
+    // Latest sonar wall distances in mm (front, right, back, left).
+    // Set to a large value (e.g. 2400) when no reading is available.
+    float sonar_mm[4] = {2400.0f, 2400.0f, 2400.0f, 2400.0f};
+
     uint32_t timestamp_ms = 0;
 } DigitalField;
 

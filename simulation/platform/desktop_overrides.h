@@ -13,8 +13,20 @@
 // This means ZERO modifications to the Bucky source code are needed.
 // =============================================================================
 
+#ifdef __cplusplus
 #include <cstdint>
 #include <cmath>
+#else
+#include <stdint.h>
+#include <math.h>
+#endif
+
+#include "optimizations/optimizations.h"
+
+// The following blocks use C++ syntax (enum class, constexpr, inline with
+// default args).  Pure-C translation units (e.g. drive.c) never include
+// these hardware headers, so the stubs are not needed for them.
+#ifdef __cplusplus
 
 // -----------------------------------------------------------------------------
 // Block: sensors/IRSensor.h  (needs <Arduino.h>, <stm32g4xx.h>)
@@ -61,6 +73,8 @@ struct VectorXY {
     float y;
 };
 
+#endif // __cplusplus
+
 // -----------------------------------------------------------------------------
 // Block: io/cordic/cordic.h  (ARM inline ASM + STM32 CORDIC coprocessor)
 // Provide desktop implementations using <cmath>.
@@ -71,39 +85,39 @@ struct VectorXY {
 extern "C" {
 #endif
 
-static inline void cordic_init() {}
+static FORCE_INLINE void cordic_init() {}
 
-static inline void cordic_sin_cos(float angle_rad, float* sin_out, float* cos_out)
+static FORCE_INLINE void cordic_sin_cos(const float angle_rad, float* sin_out, float* cos_out)
 {
     *sin_out = sinf(angle_rad);
     *cos_out = cosf(angle_rad);
 }
 
-static inline float cordic_sin(float angle_rad) { return sinf(angle_rad); }
-static inline float cordic_cos(float angle_rad) { return cosf(angle_rad); }
+static FORCE_INLINE float cordic_sin(const float angle_rad) { return sinf(angle_rad); }
+static FORCE_INLINE float cordic_cos(const float angle_rad) { return cosf(angle_rad); }
 
-static inline float cordic_atan2(float y, float x) { return atan2f(y, x); }
+static FORCE_INLINE float cordic_atan2(const float y, const float x) { return atan2f(y, x); }
 
-static inline void cordic_atan2_mod(float y, float x, float* angle_out, float* mod_out)
+static FORCE_INLINE void cordic_atan2_mod(const float y, const float x, float* angle_out, float* mod_out)
 {
     *angle_out = atan2f(y, x);
     *mod_out = hypotf(y, x);
 }
 
-static inline float cordic_modulus(float y, float x) { return hypotf(y, x); }
-static inline float cordic_atan(float x) { return atanf(x); }
+static FORCE_INLINE float cordic_modulus(const float y, const float x) { return hypotf(y, x); }
+static FORCE_INLINE float cordic_atan(const float x) { return atanf(x); }
 
-static inline void cordic_sinh_cosh(float x, float* sinh_out, float* cosh_out)
+static FORCE_INLINE void cordic_sinh_cosh(const float x, float* sinh_out, float* cosh_out)
 {
     *sinh_out = sinhf(x);
     *cosh_out = coshf(x);
 }
 
-static inline float cordic_sinh(float x) { return sinhf(x); }
-static inline float cordic_cosh(float x) { return coshf(x); }
-static inline float cordic_atanh(float x) { return atanhf(x); }
-static inline float cordic_ln(float x) { return logf(x); }
-static inline float cordic_sqrt(float x) { return sqrtf(x); }
+static FORCE_INLINE float cordic_sinh(const float x) { return sinhf(x); }
+static FORCE_INLINE float cordic_cosh(const float x) { return coshf(x); }
+static FORCE_INLINE float cordic_atanh(const float x) { return atanhf(x); }
+static FORCE_INLINE float cordic_ln(const float x) { return logf(x); }
+static FORCE_INLINE float cordic_sqrt(const float x) { return sqrtf(x); }
 
 #ifdef __cplusplus
 }

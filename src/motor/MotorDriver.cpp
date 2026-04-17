@@ -6,7 +6,7 @@
 #include "helpers/Math.h"
 #include "optimizations/logic.h"
 
-void MotorDriver::init(const float minSpeed, const float maxSpeed)
+void MotorDriver::init(const float minSpeed, const float maxSpeed, const EncoderPins enc[3])
 {
     speedRange.min = minSpeed;
     speedRange.max = maxSpeed;
@@ -39,10 +39,16 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed)
     pwm_sync_register(&pw3.inB);
     pwm_sync_timers();
 
+    if (enc != nullptr) {
+        for (uint8_t i = 0; i < 3; i++)
+            encoder_init(i, enc[i]);
+        encodersEnabled = true;
+    }
+
     const uint32_t currentTime = micros();
-    motor1 = {pw1, 0, 0, 0, currentTime};
-    motor2 = {pw2, 0, 0, 0, currentTime};
-    motor3 = {pw3, 0, 0, 0, currentTime};
+    motor1 = {pw1, 0, 0, 0, currentTime, 0, {}};
+    motor2 = {pw2, 0, 0, 0, currentTime, 1, {}};
+    motor3 = {pw3, 0, 0, 0, currentTime, 2, {}};
 }
 
 template<bool stage>
@@ -61,7 +67,10 @@ void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const
 template<bool stage>
 void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
 {
-    if (targetSpeed == 0)
+    // Float noise can produce tiny non-zero commands (e.g. -0.00 in logs).
+    // Treat a small band around zero as stop to avoid commanding MIN_SPEED.
+    constexpr float kStopDeadband = 0.05f;
+    if (fabsf(targetSpeed) <= kStopDeadband)
     {
         writeMotorSpeed<stage>(motor, 0, 0);
         return;
@@ -97,9 +106,32 @@ template<bool stage>
 void MotorDriver::updateMotor(Motor &motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
-    const float speed = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
-    motor.motor.currentSpeed = speed;
-    setMotorSpeed<stage>(motor.motor, speed);
+    const float setpoint = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
+    motor.motor.currentSpeed = setpoint;
+
+    if (!encodersEnabled || !encoder_is_active(motor.encoderIndex)) {
+        setMotorSpeed<stage>(motor.motor, setpoint);
+        return;
+    }
+
+    constexpr float kStopDeadband = 0.05f;
+    if (fabsf(setpoint) <= kStopDeadband) {
+        motor.pi.integral = 0.0f;
+        setMotorSpeed<stage>(motor.motor, 0.0f);
+        return;
+    }
+
+    encoder_update_speed(motor.encoderIndex);
+
+    const float ticksPerPercent = maxTicksPerSec[motor.encoderIndex] / 100.0f;
+    const float measuredSpeed = encoder_get_speed(motor.encoderIndex) / ticksPerPercent;
+    const float error = setpoint - measuredSpeed;
+
+    motor.pi.integral = clampf(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
+    const float correction = kP * error + kI * motor.pi.integral;
+
+    const float output = clampf(setpoint + correction, -100.0f, 100.0f);
+    setMotorSpeed<stage>(motor.motor, output);
 }
 
 void MotorDriver::updateAllMotors() {
@@ -111,9 +143,32 @@ void MotorDriver::updateAllMotors() {
 void MotorDriver::syncUpdateMotor(Motor& motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
-    const float speed = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
-    motor.motor.currentSpeed = speed;
-    setMotorSpeed<true>(motor.motor, speed);
+    const float setpoint = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
+    motor.motor.currentSpeed = setpoint;
+
+    if (!encodersEnabled || !encoder_is_active(motor.encoderIndex)) {
+        setMotorSpeed<true>(motor.motor, setpoint);
+        return;
+    }
+
+    constexpr float kStopDeadband = 0.05f;
+    if (fabsf(setpoint) <= kStopDeadband) {
+        motor.pi.integral = 0.0f;
+        setMotorSpeed<true>(motor.motor, 0.0f);
+        return;
+    }
+
+    encoder_update_speed(motor.encoderIndex);
+
+    const float ticksPerPercent = maxTicksPerSec[motor.encoderIndex] / 100.0f;
+    const float measuredSpeed = encoder_get_speed(motor.encoderIndex) / ticksPerPercent;
+    const float error = setpoint - measuredSpeed;
+
+    motor.pi.integral = clampf(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
+    const float correction = kP * error + kI * motor.pi.integral;
+
+    const float output = clampf(setpoint + correction, -100.0f, 100.0f);
+    setMotorSpeed<true>(motor.motor, output);
 }
 
 void MotorDriver::syncUpdateAllMotors() {
@@ -124,13 +179,14 @@ void MotorDriver::syncUpdateAllMotors() {
 }
 
 void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed) {
-    if (motor.targetSpeed == speed && motor.totalSpeed == totalSpeed) {
+    DBG_PRINTLN("Motor drive: beginSpeed=" + String(motor.beginSpeed) + ", targetSpeed=" + String(motor.targetSpeed) + ", totalSpeed=" + String(motor.totalSpeed));
+    if (motor.targetSpeed == speed && motor.totalSpeed == totalSpeed)
         return;
-    }
     motor.beginSpeed = motor.motor.currentSpeed;
     motor.targetSpeed = speed;
     motor.totalSpeed = totalSpeed;
     motor.beginTimeMs = micros();
+
 }
 
 void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
@@ -139,16 +195,17 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
 
 constexpr float SIN_60 = 0.8660254037844f;
 
+// `radians` is expected to be in radians; `driveDegrees` converts before calling this.
 void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
     const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
     const float scaledRotation = rotation * rotationScale;
 
-    float sinDegrees, cosDegrees;
-    cordic_sin_cos(radians, &sinDegrees, &cosDegrees);
+    float sinRadians, cosRadians;
+    cordic_sin_cos(radians, &sinRadians, &cosRadians);
 
-    float m1Speed = (0.5f * sinDegrees - SIN_60 * cosDegrees) * scale + scaledRotation;
-    float m2Speed = -sinDegrees * scale + scaledRotation;
-    float m3Speed = (0.5f * sinDegrees + SIN_60 * cosDegrees) * scale + scaledRotation;
+    float m1Speed = (0.5f * sinRadians - SIN_60 * cosRadians) * scale + scaledRotation;
+    float m2Speed = -sinRadians * scale + scaledRotation;
+    float m3Speed = (0.5f * sinRadians + SIN_60 * cosRadians) * scale + scaledRotation;
 
     m1Speed = clampf(m1Speed, -100.0f, 100.0f);
     m2Speed = clampf(m2Speed, -100.0f, 100.0f);
@@ -157,11 +214,30 @@ void MotorDriver::driveRadians(const float radians, const float scale, const flo
     drive(this->motor1, m1Speed, scale);
     drive(this->motor2, m2Speed, scale);
     drive(this->motor3, m3Speed, scale);
+
+    DBG_PRINTLN("");
 }
 
 void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
-    float angle, magnitude;
-    cordic_atan2_mod(vector.y, vector.x, &angle, &magnitude);
+    float angleRad, magnitude;
+    cordic_atan2_mod(vector.y, vector.x, &angleRad, &magnitude);
 
-    driveRadians(angle, magnitude, rotation);
+    driveRadians(angleRad, magnitude, rotation);
+}
+
+void MotorDriver::driveMotorsDirect(float m1Speed, float m2Speed, float m3Speed) {
+    m1Speed = clampf(m1Speed, -100.0f, 100.0f);
+    m2Speed = clampf(m2Speed, -100.0f, 100.0f);
+    m3Speed = clampf(m3Speed, -100.0f, 100.0f);
+
+    auto set = [](Motor& m, const float speed) {
+        m.beginSpeed = speed;
+        m.targetSpeed = speed;
+        m.totalSpeed = fabsf(speed);
+        m.motor.currentSpeed = speed;
+        m.beginTimeMs = micros();
+    };
+    set(motor1, m1Speed);
+    set(motor2, m2Speed);
+    set(motor3, m3Speed);
 }

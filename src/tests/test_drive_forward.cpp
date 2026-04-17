@@ -8,6 +8,7 @@ void testDriveForward(const TestContext& ctx) {
     while (true) {
         ctx.motorDriver.driveDegrees(0, 50, 0);
         ctx.motorDriver.syncUpdateAllMotors();
-        delay(10);
+
+        delay(1000);
     }
 }

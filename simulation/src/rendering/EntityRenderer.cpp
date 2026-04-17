@@ -21,9 +21,11 @@ void EntityRenderer::drawRobot(const SplitScreen& screen, const PanelRect& panel
 
     // Draw the dribble gap as a dark notch at the front.
     // The gap is a small rectangle cut into the front of the robot.
-    // Screen coords: theta direction, with y-axis inverted.
-    float fwdX = cosf(theta);
-    float fwdY = -sinf(theta);  // screen y inverted
+    // Body +Y is the forward direction (angle theta + PI/2 in field frame).
+    // Screen coords: y-axis inverted.
+    float fwdAngle = theta + static_cast<float>(M_PI) * 0.5f;
+    float fwdX = cosf(fwdAngle);
+    float fwdY = -sinf(fwdAngle);  // screen y inverted
     float latX = -fwdY;
     float latY = fwdX;
 
@@ -61,12 +63,12 @@ void EntityRenderer::drawRobot(const SplitScreen& screen, const PanelRect& panel
     float headLen = 6.0f;
     float headAngle = 0.4f;
     Vector2 left = {
-        tip.x - headLen * cosf(theta - headAngle),
-        tip.y + headLen * sinf(theta - headAngle)
+        tip.x - headLen * cosf(fwdAngle - headAngle),
+        tip.y + headLen * sinf(fwdAngle - headAngle)
     };
     Vector2 right = {
-        tip.x - headLen * cosf(theta + headAngle),
-        tip.y + headLen * sinf(theta + headAngle)
+        tip.x - headLen * cosf(fwdAngle + headAngle),
+        tip.y + headLen * sinf(fwdAngle + headAngle)
     };
     DrawTriangle(tip, right, left, WHITE);
 }
