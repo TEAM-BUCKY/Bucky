@@ -148,8 +148,17 @@ StrategyCommand StrategyFSM::update(const DigitalField& field,
         case STATE_DEFEND: {
             constexpr float goalX = 0.0f;
             constexpr float goalY = -0.9f;
-            const float gx = field.ball.bx - goalX;
-            const float gy = field.ball.by - goalY;
+            // Block along goal→ball by default. When the enemy tracker is
+            // confident, block along goal→enemy instead — the enemy's shot
+            // line matters more than wherever the loose ball currently sits.
+            float refX = field.ball.bx;
+            float refY = field.ball.by;
+            if (field.enemy[0].confidence > 0.5f) {
+                refX = field.enemy[0].x;
+                refY = field.enemy[0].y;
+            }
+            const float gx = refX - goalX;
+            const float gy = refY - goalY;
             const float gd = fmaxf(0.05f, hypotf(gx, gy));
             float tx = goalX + (gx / gd) * fminf(0.30f, gd * 0.4f);
             const float ty = goalY + (gy / gd) * fminf(0.30f, gd * 0.4f);

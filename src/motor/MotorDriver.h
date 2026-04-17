@@ -21,6 +21,7 @@ struct MotorPwm {
 
 struct MotorPI {
     float integral = 0.0f;
+    uint32_t lastUpdateUs = 0;   // micros() at last PI update, 0 = uninit
 };
 
 struct Motor {
@@ -66,6 +67,10 @@ class MotorDriver {
     float piIntegralMax = 30.0f;
     float maxTicksPerSec[3] = {1200.0f, 1200.0f, 1200.0f};
 
+    float dirScale[12]     = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    float dirOffsetDeg[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool  dirCalEnabled    = false;
+
     template<bool stage>
     void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
     template<bool stage>
@@ -105,12 +110,20 @@ public:
     }
 
     void setMaxTicksPerSec(const float tps) {
+        // Reject implausible values; leave the existing defaults in place so the
+        // PI loop's ticksPerPercent = tps/100 can never be zero or negative.
+        if (tps < 1.0f || tps > 100000.0f) return;
         maxTicksPerSec[0] = maxTicksPerSec[1] = maxTicksPerSec[2] = tps;
     }
 
     void setMaxTicksPerSec(const uint8_t motor, const float tps) {
-        if (motor < 3) maxTicksPerSec[motor] = tps;
+        if (motor >= 3) return;
+        if (tps < 1.0f || tps > 100000.0f) return;
+        maxTicksPerSec[motor] = tps;
     }
+
+    void setDirectionCalibration(const float scale[12], const float offsetDeg[12]);
+    void enableDirectionCalibration(const bool on) { dirCalEnabled = on; }
 };
 
 #endif //BUCKY_MOTORDRIVER_H

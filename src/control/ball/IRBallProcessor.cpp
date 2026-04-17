@@ -1,7 +1,6 @@
 #include "IRBallProcessor.h"
 
 #include <cmath>
-#include "../../io/cordic/cordic.h"
 #include "helpers/Math.h"
 
 constexpr float minAmplitude = 40.0f;
@@ -27,12 +26,19 @@ IRBallProcessor::IRBallProcessor()
 
 void IRBallProcessor::reset()
 {
-    // Restore per-sensor gain and baseline defaults.
+    // Restore per-sensor gain and baseline defaults. Board 2's idle noise floor
+    // sits around 70-90; a baseline of 100 filters that out without swallowing
+    // real ball pulses (which typically sit at several hundred to a few thousand).
     for (uint32_t i = 0; i < MAX_SENSORS; ++i)
     {
         gains_[i] = 1.0f;
-        baselines_[i] = 0.0f;
+        baselines_[i] = 100.0f;
     }
+}
+
+void IRBallProcessor::setChannelOffset(const uint32_t offset)
+{
+    channelOffset_ = offset % IR_MUX_CHANNELS;
 }
 
 void IRBallProcessor::setThresholdRatio(const float ratio)
@@ -162,11 +168,15 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
     uint8_t peakIndex = 0;
     for (uint32_t i = 0; i < n; ++i)
     {
+        // Board 2 convention: raw ADC IS the pulse amplitude (0 = idle,
+        // higher = stronger IR return). Take the max across sweeps.
+        // channelOffset_ remaps physical sensor i to its actual mux slot.
+        const uint32_t bufCh = (i + channelOffset_) % IR_MUX_CHANNELS;
         float value = 0.0f;
         for (uint32_t sweep = 0; sweep < IR_SWEEPS_PER_CYCLE; ++sweep)
         {
-            const uint32_t idx = sweep * IR_MUX_CHANNELS + i;
-            value = fmaxf(value, 4095.0f - static_cast<float>(raw[idx]));
+            const uint32_t idx = sweep * IR_MUX_CHANNELS + bufCh;
+            value = fmaxf(value, static_cast<float>(raw[idx]));
         }
 
         value = (value - baselines_[i]) * gains_[i];
@@ -213,9 +223,11 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
         const float w = value * value;
         const float angle = Math::degreesToRadians(360.0f * static_cast<float>(i) / static_cast<float>(n));
         // Convert each active sensor into a unit vector contribution.
-        float s = 0.0f;
-        float c = 0.0f;
-        cordic_sin_cos(angle, &s, &c);
+        // Use hardware FPU sinf/cosf rather than the CORDIC peripheral —
+        // the CORDIC path was silently returning (0, 0) from this call site,
+        // collapsing every bearing to 0 deg.
+        const float s = sinf(angle);
+        const float c = cosf(angle);
         sx += w * c;
         sy += w * s;
         totalWeight += w;
@@ -224,7 +236,7 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
     if (!(totalWeight > 0.0f))
         return obs;
 
-    const float angleRad = cordic_atan2(sy, sx);
+    const float angleRad = atan2f(sy, sx);
     const float vectorMagnitude = sqrtf(sx * sx + sy * sy);
     // Average the strongest sensors for a rough signal strength.
     const float strength = (top1 + top2 + top3) / 3.0f;
@@ -238,9 +250,9 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
     obs.confidence = clampf((vectorMagnitude / totalWeight) * (strength / (strength + 250.0f)), 0.0f, 1.0f);
 
     // Convert the final bearing and range into Cartesian coordinates.
-    float sinB = 0.0f;
-    float cosB = 0.0f;
-    cordic_sin_cos(Math::degreesToRadians(obs.bearingDeg), &sinB, &cosB);
+    const float bearingRad = Math::degreesToRadians(obs.bearingDeg);
+    const float sinB = sinf(bearingRad);
+    const float cosB = cosf(bearingRad);
     obs.x = rangeCm * cosB;
     obs.y = rangeCm * sinB;
 

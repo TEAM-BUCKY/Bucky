@@ -51,17 +51,17 @@ static constexpr bool is_silence_idx(const uint32_t i) {
 }
 
 // ---- Timer parameters (gated mode, Board 2) ----
-// TIM2 master: 1 MHz tick → 925 µs cycle, 24 µs gate window
-// TIM3 slave:  170 MHz → 16 pulses @ 1.5 µs during gate window
+// TIM2 master: 1 MHz tick → 925 µs cycle, 240 µs gate window
+// TIM3 slave:  170 MHz → 16 pulses @ 15 µs during gate window
 static constexpr uint32_t IR_GATE_PSC = 169;   // 170 MHz / 170 = 1 MHz
 static constexpr uint32_t IR_GATE_ARR = 924;   // 925 µs total period
-static constexpr uint32_t IR_GATE_CCR = 96;    // 96 µs gate HIGH
-static constexpr uint32_t IR_CLK_ARR  = 1019;  // 1020 / 170 MHz = 6 µs
-static constexpr uint32_t IR_CLK_CCR  = 509;   // 50% duty
+static constexpr uint32_t IR_GATE_CCR = 240;   // 240 µs gate HIGH
+static constexpr uint32_t IR_CLK_ARR  = 2549;  // 2550 / 170 MHz = 15 µs
+static constexpr uint32_t IR_CLK_CCR  = 1274;  // 50% duty
 
 static uint32_t tim4_dma_buf[IR_BOARD1_ENABLED ? IR_CYCLE_COUNT * 3 : 1];
 
-// Board 2 gated mode: accumulate IR_SWEEPS_PER_CYCLE gate scans (8 × 16 = 128)
+// Board 2 gated mode: accumulate IR_SWEEPS_PER_CYCLE gate scans
 // so IRBallProcessor can take max across sweeps, matching Board 1's design.
 static constexpr uint32_t IR_BOARD2_ADC_HALF = IR_SWEEPS_PER_CYCLE * IR_MUX_CHANNELS;
 
@@ -317,4 +317,57 @@ uint32_t ir_get_frame_sequence(const uint8_t board)
 bool ir_has_new_frame(const uint8_t board, const uint32_t lastSequence)
 {
     return ir_get_frame_sequence(board) != lastSequence;
+}
+
+static uint8_t board1_channel_offset = 0;
+static uint8_t board2_channel_offset = 0;
+
+uint8_t ir_get_channel_offset(const uint8_t board)
+{
+    return board == 1 ? board1_channel_offset : board2_channel_offset;
+}
+
+uint8_t ir_calibrate_channels(const uint8_t board, const uint32_t frames)
+{
+    const uint32_t sensorCount = ir_get_sensor_count(board);
+    if (sensorCount == 0 || sensorCount >= IR_MUX_CHANNELS) {
+        return 0;
+    }
+    const uint32_t unconnectedCount = IR_MUX_CHANNELS - sensorCount;
+
+    uint32_t idleSum[IR_MUX_CHANNELS] = {0};
+    uint32_t lastSeq = ir_get_frame_sequence(board);
+    uint32_t collected = 0;
+    while (collected < frames) {
+        if (!ir_has_new_frame(board, lastSeq)) continue;
+        lastSeq = ir_get_frame_sequence(board);
+        const uint16_t* raw = ir_get_buffer(board);
+        for (uint32_t ch = 0; ch < IR_MUX_CHANNELS; ++ch) {
+            uint16_t m = 0;
+            for (uint32_t sweep = 0; sweep < IR_SWEEPS_PER_CYCLE; ++sweep) {
+                const uint16_t v = raw[sweep * IR_MUX_CHANNELS + ch];
+                if (v > m) m = v;
+            }
+            idleSum[ch] += m;
+        }
+        ++collected;
+    }
+
+    // Find N consecutive (wrapping) slots with the lowest combined signal;
+    // those are the unconnected mux channels. Physical sensor 0 lives
+    // immediately after that cluster.
+    uint32_t bestSum = UINT32_MAX;
+    uint8_t bestStart = 0;
+    for (uint8_t s = 0; s < IR_MUX_CHANNELS; ++s) {
+        uint32_t sum = 0;
+        for (uint32_t k = 0; k < unconnectedCount; ++k) {
+            sum += idleSum[(s + k) % IR_MUX_CHANNELS];
+        }
+        if (sum < bestSum) { bestSum = sum; bestStart = s; }
+    }
+    const uint8_t offset = static_cast<uint8_t>(
+        (bestStart + unconnectedCount) % IR_MUX_CHANNELS);
+    if (board == 1) board1_channel_offset = offset;
+    else            board2_channel_offset = offset;
+    return offset;
 }

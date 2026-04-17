@@ -23,6 +23,14 @@ bool Compass::tick() {
             DBG_PRINT("Compass WHO_AM_I: 0x");
             DBG_PRINTLN(id, HEX);
             if (id != 0x40) {
+                // Cold-boot I2C sometimes returns 0x00 on the first one or two
+                // reads; stay in BOOT_WAIT and retry a few times before giving up.
+                if (whoAmIRetries < 5) {
+                    whoAmIRetries++;
+                    state = CompassState::BOOT_WAIT;
+                    stateStart = millis();
+                    break;
+                }
                 state = CompassState::FAILED;
                 break;
             }
@@ -62,6 +70,11 @@ bool Compass::tick() {
                 if (sampleCount >= 10) {
                     startHeading = heading;
                     hasStartHeading = true;
+                    // Prime PD state so the first computeRotation() after boot
+                    // doesn't see a multi-second dt or a stale derivative.
+                    lastTime = millis();
+                    lastError = 0;
+                    lastDerivative = 0;
                     state = CompassState::READY;
                 }
             }
@@ -75,22 +88,31 @@ bool Compass::tick() {
 }
 
 void Compass::processRead() {
-    const auto rawX = static_cast<int16_t>(combineBytes(rx_buf[1], rx_buf[0]));
-    const auto rawY = static_cast<int16_t>(combineBytes(rx_buf[3], rx_buf[2]));
+    lastRawX = static_cast<int16_t>(combineBytes(rx_buf[1], rx_buf[0]));
+    lastRawY = static_cast<int16_t>(combineBytes(rx_buf[3], rx_buf[2]));
+    lastRawZ = static_cast<int16_t>(combineBytes(rx_buf[5], rx_buf[4]));
 
-    heading = Math::radiansToDegrees(cordic_atan2(rawY, rawX));
+    const float cx = (static_cast<float>(lastRawX) - offX) * scaleX;
+    const float cy = (static_cast<float>(lastRawY) - offY) * scaleY;
+
+    heading = Math::radiansToDegrees(cordic_atan2(cy, cx));
     if (heading < 0) heading += 360.0f;
-
-    if (!hasStartHeading) {
-        startHeading = heading;
-        hasStartHeading = true;
-    }
 }
 
-void Compass::update() {
+void Compass::setCalibration(const float ox, const float oy, const float oz,
+                             const float sx, const float sy, const float sz) {
+    offX = ox; offY = oy; offZ = oz;
+    scaleX = sx; scaleY = sy; scaleZ = sz;
+}
+
+bool Compass::update(const uint32_t timeoutMs) {
     startRead();
-    while (!isReadComplete()) {}
+    const uint32_t start = millis();
+    while (!isReadComplete()) {
+        if (millis() - start > timeoutMs) return false;
+    }
     processRead();
+    return true;
 }
 
 float Compass::getOffset() const {
@@ -110,10 +132,15 @@ float Compass::computeRotation(const float targetDegrees) {
     if (error > 180.0f) error -= 360.0f;
     if (error < -180.0f) error += 360.0f;
 
+    // Dirty-D: one-pole IIR on the derivative to keep magnetometer noise
+    // (±0.5-1°) from driving the motors at the rated kd.
+    const float rawDeriv = (dtS > 0) ? (error - lastError) / dtS : 0;
+    const float alpha    = (dtS > 0) ? dtS / (derivTau + dtS) : 1.0f;
+    lastDerivative      += alpha * (rawDeriv - lastDerivative);
+
     float rotation = 0;
     if (fabsf(error) > deadzone) {
-        const float derivative = (dtS > 0) ? (error - lastError) / dtS : 0;
-        rotation = constrain(-error * kp - derivative * kd, -maxRotation, maxRotation);
+        rotation = constrain(-error * kp - lastDerivative * kd, -maxRotation, maxRotation);
     }
     lastError = error;
 
@@ -130,5 +157,6 @@ void Compass::setPD(const float kp_, const float kd_, const float maxRotation_, 
 void Compass::reset() {
     startHeading = heading;
     lastError = 0;
+    lastDerivative = 0;
     lastTime = millis();
 }

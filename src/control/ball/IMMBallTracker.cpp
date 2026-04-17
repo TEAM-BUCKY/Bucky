@@ -299,7 +299,9 @@ void IMMBallTracker::step(const float dt,
     else
     {
         out_.visible = 0;
-        out_.lost_ms = static_cast<uint16_t>(nowMs - lastSeenMs_);
+        const uint32_t lostDelta = nowMs - lastSeenMs_;
+        out_.lost_ms = lostDelta > 0xFFFFu ? 0xFFFFu
+                                           : static_cast<uint16_t>(lostDelta);
 
         const float inflate = (out_.lost_ms > 300U) ? 10.0f : 3.0f;
         for (auto & [x, P] : mode_)

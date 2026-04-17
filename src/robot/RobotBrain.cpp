@@ -85,7 +85,7 @@ BrainCommand RobotBrain::tick(const BrainSensors& s)
 
     // --- Strategy ---
     auto [drive, rotation, state] = strategy_.update(field_, gameState_,
-                                                     false, false);
+                                                     false, s.stuck_detected);
     gameState_    = state;
     lastDrive_    = drive;
     lastRotation_ = rotation;

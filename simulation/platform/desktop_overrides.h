@@ -41,9 +41,9 @@ static constexpr uint32_t IR_MUX_CHANNELS = 16;
 static constexpr bool IR_BOARD1_ENABLED = true;
 static constexpr bool IR_BOARD2_ENABLED = true;
 static constexpr uint32_t IR_BOARD1_SENSOR_COUNT = 16;
-static constexpr uint32_t IR_BOARD2_SENSOR_COUNT = 16;
+static constexpr uint32_t IR_BOARD2_SENSOR_COUNT = 12;
 static constexpr uint32_t IR_SWEEPS_PER_CYCLE =
-    IR_MODE == IRBallMode::MODE_D ? 1 : 8;
+    IR_MODE == IRBallMode::MODE_D ? 1 : 16;
 static constexpr uint32_t IR_ADC_BUFFER_SIZE =
     IR_SWEEPS_PER_CYCLE * IR_MUX_CHANNELS;
 

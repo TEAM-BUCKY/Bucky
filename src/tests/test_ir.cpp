@@ -63,7 +63,7 @@ void testIR(const TestContext& ctx) {
 
         const uint16_t* b2 = ir_get_buffer(2);
 
-        // Show max across 8 sweeps per channel (same logic as IRBallProcessor)
+        // Show max across sweeps per channel (same logic as IRBallProcessor)
         DBG_PRINT("B2 MAX: ");
         for (uint32_t ch = 0; ch < count2; ch++) {
             uint16_t maxVal = 0;

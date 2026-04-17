@@ -34,6 +34,10 @@ struct BrainSensors {
 
     // Possession hint from dribbler contact sensor / simulation capture flag
     BallMode possession_hint;
+
+    // External stuck detection (hardware: encoder watchdog; sim: ground truth
+    // or left false). Propagates directly into StrategyFSM.
+    bool stuck_detected;
 };
 
 // Drive command output from the brain.

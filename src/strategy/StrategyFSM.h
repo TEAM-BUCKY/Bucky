@@ -11,7 +11,6 @@
 enum GameState_t : uint8_t {
     STATE_FIND_BALL = 0,
     STATE_CHASE_BALL,
-    STATE_ORBIT_BALL,
     STATE_DRIBBLE,
     STATE_SHOOT,
     STATE_DEFEND,
