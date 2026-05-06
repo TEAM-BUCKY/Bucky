@@ -62,6 +62,10 @@ void SimLoop::step(float dt)
     bs.ball_field_y = sensors.ballFieldY;
     bs.ball_range_m = sensors.ballRangeM;
 
+    // Sim has no DMA channel rotation to calibrate for, so the IR-boot
+    // workaround is always considered locked.
+    bs.ir_s0_locked = true;
+
     // Use ground truth capture flag as possession hint — simulates
     // a dribbler contact sensor (IR break-beam, motor current, etc.)
     if (truth_.ball.captured)

@@ -38,6 +38,13 @@ struct BrainSensors {
     // External stuck detection (hardware: encoder watchdog; sim: ground truth
     // or left false). Propagates directly into StrategyFSM.
     bool stuck_detected;
+
+    // True once IRBallProcessor has seen its first confident reading and
+    // rotated the channel offset so that sensor is index 0. Until then,
+    // StrategyFSM stays in STATE_FIND_BALL (drive forward) on "ball not
+    // visible" instead of retreating to RETURN_POSITION. Hardware sets
+    // this from IRBallProcessor::isS0Locked(); sim sets it to true.
+    bool ir_s0_locked;
 };
 
 // Drive command output from the brain.
@@ -67,7 +74,6 @@ private:
     SelfLocalizationFilter selfLoc_ = {};
     IMMBallTracker ballImm_;
     EnemyTracker enemyTracker_;
-    StrategyFSM strategy_;
     DigitalField field_ = {};
 
     VectorXY lastDrive_ = {0.0f, 0.0f};

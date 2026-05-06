@@ -34,7 +34,7 @@ static constexpr void (*const isrTable[ENCODER_MAX])() = {
     encoder_isr0, encoder_isr1, encoder_isr2
 };
 
-static bool tryAttachInterrupt(int pin, uint8_t encoderIndex) {
+static bool tryAttachInterrupt(const int pin, const uint8_t encoderIndex) {
     const int irq = digitalPinToInterrupt(pin);
     if (irq < 0) return false;
 
@@ -116,6 +116,7 @@ void encoder_update_speed(const uint8_t index) {
 
     const float instantSpeed = static_cast<float>(delta) * 1000000.0f / static_cast<float>(dt);
 
-    constexpr float alpha = 0.3f;
-    e.speedTicksPerSec = e.speedTicksPerSec * (1.0f - alpha) + instantSpeed * alpha;
+    constexpr float kEmaAlpha = 0.3f;
+    constexpr float kEmaBeta  = 1.0f - kEmaAlpha;
+    e.speedTicksPerSec = e.speedTicksPerSec * kEmaBeta + instantSpeed * kEmaAlpha;
 }

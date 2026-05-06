@@ -68,10 +68,9 @@ bool Compass::tick() {
                 sampleCount++;
                 stateStart = millis();
                 if (sampleCount >= 10) {
-                    startHeading = heading;
-                    hasStartHeading = true;
-                    // Prime PD state so the first computeRotation() after boot
-                    // doesn't see a multi-second dt or a stale derivative.
+                    // startHeading is captured by reset() after calibration
+                    // is loaded — sampling here runs with default offX/Y=0,
+                    // scaleX/Y=1 and would anchor to an uncalibrated heading.
                     lastTime = millis();
                     lastError = 0;
                     lastDerivative = 0;
@@ -133,10 +132,14 @@ float Compass::computeRotation(const float targetDegrees) {
     if (error < -180.0f) error += 360.0f;
 
     // Dirty-D: one-pole IIR on the derivative to keep magnetometer noise
-    // (±0.5-1°) from driving the motors at the rated kd.
-    const float rawDeriv = (dtS > 0) ? (error - lastError) / dtS : 0;
-    const float alpha    = (dtS > 0) ? dtS / (derivTau + dtS) : 1.0f;
-    lastDerivative      += alpha * (rawDeriv - lastDerivative);
+    // (±0.5-1°) from driving the motors at the rated kd. Skip the state
+    // update on zero-dt ticks — otherwise alpha=1 with rawDeriv=0 wipes
+    // the filter whenever two calls land in the same millisecond.
+    if (dtS > 0.0f) {
+        const float rawDeriv = (error - lastError) / dtS;
+        const float alpha    = dtS / (derivTau + dtS);
+        lastDerivative      += alpha * (rawDeriv - lastDerivative);
+    }
 
     float rotation = 0;
     if (fabsf(error) > deadzone) {

@@ -11,6 +11,8 @@
 #include "drive.h"
 #include <math.h>
 
+#include "io/cordic/cordic.h"
+
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
 /* ------------------------------------------------------------------ */
@@ -33,14 +35,14 @@ static inline float clampf(float val, float lo, float hi)
 
 /* Hermite smoothstep — same formula used in MotorDriver for acceleration.
  * Returns 0 when x <= edge0, 1 when x >= edge1, smooth S-curve between. */
-static inline float smoothstep(float x, float edge0, float edge1)
+static FORCE_INLINE float smoothstep(float x, float edge0, float edge1)
 {
-    float t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    const float t = clampf((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
     return t * t * (3.0f - 2.0f * t);
 }
 
 /* Wrap an angle in radians to (-pi, +pi]. */
-static inline float wrap_pi(float a)
+static FORCE_INLINE float wrap_pi(float a)
 {
     while (a > PI_F)  a -= 2.0f * PI_F;
     while (a < -PI_F) a += 2.0f * PI_F;
@@ -77,27 +79,27 @@ static void compute_virtual_target(float tx, float ty, float d,
                                    const DriveConfig* cfg,
                                    float* vt_x, float* vt_y)
 {
-    float bearing     = atan2f(tx, ty);  /* bearing to real target */
-    float abs_bearing = fabsf(bearing);
+    const float bearing     = cordic_atan2(tx, ty);  /* bearing to real target */
+    const float abs_bearing = fabsf(bearing);
 
     /* dist_blend:  0 when close, 1 when far */
-    float dist_blend  = smoothstep(d, cfg->d_close, cfg->d_far);
+    const float dist_blend  = smoothstep(d, cfg->d_close, cfg->d_far);
 
     /* angle_blend: 0 when aligned (< capture_angle), 1 when misaligned (> 50°).
      * Keeps the offset active while the approach angle is too wide for the cage. */
-    float capture_rad = cfg->capture_angle * DEG2RAD;
-    float angle_blend = smoothstep(abs_bearing, capture_rad, 50.0f * DEG2RAD);
+    const float capture_rad = cfg->capture_angle * DEG2RAD;
+    const float angle_blend = smoothstep(abs_bearing, capture_rad, 50.0f * DEG2RAD);
 
     /* Offset stays if EITHER far away OR misaligned. */
-    float blend = fmaxf(dist_blend, angle_blend);
+    const float blend = fmaxf(dist_blend, angle_blend);
 
     /* Cap the offset so it never exceeds 60% of the distance to the real
      * target.  Without this, a close ball (e.g. 50 mm ahead) gets its
      * virtual target pushed 120 mm behind — past the robot — which flips
      * the bearing to ~150° and sends the orbit into reverse. */
-    float raw_offset = cfg->behind_offset * blend;
-    float max_offset = d * 0.6f;
-    float eff_offset = fminf(raw_offset, max_offset);
+    const float raw_offset = cfg->behind_offset * blend;
+    const float max_offset = d * 0.6f;
+    const float eff_offset = fminf(raw_offset, max_offset);
 
     *vt_x = tx;
     *vt_y = ty - eff_offset;
@@ -124,7 +126,7 @@ static DriveCmd compute_orbit_drive(float vt_x, float vt_y, float d,
 
     /* --- Bearing to virtual target ---
      * atan2(x, y) instead of atan2(y, x) because +Y is the forward axis. */
-    float theta_raw = atan2f(vt_x, vt_y);
+    const float theta_raw = cordic_atan2(vt_x, vt_y);
 
     /* --- EMA filter with wrap-around handling ---
      * If the angle jumps by more than pi between cycles (e.g. target
@@ -142,12 +144,12 @@ static DriveCmd compute_orbit_drive(float vt_x, float vt_y, float d,
             filtered_angle = wrap_pi(filtered_angle + ANGLE_EMA_ALPHA * diff);
         }
     }
-    float theta = filtered_angle;
+    const float theta = filtered_angle;
 
-    float abs_theta     = fabsf(theta);
-    float capture_rad   = cfg->capture_angle * DEG2RAD;
-    float hyst_rad      = cfg->hyst_band * DEG2RAD;
-    float k_offset_rad  = cfg->k_offset * DEG2RAD;
+    const float abs_theta     = fabsf(theta);
+    const float capture_rad   = cfg->capture_angle * DEG2RAD;
+    const float hyst_rad      = cfg->hyst_band * DEG2RAD;
+    const float k_offset_rad  = cfg->k_offset * DEG2RAD;
 
     /* --- Speed modulation ---
      * Ramp down on approach to prevent overshooting the capture zone. */
@@ -206,20 +208,23 @@ static DriveCmd compute_orbit_drive(float vt_x, float vt_y, float d,
      * The offset grows with the absolute bearing angle using a power
      * curve: lazy at small misalignment, aggressive at large.
      * offset = k_offset * (|theta|/pi)^n_power                      */
-    float frac   = abs_theta / PI_F;              /* 0..1 */
+    const float frac   = abs_theta / PI_F;              /* 0..1 */
+    const
     float offset = k_offset_rad * powf(frac, cfg->n_power);
 
     /* --- Total drive angle ---
      * Add the offset in the orbit direction.  The 90° clamp ensures the
      * robot never drives backward — at worst it drives pure sideways,
      * which is exactly what we want for the 180° (ball-behind) case.  */
-    float half_pi   = PI_F * 0.5f;
-    float theta_mag = fminf(abs_theta + offset, half_pi);
-    float theta_drive = (float)orbit_dir * theta_mag;
+    const float half_pi   = PI_F * 0.5f;
+    const float theta_mag = fminf(abs_theta + offset, half_pi);
+    const float theta_drive = (float)orbit_dir * theta_mag;
 
     /* --- Convert to velocity vector --- */
-    cmd.vx    = speed * sinf(theta_drive);
-    cmd.vy    = speed * cosf(theta_drive);
+    float sinDrive, cosDrive;
+    cordic_sin_cos(theta_drive, &sinDrive, &cosDrive);
+    cmd.vx    = speed * sinDrive;
+    cmd.vy    = speed * cosDrive;
     cmd.speed = speed;
     return cmd;
 }
@@ -264,12 +269,33 @@ static void apply_wall_avoidance(float* vx, float* vy,
     *vy += push_y;
 
     /* Renormalize so we never exceed max_speed. */
-    float mag = sqrtf(*vx * *vx + *vy * *vy);
+    float mag = cordic_modulus(*vy, *vx);
     if (mag > max_speed) {
         float scale = max_speed / mag;
         *vx *= scale;
         *vy *= scale;
     }
+}
+
+/* Hard-stop clip. When a wall is closer than wall_stop, zero the velocity
+ * component that would push us further into it. Repulsion alone only
+ * redirects the vector and then renormalizes back to max_speed, so at
+ * ~1 m/s the inward component survives and the robot drives through the
+ * line. This runs AFTER apply_wall_avoidance so the overlay can't nudge
+ * a clipped component back above zero.
+ *
+ * Dead sensors are already re-mapped to 2400 mm upstream (RobotBrain),
+ * so they never trip this check. */
+static void apply_wall_hard_stop(float* vx, float* vy,
+                                 const float sonar_mm[4],
+                                 const DriveConfig* cfg)
+{
+    if (cfg->wall_stop < 1.0f) return;
+
+    if (sonar_mm[0] < cfg->wall_stop && *vy > 0.0f) *vy = 0.0f; /* front */
+    if (sonar_mm[1] < cfg->wall_stop && *vx > 0.0f) *vx = 0.0f; /* right */
+    if (sonar_mm[2] < cfg->wall_stop && *vy < 0.0f) *vy = 0.0f; /* back  */
+    if (sonar_mm[3] < cfg->wall_stop && *vx < 0.0f) *vx = 0.0f; /* left  */
 }
 
 /* ------------------------------------------------------------------ */
@@ -287,8 +313,9 @@ DriveConfig drive_default_config(void)
     cfg.k_offset      = 70.0f;
     cfg.n_power       = 1.3f;
     cfg.hyst_band     = 8.0f;
-    cfg.wall_danger   = 200.0f;
-    cfg.wall_force    = 0.5f;
+    cfg.wall_danger   = 350.0f;
+    cfg.wall_force    = 0.8f;
+    cfg.wall_stop     = 150.0f;
     return cfg;
 }
 
@@ -303,7 +330,7 @@ DriveCmd drive_to_point(float tx, float ty,
                         const float sonar_mm[4],
                         const DriveConfig* cfg)
 {
-    float d = sqrtf(tx * tx + ty * ty);
+    float d = cordic_modulus(ty, tx);
 
     /* Layer 1 — virtual target: offset behind the real target so the
      * robot arcs around and captures from the front. */
@@ -316,8 +343,9 @@ DriveCmd drive_to_point(float tx, float ty,
 
     /* Wall avoidance overlay. */
     apply_wall_avoidance(&cmd.vx, &cmd.vy, sonar_mm, cfg, cfg->max_speed);
+    apply_wall_hard_stop(&cmd.vx, &cmd.vy, sonar_mm, cfg);
 
-    cmd.speed = sqrtf(cmd.vx * cmd.vx + cmd.vy * cmd.vy);
+    cmd.speed = cordic_modulus(cmd.vy, cmd.vx);
     return cmd;
 }
 
@@ -325,7 +353,17 @@ DriveCmd drive_to_waypoint(float tx, float ty,
                            const float sonar_mm[4],
                            const DriveConfig* cfg)
 {
-    float d = sqrtf(tx * tx + ty * ty);
+    const float d = cordic_modulus(ty, tx);
+
+    /* Arrival deadband. Ball-chase (drive_to_point) keeps a 15% minimum
+     * creep in compute_orbit_drive for forward pressure on the ball;
+     * static waypoints must stop, otherwise continuous creep scrubs the
+     * heading and the hold-heading PD runs away trying to fight it. */
+    if (d < 30.0f) {
+        DriveCmd stop = {0.0f, 0.0f, 0.0f};
+        orbit_dir = 0;   /* clear committed orbit so next approach re-picks */
+        return stop;
+    }
 
     /* No virtual target offset — drive directly toward the waypoint.
      * The orbit logic still handles approach angles and speed ramp. */
@@ -333,7 +371,8 @@ DriveCmd drive_to_waypoint(float tx, float ty,
 
     /* Wall avoidance overlay. */
     apply_wall_avoidance(&cmd.vx, &cmd.vy, sonar_mm, cfg, cfg->max_speed);
+    apply_wall_hard_stop(&cmd.vx, &cmd.vy, sonar_mm, cfg);
 
-    cmd.speed = sqrtf(cmd.vx * cmd.vx + cmd.vy * cmd.vy);
+    cmd.speed = cordic_modulus(cmd.vy, cmd.vx);
     return cmd;
 }

@@ -5,8 +5,8 @@
 #include "io/gpio/pwm.h"
 #include "io/encoder/Encoder.h"
 
-#define MIN_SPEED 1700
-#define MAX_SPEED 3399
+inline constexpr int MIN_SPEED = 1300;
+inline constexpr int MAX_SPEED = 2500;
 
 struct MotorPin {
     int inA;
@@ -66,6 +66,10 @@ class MotorDriver {
     float kI = 0.05f;
     float piIntegralMax = 30.0f;
     float maxTicksPerSec[3] = {1200.0f, 1200.0f, 1200.0f};
+    // Inverse of (maxTicksPerSec / 100). Cached so the per-tick PI loop can
+    // multiply instead of dividing. Kept in sync with maxTicksPerSec by the
+    // setMaxTicksPerSec() setters.
+    float invTicksPerPercent[3] = {100.0f / 1200.0f, 100.0f / 1200.0f, 100.0f / 1200.0f};
 
     float dirScale[12]     = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
     float dirOffsetDeg[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -113,13 +117,16 @@ public:
         // Reject implausible values; leave the existing defaults in place so the
         // PI loop's ticksPerPercent = tps/100 can never be zero or negative.
         if (tps < 1.0f || tps > 100000.0f) return;
+        const float inv = 100.0f / tps;
         maxTicksPerSec[0] = maxTicksPerSec[1] = maxTicksPerSec[2] = tps;
+        invTicksPerPercent[0] = invTicksPerPercent[1] = invTicksPerPercent[2] = inv;
     }
 
     void setMaxTicksPerSec(const uint8_t motor, const float tps) {
         if (motor >= 3) return;
         if (tps < 1.0f || tps > 100000.0f) return;
         maxTicksPerSec[motor] = tps;
+        invTicksPerPercent[motor] = 100.0f / tps;
     }
 
     void setDirectionCalibration(const float scale[12], const float offsetDeg[12]);

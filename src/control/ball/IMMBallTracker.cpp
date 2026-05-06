@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "../ekf/EKFCore.h"
+#include "io/cordic/cordic.h"
 
 namespace
 {
@@ -152,8 +153,10 @@ void IMMBallTracker::predictFree(ModeFilter& f, const float dt) const
 void IMMBallTracker::predictFriendly(ModeFilter& f, const float dt, const SelfLocState& self) const
 {
     (void)dt;
-    const float bx = self.x + kCaptureOffsetM * cosf(self.theta);
-    const float by = self.y + kCaptureOffsetM * sinf(self.theta);
+    float s, c;
+    cordic_sin_cos(self.theta, &s, &c);
+    const float bx = self.x + kCaptureOffsetM * c;
+    const float by = self.y + kCaptureOffsetM * s;
 
     float vxField = 0.0f;
     float vyField = 0.0f;
@@ -169,9 +172,11 @@ void IMMBallTracker::predictFriendly(ModeFilter& f, const float dt, const SelfLo
 
 void IMMBallTracker::predictEnemy(ModeFilter& f, const float dt, const EnemyState& enemy) const
 {
-    const float heading = (fabsf(enemy.vx) + fabsf(enemy.vy) > 0.05f) ? atan2f(enemy.vy, enemy.vx) : 0.0f;
-    f.x[0] = enemy.x + kCaptureOffsetM * cosf(heading);
-    f.x[1] = enemy.y + kCaptureOffsetM * sinf(heading);
+    const float heading = (fabsf(enemy.vx) + fabsf(enemy.vy) > 0.05f) ? cordic_atan2(enemy.vy, enemy.vx) : 0.0f;
+    float hs, hc;
+    cordic_sin_cos(heading, &hs, &hc);
+    f.x[0] = enemy.x + kCaptureOffsetM * hc;
+    f.x[1] = enemy.y + kCaptureOffsetM * hs;
     f.x[2] = enemy.vx;
     f.x[3] = enemy.vy;
 
@@ -292,7 +297,7 @@ void IMMBallTracker::step(const float dt,
         int best = 0;
         if (mu_[1] > mu_[best]) best = 1;
         if (mu_[2] > mu_[best]) best = 2;
-        innovationMag = sqrtf(fmaxf(0.0f, mahal[best]));
+        innovationMag = cordic_sqrt(fmaxf(0.0f, mahal[best]));
         out_.visible = 1;
         out_.lost_ms = 0;
     }

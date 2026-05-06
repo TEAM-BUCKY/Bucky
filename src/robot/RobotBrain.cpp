@@ -1,7 +1,10 @@
 #include "RobotBrain.h"
+
+#include <cmath>
+
 #include "helpers/Math.h"
 
-void RobotBrain::reset(float x0, float y0, float theta0)
+void RobotBrain::reset(const float x0, const float y0, const float theta0)
 {
     selfloc_reset(&selfLoc_, x0, y0, theta0);
     ballImm_.reset();
@@ -21,15 +24,24 @@ BrainCommand RobotBrain::tick(const BrainSensors& s)
                     lastRotation_ * kCmdToRadS);
 
     // --- Compass update ---
-    if (s.compass_ready)
-        selfloc_update_compass(&selfLoc_, s.compass_heading_rad);
+    // Sum |drive|+|rotation| from the previous tick as the "motors busy"
+    // signal for the EKF's noise-switch (SelfLocalizationEKF.cpp busy/idle R).
+    if (s.compass_ready) {
+        const float totalPwmDuty = fabsf(lastDrive_.x) + fabsf(lastDrive_.y) + fabsf(lastRotation_);
+        selfloc_update_compass(&selfLoc_, s.compass_heading_rad, totalPwmDuty);
+    }
 
     // --- Sonar update + enemy detection ---
     if (s.sonar_ready)
     {
-        for (int i = 0; i < SONAR_COUNT; ++i)
+        for (uint8_t i = 0; i < SONAR_COUNT; ++i)
         {
-            SonarUpdateResult result = selfloc_update_sonar(&selfLoc_, i,
+            // Skip invalid readings (-1 sentinel from main.cpp) — otherwise the
+            // EKF wastes a Jacobian step on garbage and may spuriously flag an
+            // enemy at the sensor origin.
+            if (s.sonar_distance_m[i] <= 0.0f)
+                continue;
+            const SonarUpdateResult result = selfloc_update_sonar(&selfLoc_, i,
                                                             s.sonar_distance_m[i]);
             if (result.anomaly_detected)
                 enemyTracker_.update(result.obstacle_x, result.obstacle_y, s.now_ms);
@@ -38,8 +50,8 @@ BrainCommand RobotBrain::tick(const BrainSensors& s)
     }
 
     // --- Get estimated states ---
-    SelfLocState selfState = selfloc_get_state(&selfLoc_);
-    EnemyState enemyState = enemyTracker_.getState();
+    const SelfLocState selfState = selfloc_get_state(&selfLoc_);
+    const EnemyState enemyState = enemyTracker_.getState();
 
     // --- Ball tracker ---
     ballImm_.setPossessionHint(s.possession_hint);
@@ -47,8 +59,7 @@ BrainCommand RobotBrain::tick(const BrainSensors& s)
                   s.ball_field_x, s.ball_field_y, s.ball_range_m,
                   selfState, enemyState, s.now_ms);
 
-    auto [bx, by, bvx, bvy, P, mu, innovation_mag, visible, lost_ms] =
-        ballImm_.getEstimate();
+    const BallEstimate& est = ballImm_.getEstimate();
 
     // --- Populate DigitalField ---
     field_.self.x      = selfState.x;
@@ -59,17 +70,22 @@ BrainCommand RobotBrain::tick(const BrainSensors& s)
     field_.self.omega  = selfState.omega;
     field_.self.P_xy   = selfState.P_xy;
 
-    field_.ball.bx             = bx;
-    field_.ball.by             = by;
-    field_.ball.bvx            = bvx;
-    field_.ball.bvy            = bvy;
-    field_.ball.mu[0]          = mu[0];
-    field_.ball.mu[1]          = mu[1];
-    field_.ball.mu[2]          = mu[2];
-    field_.ball.P_xy           = P[0][0] + P[1][1];
-    field_.ball.innovation_mag = innovation_mag;
-    field_.ball.visible        = visible;
-    field_.ball.lost_ms        = lost_ms;
+    field_.ball.bx             = est.bx;
+    field_.ball.by             = est.by;
+    field_.ball.bvx            = est.bvx;
+    field_.ball.bvy            = est.bvy;
+    field_.ball.mu[0]          = est.mu[0];
+    field_.ball.mu[1]          = est.mu[1];
+    field_.ball.mu[2]          = est.mu[2];
+    field_.ball.P_xy           = est.P[0][0] + est.P[1][1];
+    field_.ball.innovation_mag = est.innovation_mag;
+    field_.ball.visible        = est.visible;
+    field_.ball.lost_ms        = est.lost_ms;
+
+    // Derive ball-in-body-frame + range once per tick so strategy, drive
+    // helpers, and main.cpp's possession-hint block don't each repeat the
+    // same hypotf + cordic_sin_cos against the same self/ball delta.
+    digitalFieldRefreshBallCache(field_);
 
     field_.enemy[0].x          = enemyState.x;
     field_.enemy[0].y          = enemyState.y;
@@ -78,14 +94,20 @@ BrainCommand RobotBrain::tick(const BrainSensors& s)
     field_.enemy[0].confidence = enemyState.confidence;
     field_.timestamp_ms        = s.now_ms;
 
-    // Store latest sonar distances (convert m → mm for drive module).
+    // Store latest sonar distances (convert m → mm for drive module). Invalid
+    // slots map to the 2400 mm "no wall seen" sentinel defined in DigitalField
+    // so hard-stop / wall-avoidance treat a dead sensor as "far = safe"
+    // instead of "wall at 0 mm".
     if (s.sonar_ready)
-        for (int i = 0; i < SONAR_COUNT; ++i)
-            field_.sonar_mm[i] = s.sonar_distance_m[i] * 1000.0f;
+        for (uint8_t i = 0; i < SONAR_COUNT; ++i)
+            field_.sonar_mm[i] = (s.sonar_distance_m[i] > 0.0f)
+                                     ? s.sonar_distance_m[i] * 1000.0f
+                                     : 2400.0f;
 
     // --- Strategy ---
-    auto [drive, rotation, state] = strategy_.update(field_, gameState_,
-                                                     false, s.stuck_detected);
+    auto [drive, rotation, state] = StrategyFSM::update(field_, gameState_,
+                                                        false, s.stuck_detected,
+                                                        s.ir_s0_locked);
     gameState_    = state;
     lastDrive_    = drive;
     lastRotation_ = rotation;

@@ -8,14 +8,18 @@ void testSonar(const TestContext& ctx) {
     DBG_PRINTLN();
 
     while (true) {
-        auto [distance] = ctx.sonar.read();
+        const SonarReading r = ctx.sonar.read();
 
         for (int i = 0; i < SONAR_COUNT; i++) {
             DBG_PRINT("S");
             DBG_PRINT(i);
             DBG_PRINT(": ");
-            DBG_PRINT(distance[i], 1);
-            DBG_PRINT(" cm\t");
+            if (r.valid[i]) {
+                DBG_PRINT(r.distance[i], 1);
+                DBG_PRINT(" cm\t");
+            } else {
+                DBG_PRINT("TIMEOUT\t");
+            }
         }
         DBG_PRINTLN();
 

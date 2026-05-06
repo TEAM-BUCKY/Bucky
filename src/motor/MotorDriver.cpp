@@ -109,7 +109,8 @@ float getSmoothFunction(const float begin, const float target, const uint32_t ti
 
 // PI loop normalises integration to this loop period so the hand-tuned kI/iMax
 // stays valid as the brain tick rate drifts with sensor load.
-constexpr float kPiNominalDtS = 0.01f; // 100 Hz
+constexpr float kPiNominalDtS    = 0.01f;          // 100 Hz
+constexpr float kInvPiNominalDtS = 1.0f / kPiNominalDtS;
 
 template<bool stage>
 void MotorDriver::updateMotor(Motor &motor) const
@@ -133,8 +134,8 @@ void MotorDriver::updateMotor(Motor &motor) const
 
     encoder_update_speed(motor.encoderIndex);
 
-    const float ticksPerPercent = maxTicksPerSec[motor.encoderIndex] / 100.0f;
-    const float measuredSpeed = encoder_get_speed(motor.encoderIndex) / ticksPerPercent;
+    const float measuredSpeed = encoder_get_speed(motor.encoderIndex)
+                              * invTicksPerPercent[motor.encoderIndex];
     const float error = setpoint - measuredSpeed;
 
     const uint32_t nowUs = micros();
@@ -143,7 +144,7 @@ void MotorDriver::updateMotor(Motor &motor) const
         : static_cast<float>(nowUs - motor.pi.lastUpdateUs) * 1e-6f;
     motor.pi.lastUpdateUs = nowUs;
 
-    motor.pi.integral = clampf(motor.pi.integral + error * (dtS / kPiNominalDtS),
+    motor.pi.integral = clampf(motor.pi.integral + error * (dtS * kInvPiNominalDtS),
                                -piIntegralMax, piIntegralMax);
     const float correction = kP * error + kI * motor.pi.integral;
 
@@ -178,8 +179,8 @@ void MotorDriver::syncUpdateMotor(Motor& motor) const
 
     encoder_update_speed(motor.encoderIndex);
 
-    const float ticksPerPercent = maxTicksPerSec[motor.encoderIndex] / 100.0f;
-    const float measuredSpeed = encoder_get_speed(motor.encoderIndex) / ticksPerPercent;
+    const float measuredSpeed = encoder_get_speed(motor.encoderIndex)
+                              * invTicksPerPercent[motor.encoderIndex];
     const float error = setpoint - measuredSpeed;
 
     const uint32_t nowUs = micros();
@@ -188,7 +189,7 @@ void MotorDriver::syncUpdateMotor(Motor& motor) const
         : static_cast<float>(nowUs - motor.pi.lastUpdateUs) * 1e-6f;
     motor.pi.lastUpdateUs = nowUs;
 
-    motor.pi.integral = clampf(motor.pi.integral + error * (dtS / kPiNominalDtS),
+    motor.pi.integral = clampf(motor.pi.integral + error * (dtS * kInvPiNominalDtS),
                                -piIntegralMax, piIntegralMax);
     const float correction = kP * error + kI * motor.pi.integral;
 
@@ -259,6 +260,9 @@ void MotorDriver::driveRadians(float radians, float scale, const float rotation)
     // old fmaxf(scale, |rot|)/100 hybrid, which attenuated rotation during slow
     // translation and let commands saturate during fast translation). Same
     // rescale also covers direction-calibration sMul overshoot (M2).
+    // Baseline three-wheel omni inverse kinematics. Wheels at body angles
+    // 60° (M1), 180° (M2), -60° (M3); rolling tangents CCW; + rotation is
+    // CCW body spin.
     float m1Speed = (0.5f * sinRadians - SIN_60 * cosRadians) * scale + rotation;
     float m2Speed = -sinRadians * scale + rotation;
     float m3Speed = (0.5f * sinRadians + SIN_60 * cosRadians) * scale + rotation;
@@ -271,9 +275,14 @@ void MotorDriver::driveRadians(float radians, float scale, const float rotation)
         m3Speed *= k;
     }
 
-    drive(this->motor1, m1Speed, scale);
-    drive(this->motor2, m2Speed, scale);
-    drive(this->motor3, m3Speed, scale);
+    // M1 and M3 have their direction pins physically flipped on this board
+    // (M2 wiring is normal). Negate those two channels at the last step so
+    // physical wheels spin in the direction the kinematic formula intended.
+    // Done AFTER saturation rescale so the rescale sees the same magnitudes
+    // the motors will actually see.
+    drive(this->motor1, -m1Speed, scale);
+    drive(this->motor2,  m2Speed, scale);
+    drive(this->motor3, -m3Speed, scale);
 }
 
 void MotorDriver::driveVector(const VectorXY vector, const float rotation) {

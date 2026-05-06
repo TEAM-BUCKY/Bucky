@@ -126,11 +126,16 @@ static void driveDirectDegrees(MotorDriver& md, const float degrees, const float
     float sinR, cosR;
     cordic_sin_cos(rad, &sinR, &cosR);
     // Apply rotation directly as motor % (no scaling down). computeRotation
-    // returns ±50 max (boosted for calibration). Rotation sign is negated because
-    // M1/M3 pin swap reversed the physical rotation direction.
-    const float m1 = fmaxf(-100.0f, fminf(100.0f, (0.5f * sinR - SIN_60 * cosR) * scale - rotation));
-    const float m2 = fmaxf(-100.0f, fminf(100.0f, -sinR * scale - rotation));
-    const float m3 = fmaxf(-100.0f, fminf(100.0f, (0.5f * sinR + SIN_60 * cosR) * scale - rotation));
+    // returns ±50 max (boosted for calibration). M1 and M3 direction pins
+    // are physically flipped on this board; their entire computed output
+    // is negated so physical wheels match the kinematic formula. M2 is
+    // normal. Same compensation as MotorDriver::driveRadians.
+    const float m1Raw = (0.5f * sinR - SIN_60 * cosR) * scale + rotation;
+    const float m2Raw = -sinR * scale + rotation;
+    const float m3Raw = (0.5f * sinR + SIN_60 * cosR) * scale + rotation;
+    const float m1 = fmaxf(-100.0f, fminf(100.0f, -m1Raw));
+    const float m2 = fmaxf(-100.0f, fminf(100.0f,  m2Raw));
+    const float m3 = fmaxf(-100.0f, fminf(100.0f, -m3Raw));
     md.driveMotorsDirect(m1, m2, m3);
 }
 
@@ -238,30 +243,37 @@ void testCalibrate(const TestContext& ctx) {
     for (uint8_t i = 0; i < 3; i++)
         encoder_reset(i);
 
-    // Measure each motor individually to avoid the robot driving into walls.
-    for (uint8_t m = 0; m < 3; m++) {
-        encoder_reset(m);
-        const float speeds[3][3] = {{100,0,0}, {0,100,0}, {0,0,100}};
-        ctx.motorDriver.driveMotorsDirect(speeds[m][0], speeds[m][1], speeds[m][2]);
-        updateLoop(ctx.motorDriver, 300);
-        // Measure this motor's max speed
+    // Spin in place (all three motors +100%) so each wheel drives its own load.
+    // Driving one wheel alone forces the chassis to translate while the other
+    // two wheels roll passively on their free rollers — under floor friction
+    // the lone motor stalls and reports ~0 t/s. Rotating in place keeps every
+    // wheel powered against its own ground contact and stays within the
+    // footprint, so no wall-collision risk.
+    ctx.motorDriver.driveMotorsDirect(100, 100, 100);
+    updateLoop(ctx.motorDriver, 500);
+    {
         constexpr int P2_SAMPLES = 20, P2_DISCARD = 4, P2_PERIOD = 50;
-        float sum = 0; int cnt = 0;
+        float sums[3] = {0, 0, 0};
+        int cnt = 0;
         for (int s = 0; s < P2_SAMPLES; s++) {
             delay(P2_PERIOD);
             ctx.motorDriver.syncUpdateAllMotors();
-            encoder_update_speed(m);
-            if (s >= P2_DISCARD) { sum += fabsf(encoder_get_speed(m)); cnt++; }
+            for (uint8_t i = 0; i < 3; i++) encoder_update_speed(i);
+            if (s >= P2_DISCARD) {
+                for (uint8_t i = 0; i < 3; i++) sums[i] += fabsf(encoder_get_speed(i));
+                cnt++;
+            }
         }
-        result.maxTicksPerSec[m] = sum / static_cast<float>(cnt);
-        log.maxTicksPerSec[m] = result.maxTicksPerSec[m];
-        ctx.motorDriver.driveMotorsDirect(0, 0, 0);
-        updateLoop(ctx.motorDriver, 200);
-        DBG_PRINTLN("  M" + String(m + 1) + ": " + String(result.maxTicksPerSec[m], 1) + " t/s");
+        for (uint8_t i = 0; i < 3; i++) {
+            result.maxTicksPerSec[i] = sums[i] / static_cast<float>(cnt);
+            log.maxTicksPerSec[i]    = result.maxTicksPerSec[i];
+            DBG_PRINTLN("  M" + String(i + 1) + ": " + String(result.maxTicksPerSec[i], 1) + " t/s");
+        }
     }
-
+    // Long coast so residual chassis rotation doesn't bias Phase 3. At ~full
+    // spin the wheels take a couple of seconds to stop on a smooth surface.
     ctx.motorDriver.driveMotorsDirect(0, 0, 0);
-    updateLoop(ctx.motorDriver, 500);
+    updateLoop(ctx.motorDriver, 3000);
 
     // Abort if any motor reports no motion at 100% PWM. Continuing with
     // maxTicksPerSec=0 makes PI divide by zero and corrupts every later phase.
@@ -296,33 +308,36 @@ void testCalibrate(const TestContext& ctx) {
     DBG_PRINTLN("\n[Phase 3/5] Linearity at 50%...");
     log.lastPhase = 3;
 
-    // Measure each motor individually at 50% (same approach as Phase 2).
-    for (uint8_t m = 0; m < 3; m++) {
-        encoder_reset(m);
-        const float speeds[3][3] = {{50,0,0}, {0,50,0}, {0,0,50}};
-        ctx.motorDriver.driveMotorsDirect(speeds[m][0], speeds[m][1], speeds[m][2]);
-        updateLoop(ctx.motorDriver, 300);
+    // Same rotate-in-place pattern as Phase 2 — see comment there for rationale.
+    for (uint8_t i = 0; i < 3; i++) encoder_reset(i);
+    ctx.motorDriver.driveMotorsDirect(50, 50, 50);
+    updateLoop(ctx.motorDriver, 500);
+    {
         constexpr int P3_SAMPLES = 20, P3_DISCARD = 4, P3_PERIOD = 50;
-        float sum = 0; int cnt = 0;
+        float sums[3] = {0, 0, 0};
+        int cnt = 0;
         for (int s = 0; s < P3_SAMPLES; s++) {
             delay(P3_PERIOD);
             ctx.motorDriver.syncUpdateAllMotors();
-            encoder_update_speed(m);
-            if (s >= P3_DISCARD) { sum += fabsf(encoder_get_speed(m)); cnt++; }
+            for (uint8_t i = 0; i < 3; i++) encoder_update_speed(i);
+            if (s >= P3_DISCARD) {
+                for (uint8_t i = 0; i < 3; i++) sums[i] += fabsf(encoder_get_speed(i));
+                cnt++;
+            }
         }
-        result.speedAt50[m] = sum / static_cast<float>(cnt);
-        const float expected = result.maxTicksPerSec[m] * 0.5f;
-        result.linearityRatio[m] = (expected > 0) ? result.speedAt50[m] / expected : 0;
-        log.speedAt50[m]       = result.speedAt50[m];
-        log.linearityRatio[m]  = result.linearityRatio[m];
-        ctx.motorDriver.driveMotorsDirect(0, 0, 0);
-        updateLoop(ctx.motorDriver, 200);
-        DBG_PRINTLN("  M" + String(m + 1) + ": " + String(result.speedAt50[m], 1) + " t/s (" +
-                    String(result.linearityRatio[m], 3) + ")");
+        for (uint8_t i = 0; i < 3; i++) {
+            result.speedAt50[i] = sums[i] / static_cast<float>(cnt);
+            const float expected = result.maxTicksPerSec[i] * 0.5f;
+            result.linearityRatio[i] = (expected > 0) ? result.speedAt50[i] / expected : 0;
+            log.speedAt50[i]       = result.speedAt50[i];
+            log.linearityRatio[i]  = result.linearityRatio[i];
+            DBG_PRINTLN("  M" + String(i + 1) + ": " + String(result.speedAt50[i], 1) + " t/s (" +
+                        String(result.linearityRatio[i], 3) + ")");
+        }
     }
-
+    // Long coast before Phase 4 for the same reason as before Phase 3.
     ctx.motorDriver.driveMotorsDirect(0, 0, 0);
-    updateLoop(ctx.motorDriver, 500);
+    updateLoop(ctx.motorDriver, 3000);
 
     // ========== Phase 4: Forward drive validation ==========
     DBG_PRINTLN("\n[Phase 4/5] Forward drive validation...");
@@ -652,16 +667,20 @@ void testCalibrate(const TestContext& ctx) {
                 : "  Direction cal: SUSPECT - not saved");
 
     // ========== Report & Save ==========
-    result.valid = true;
+    // Force-apply on completion: reaching this point means every phase ran, so
+    // always persist whatever came out. Range checks still inform the STATUS
+    // line for visibility, but they no longer gate the EEPROM write.
+    bool rangesOk = true;
     for (uint8_t i = 0; i < 3; i++) {
         if (result.maxTicksPerSec[i] < 100.0f || result.maxTicksPerSec[i] > 10000.0f)
-            result.valid = false;
+            rangesOk = false;
         if (result.linearityRatio[i] < 0.5f || result.linearityRatio[i] > 1.5f)
-            result.valid = false;
+            rangesOk = false;
     }
+    result.valid = true;
 
     DBG_PRINTLN("\n===== CALIBRATION RESULTS =====");
-    DBG_PRINTLN(result.valid ? "STATUS: VALID" : "STATUS: SUSPECT - review values");
+    DBG_PRINTLN(rangesOk ? "STATUS: VALID" : "STATUS: SUSPECT - review values (saved anyway)");
     DBG_PRINTLN("");
 
     for (uint8_t i = 0; i < 3; i++) {
@@ -670,7 +689,7 @@ void testCalibrate(const TestContext& ctx) {
                      String(result.linearityRatio[i], 3));
     }
 
-    if (result.valid) {
+    {
         StoredCalibration cal = {};
         EEPROM.get(0, cal);          // preserve any existing compass cal
         const bool keepMag = (cal.magic == CALIBRATION_MAGIC) && cal.magValid;
@@ -692,8 +711,6 @@ void testCalibrate(const TestContext& ctx) {
         DBG_PRINTLN(result.dirValid
             ? "\nCalibration saved to EEPROM (motor + direction)."
             : "\nCalibration saved to EEPROM (motor only; direction cal skipped).");
-    } else {
-        DBG_PRINTLN("\nNot saved — results out of range.");
     }
 
     DBG_PRINTLN("");

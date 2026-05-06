@@ -346,17 +346,27 @@ namespace Math
 		return degrees * (PI_F / 180.0f);
 	}
 
+	// Bounded single-step wrap. All callers pass values in ±2π (atan2 output ±
+	// small offset), so one conditional step is always sufficient. A second
+	// pass is kept as a cheap safety net for edge cases (inputs up to ±5π).
+	// Unlike the previous while-loop form, both branches are predictably
+	// not-taken in the steady state — no pipeline stalls on Cortex-M4.
 	FORCE_INLINE float wrapRadians(float radians)
 	{
-		while (radians > PI_F) radians -= 2.0f * PI_F;
-		while (radians < -PI_F) radians += 2.0f * PI_F;
+		constexpr float kTwoPi = 2.0f * PI_F;
+		if (radians >  PI_F) radians -= kTwoPi;
+		else if (radians < -PI_F) radians += kTwoPi;
+		if (radians >  PI_F) radians -= kTwoPi;
+		else if (radians < -PI_F) radians += kTwoPi;
 		return radians;
 	}
 
 	FORCE_INLINE float wrapDegrees(float degrees)
 	{
-		while (degrees > 360.0f) degrees -= 360.0f;
-		while (degrees < 0.0f) degrees += 360.0f;
+		if (degrees >= 360.0f) degrees -= 360.0f;
+		else if (degrees < 0.0f) degrees += 360.0f;
+		if (degrees >= 360.0f) degrees -= 360.0f;
+		else if (degrees < 0.0f) degrees += 360.0f;
 		return degrees;
 	}
 } // namespace Math

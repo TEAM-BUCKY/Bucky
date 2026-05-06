@@ -2,16 +2,17 @@
 
 #include <cmath>
 
+#include "io/cordic/cordic.h"
 #include "io/encoder/Encoder.h"
 
-void StuckDetector::reset(uint32_t now_ms) {
+void StuckDetector::reset(const uint32_t now_ms) {
     stuckSinceMs_ = 0;
     clearSinceMs_ = now_ms;
     tripped_ = false;
 }
 
-bool StuckDetector::update(uint32_t now_ms, VectorXY drive, float rotation) {
-    const float driveMag = sqrtf(drive.x * drive.x + drive.y * drive.y);
+bool StuckDetector::update(const uint32_t now_ms, const VectorXY drive, const float rotation) {
+    const float driveMag = cordic_modulus(drive.y, drive.x);
     const bool commanded = driveMag > kCmdDriveMin
                         || fabsf(rotation) > kCmdRotationMin;
 

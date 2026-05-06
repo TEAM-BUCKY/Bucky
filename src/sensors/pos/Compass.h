@@ -32,7 +32,6 @@ class Compass
         volatile uint8_t rx_buf[6] = {};
         float heading = 0;
         float startHeading = 0;
-        bool hasStartHeading = false;
 
         int16_t lastRawX = 0;
         int16_t lastRawY = 0;

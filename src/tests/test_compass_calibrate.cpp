@@ -146,11 +146,16 @@ void testCompassCalibrate(const TestContext& ctx) {
     }
 
     DBG_PRINTLN("\nLive corrected heading (Ctrl-C / reset when done):");
-    DBG_PRINTLN("heading [deg]");
+    DBG_PRINTLN("ok heading raw=(x,y,z)");
     while (true) {
-        ctx.compass.update();
+        const bool ok = ctx.compass.update();
+        DBG_PRINT(ok ? "OK  " : "ERR ");
         DBG_PRINT("heading=");
-        DBG_PRINTLN(ctx.compass.getHeading(), 1);
+        DBG_PRINT(ctx.compass.getHeading(), 1);
+        DBG_PRINT("  raw=(");
+        DBG_PRINT(ctx.compass.getRawX()); DBG_PRINT(", ");
+        DBG_PRINT(ctx.compass.getRawY()); DBG_PRINT(", ");
+        DBG_PRINT(ctx.compass.getRawZ()); DBG_PRINTLN(")");
         delay(100);
     }
 }

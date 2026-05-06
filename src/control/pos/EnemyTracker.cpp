@@ -1,5 +1,6 @@
 #include <control/pos/EnemyTracker.h>
 #include <helpers/Math.h>
+#include <io/cordic/cordic.h>
 
 #include <cmath>
 
@@ -49,8 +50,10 @@ void EnemyTracker::reportFromSonar(const SelfLocState& self, const uint8_t senso
     }
 
     const float alpha = self.theta + kSensorOffsets[sensorIdx];
-    const float mx = self.x + distanceM * cosf(alpha);
-    const float my = self.y + distanceM * sinf(alpha);
+    float s, c;
+    cordic_sin_cos(alpha, &s, &c);
+    const float mx = self.x + distanceM * c;
+    const float my = self.y + distanceM * s;
 
     update(mx, my, nowMs);
 }

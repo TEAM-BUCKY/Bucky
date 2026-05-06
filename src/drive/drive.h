@@ -22,8 +22,9 @@ typedef struct {
     float k_offset;        /* deg, max orbit offset (e.g. 70)           */
     float n_power;         /* exponent for offset curve (e.g. 1.3)      */
     float hyst_band;       /* deg, orbit direction hysteresis (e.g. 8)  */
-    float wall_danger;     /* mm, wall avoidance activation dist (e.g. 200) */
-    float wall_force;      /* 0..1, wall push strength (e.g. 0.5)       */
+    float wall_danger;     /* mm, wall avoidance activation dist (e.g. 350) */
+    float wall_force;      /* 0..1, wall push strength (e.g. 0.8)       */
+    float wall_stop;       /* mm, hard-stop clip distance (e.g. 150)    */
 } DriveConfig;
 
 /* Return a default config with recommended tuning values. */

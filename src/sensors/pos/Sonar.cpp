@@ -100,8 +100,14 @@ SonarReading Sonar::processRead() {
     reading = false;
 
     SonarReading r;
-    for (int i = 0; i < SONAR_COUNT; i++)
-        r.distance[i] = 0.017f * duration[i];
+    for (int i = 0; i < SONAR_COUNT; i++) {
+        // Only sensors whose ISR/TIM1 capture actually fired produce a real
+        // distance. A timeout leaves done[i]=false with duration[i]=0 — feed
+        // that straight into 0.017 and downstream wall-avoidance would treat
+        // the dead sensor as "wall at 0 mm" and push maximum repulsion.
+        r.valid[i] = (echoPinNumbers[i] >= 0) && done[i];
+        r.distance[i] = r.valid[i] ? 0.017f * duration[i] : 0.0f;
+    }
 
     return r;
 }

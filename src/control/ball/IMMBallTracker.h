@@ -32,7 +32,9 @@ public:
               const EnemyState& enemy,
               uint32_t nowMs);
 
-    [[nodiscard]] BallEstimate getEstimate() const { return out_; }
+    // Returning by const reference avoids an 80-byte copy (incl. 4×4 P) on
+    // every brain tick; callers only read a few scalars.
+    [[nodiscard]] const BallEstimate& getEstimate() const { return out_; }
 
 private:
     struct ModeFilter {

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "../ekf/EKFCore.h"
+#include "io/cordic/cordic.h"
 
 namespace
 {
@@ -62,8 +63,8 @@ void selfloc_predict(SelfLocalizationFilter* filter, const float dt, const float
     filter->x[5] = omega;
 
     const float theta = filter->x[2];
-    const float c = cosf(theta);
-    const float s = sinf(theta);
+    float s, c;
+    cordic_sin_cos(theta, &s, &c);
 
     filter->x[0] += (vxBody * c - vyBody * s) * dt;
     filter->x[1] += (vxBody * s + vyBody * c) * dt;
@@ -83,7 +84,7 @@ void selfloc_predict(SelfLocalizationFilter* filter, const float dt, const float
     F[1 * 6 + 4] = c * dt;
     F[2 * 6 + 5] = dt;
 
-    const float speed = sqrtf(vxBody * vxBody + vyBody * vyBody);
+    const float speed = cordic_modulus(vyBody, vxBody);
     const float sigmaX = 0.03f * speed * dt + 0.0008f;
     const float sigmaY = sigmaX;
     const float sigmaTheta = 0.05f * fabsf(omega) * dt + 0.0008f;
@@ -109,7 +110,9 @@ void selfloc_update_compass(SelfLocalizationFilter* filter, const float thetaMea
     const float H[6] = {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
     const float innovation = wrapAngle(thetaMeasuredRad - filter->x[2]);
     const float R = (totalPwmDuty > 1.5f) ? kCompassNoiseBusy : kCompassNoiseIdle;
-    EKFCore::updateScalar(filter->x, &filter->P[0][0], H, innovation, R, 6);
+    // Compass only observes theta (index 2) — H is zero beyond index 3, so the
+    // sparsity-aware path skips useless MACs on velocity states.
+    EKFCore::updateScalarPrefix(filter->x, &filter->P[0][0], H, innovation, R, 6, 3);
     filter->x[2] = wrapAngle(filter->x[2]);
     selfloc_clamp_to_field(filter);
 }
@@ -120,8 +123,8 @@ float selfloc_expected_wall_distance(const SelfLocalizationFilter* filter, const
         return 0.0f;
 
 
-    const float c = cosf(beamAngleRad);
-    const float s = sinf(beamAngleRad);
+    float s, c;
+    cordic_sin_cos(beamAngleRad, &s, &c);
     float minD = 10.0f;
 
     if (fabsf(c) > 1.0e-5f)
@@ -153,7 +156,7 @@ SonarUpdateResult selfloc_update_sonar(SelfLocalizationFilter* filter, const uin
     if (filter == nullptr)
         return result;
 
-    if (sensorIdx >= 4 || distanceM < 0.03f || distanceM > 2.5f)
+    if (sensorIdx >= 4 || distanceM <= 0.0f || distanceM < 0.03f || distanceM > 2.5f)
         return result;
 
     const float alpha = wrapAngle(filter->x[2] + kSensorOffsets[sensorIdx]);
@@ -166,12 +169,15 @@ SonarUpdateResult selfloc_update_sonar(SelfLocalizationFilter* filter, const uin
     if (fabsf(residual) > 0.12f)
     {
         result.anomaly_detected = true;
-        result.obstacle_x = filter->x[0] + distanceM * cosf(alpha);
-        result.obstacle_y = filter->x[1] + distanceM * sinf(alpha);
+        float sA, cA;
+        cordic_sin_cos(alpha, &sA, &cA);
+        result.obstacle_x = filter->x[0] + distanceM * cA;
+        result.obstacle_y = filter->x[1] + distanceM * sA;
         return result;
     }
 
-    constexpr float eps = 0.01f;
+    constexpr float eps      = 0.01f;
+    constexpr float kInv2Eps = 1.0f / (2.0f * eps);
     // Estimate Jacobian numerically for x, y, and theta.
     const float xOrig = filter->x[0];
     const float yOrig = filter->x[1];
@@ -189,22 +195,46 @@ SonarUpdateResult selfloc_update_sonar(SelfLocalizationFilter* filter, const uin
     const float dNy = selfloc_expected_wall_distance(filter, alpha);
     filter->x[1] = yOrig;
 
-    filter->x[2] = wrapAngle(tOrig + eps);
-    const float dPt = selfloc_expected_wall_distance(filter, wrapAngle(filter->x[2] + kSensorOffsets[sensorIdx]));
-    filter->x[2] = wrapAngle(tOrig - eps);
-    const float dNt = selfloc_expected_wall_distance(filter, wrapAngle(filter->x[2] + kSensorOffsets[sensorIdx]));
+    // For the theta partial: perturb theta and recompute the absolute beam
+    // angle. wrapAngle is bounded-step, so one wrap per branch is enough.
+    const float tPlus   = wrapAngle(tOrig + eps);
+    const float alphaP  = wrapAngle(tPlus + kSensorOffsets[sensorIdx]);
+    filter->x[2] = tPlus;
+    const float dPt = selfloc_expected_wall_distance(filter, alphaP);
+
+    const float tMinus  = wrapAngle(tOrig - eps);
+    const float alphaM  = wrapAngle(tMinus + kSensorOffsets[sensorIdx]);
+    filter->x[2] = tMinus;
+    const float dNt = selfloc_expected_wall_distance(filter, alphaM);
     filter->x[2] = tOrig;
 
+    // Reject updates whose numerical Jacobian crosses a wall boundary.
+    // selfloc_expected_wall_distance picks the *nearest* wall along the beam,
+    // so a 1 cm / 0.57° perturbation near a corner can flip which wall is
+    // "nearest" and flip the expected distance by a meter. Treated as a
+    // smooth derivative, that would slam pos by a similar amount via the
+    // Kalman gain. A smooth geometry gives at most ~2·eps·|slope| change
+    // per side — well under 100 mm for any reasonable beam — so a larger
+    // step is a reliable switch signal.
+    constexpr float kJacobianStepLimit = 0.10f;
+    if (fabsf(dPx - dNx) > kJacobianStepLimit
+        || fabsf(dPy - dNy) > kJacobianStepLimit
+        || fabsf(dPt - dNt) > kJacobianStepLimit)
+    {
+        return result;
+    }
+
     const float H[6] = {
-        (dPx - dNx) / (2.0f * eps),
-        (dPy - dNy) / (2.0f * eps),
-        (dPt - dNt) / (2.0f * eps),
+        (dPx - dNx) * kInv2Eps,
+        (dPy - dNy) * kInv2Eps,
+        (dPt - dNt) * kInv2Eps,
         0.0f,
         0.0f,
         0.0f,
     };
 
-    EKFCore::updateScalar(filter->x, &filter->P[0][0], H, residual, 0.0009f, 6);
+    // Sonar observation Jacobian is zero on velocity states (indices 3..5).
+    EKFCore::updateScalarPrefix(filter->x, &filter->P[0][0], H, residual, 0.0009f, 6, 3);
     selfloc_clamp_to_field(filter);
     result.used_for_localization = true;
     return result;

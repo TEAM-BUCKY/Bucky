@@ -14,6 +14,7 @@ struct SonarPins {
 
 struct SonarReading {
     float distance[SONAR_COUNT] = {};
+    bool  valid[SONAR_COUNT] = {};
 };
 
 class Sonar {

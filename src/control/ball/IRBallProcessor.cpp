@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include "helpers/Math.h"
+#include "io/cordic/cordic.h"
 
 constexpr float minAmplitude = 40.0f;
 constexpr float maxAmplitude = 3600.0f;
@@ -39,6 +40,20 @@ void IRBallProcessor::reset()
 void IRBallProcessor::setChannelOffset(const uint32_t offset)
 {
     channelOffset_ = offset % IR_MUX_CHANNELS;
+}
+
+void IRBallProcessor::lockS0AtSensor(const uint8_t peakSensor)
+{
+    if (s0Locked_) return;
+    // Physical sensor i currently reads buffer slot (i + channelOffset_) % 16.
+    // To relabel `peakSensor` as the new sensor 0, point the new index 0 at
+    // the same buffer slot that peakSensor is on today.
+    channelOffset_ = (static_cast<uint32_t>(peakSensor) + channelOffset_) % IR_MUX_CHANNELS;
+    // Reset the drift detector so it doesn't spend the next 8 frames
+    // pulling the offset back toward the boot-calibration value.
+    driftFrames_ = 0;
+    pendingOffset_ = channelOffset_;
+    s0Locked_ = true;
 }
 
 void IRBallProcessor::setThresholdRatio(const float ratio)
@@ -125,7 +140,8 @@ void IRBallProcessor::setDefaultDistanceCalibration(float minDistanceCm, float m
 float IRBallProcessor::lookupDistanceFromAmplitude(const float* amplitudes, const float* distances, const uint32_t count,
                                                  const float amplitude)
 {
-    // Interpolate the distance from the calibrated amplitude table.
+    // Interpolate the distance from the calibrated amplitude table. The LUT
+    // is sorted with amplitudes descending (distances ascending).
     if (count == 0)
         return 0.0f;
 
@@ -135,21 +151,28 @@ float IRBallProcessor::lookupDistanceFromAmplitude(const float* amplitudes, cons
     if (amplitude <= amplitudes[count - 1])
         return distances[count - 1];
 
-    for (uint32_t i = 1; i < count; ++i)
+    // Binary search for the first index i where amplitudes[i] <= amplitude.
+    // Since the array is descending, this is the lower end of the bracketing
+    // segment. Replaces the prior O(n) linear scan with O(log n).
+    uint32_t lo = 1;
+    uint32_t hi = count - 1;
+    while (lo < hi)
     {
-        if (amplitude >= amplitudes[i])
-        {
-            const float a0 = amplitudes[i - 1];
-            const float a1 = amplitudes[i];
-            const float d0 = distances[i - 1];
-            const float d1 = distances[i];
-            const float span = a0 - a1;
-            const float t = span > 0.0f ? (a0 - amplitude) / span : 0.0f;
-            return d0 + t * (d1 - d0);
-        }
+        const uint32_t mid = lo + ((hi - lo) >> 1);
+        if (amplitudes[mid] <= amplitude)
+            hi = mid;
+        else
+            lo = mid + 1;
     }
 
-    return distances[count - 1];
+    const uint32_t i = lo;
+    const float a0 = amplitudes[i - 1];
+    const float a1 = amplitudes[i];
+    const float d0 = distances[i - 1];
+    const float d1 = distances[i];
+    const float span = a0 - a1;
+    const float t = span > 0.0f ? (a0 - amplitude) / span : 0.0f;
+    return d0 + t * (d1 - d0);
 }
 
 IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t sensorCount) const
@@ -163,6 +186,115 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
 
     const uint32_t n = clampSensorCount(sensorCount);
     float calibrated[MAX_SENSORS] = {};
+
+    // --- Runtime mux-phase drift detection ---
+    // The 74HC4040 mux counter is free-running and its CLK line can pick up
+    // a glitch edge, rotating the buffer-index-to-physical-sensor mapping.
+    // ir_calibrate_channels() runs once at boot, so without this block a
+    // drift event misroutes every sensor for the rest of the session.
+    //
+    // The detection mirrors boot calibration: find the `unconnectedCount`
+    // consecutive slots with the smallest per-channel max, and place sensor 0
+    // right after that cluster. This is only reliable when the ring is
+    // otherwise quiet — if a ball is illuminating a bright arc, the 4
+    // back-facing connected sensors on the opposite side can read lower
+    // than floating unconnected mux inputs picking up noise, causing the
+    // detector to latch onto a 180°-rotated (wrong) offset. So gate the
+    // detection on `peakMax < kDriftDetectPeakMax` — same "field clear"
+    // precondition the header comment on ir_calibrate_channels spells out.
+    if (n < IR_MUX_CHANNELS && n > 0)
+    {
+        const uint32_t unconnectedCount = IR_MUX_CHANNELS - n;
+
+        uint16_t maxPerCh[IR_MUX_CHANNELS] = {};
+        for (uint32_t sweep = 0; sweep < IR_SWEEPS_PER_CYCLE; ++sweep)
+        {
+            const uint16_t* row = raw + sweep * IR_MUX_CHANNELS;
+            for (uint32_t ch = 0; ch < IR_MUX_CHANNELS; ++ch)
+                if (row[ch] > maxPerCh[ch]) maxPerCh[ch] = row[ch];
+        }
+
+        uint16_t peakMax = 0;
+        for (uint32_t ch = 0; ch < IR_MUX_CHANNELS; ++ch)
+            if (maxPerCh[ch] > peakMax) peakMax = maxPerCh[ch];
+
+        if (peakMax < kDriftDetectPeakMax)
+        {
+            uint32_t bestSum = UINT32_MAX;
+            uint32_t secondBestSum = UINT32_MAX;
+            uint8_t  bestStart = 0;
+            for (uint8_t s = 0; s < IR_MUX_CHANNELS; ++s)
+            {
+                uint32_t sum = 0;
+                for (uint32_t k = 0; k < unconnectedCount; ++k)
+                    sum += maxPerCh[(s + k) % IR_MUX_CHANNELS];
+                if (sum < bestSum)
+                {
+                    secondBestSum = bestSum;
+                    bestSum = sum;
+                    bestStart = s;
+                }
+                else if (sum < secondBestSum)
+                {
+                    secondBestSum = sum;
+                }
+            }
+
+            // Confidence gate: runner-up must be >1.5× + 10 counts above best.
+            // Rotating a genuine quiet-cluster window by one slot replaces one
+            // unconnected channel with one connected channel, so the true
+            // phase has runner-up ≈ 2-3× best. A close runner-up means the
+            // detection is ambiguous — skip it.
+            if (secondBestSum > bestSum + bestSum / 2 + 10)
+            {
+                const uint32_t detected =
+                    (static_cast<uint32_t>(bestStart) + unconnectedCount) % IR_MUX_CHANNELS;
+
+                if (detected == channelOffset_)
+                {
+                    driftFrames_ = 0;
+                }
+                else if (detected == pendingOffset_)
+                {
+                    if (++driftFrames_ >= kDriftConfirmFrames)
+                    {
+                        channelOffset_ = detected;
+                        driftFrames_ = 0;
+                    }
+                }
+                else
+                {
+                    pendingOffset_ = detected;
+                    driftFrames_ = 1;
+                }
+            }
+        }
+        else
+        {
+            // Ball-bright frame — detection unreliable, reset any pending flip.
+            driftFrames_ = 0;
+        }
+    }
+
+    // Rebuild the sensor-angle sin/cos tables only when n changes. For a
+    // fixed board that's once at boot; steady-state cost is zero. Prior code
+    // called cordic_sin_cos + degrees→radians inside the per-sensor loop.
+    //
+    // Ring geometry on this board: sensor 0 is mounted at body +Y (front of
+    // the robot) and indices increase clockwise, so sensor i sits at physical
+    // body angle (π/2 − 2π·i/N) in standard CCW math convention. This makes
+    // the weighted-centroid atan2 emit a bearing where 0 = body +X (right),
+    // +π/2 = body +Y (forward), +π = body −X (left) — matching how main.cpp
+    // and the FSM interpret `bearingDeg` downstream (`alpha = theta + bearing`
+    // produces the correct world-frame ball position at any self.theta).
+    if (n != cachedSensorCount_)
+    {
+        const float kTwoPiOverN = (n > 0) ? (2.0f * PI_F / static_cast<float>(n)) : 0.0f;
+        for (uint32_t i = 0; i < n; ++i)
+            cordic_sin_cos(PI_F * 0.5f - kTwoPiOverN * static_cast<float>(i),
+                           &sinAngle_[i], &cosAngle_[i]);
+        cachedSensorCount_ = n;
+    }
 
     float peak = 0.0f;
     uint8_t peakIndex = 0;
@@ -221,23 +353,16 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
             top3 = value;
 
         const float w = value * value;
-        const float angle = Math::degreesToRadians(360.0f * static_cast<float>(i) / static_cast<float>(n));
-        // Convert each active sensor into a unit vector contribution.
-        // Use hardware FPU sinf/cosf rather than the CORDIC peripheral —
-        // the CORDIC path was silently returning (0, 0) from this call site,
-        // collapsing every bearing to 0 deg.
-        const float s = sinf(angle);
-        const float c = cosf(angle);
-        sx += w * c;
-        sy += w * s;
+        sx += w * cosAngle_[i];
+        sy += w * sinAngle_[i];
         totalWeight += w;
     }
 
     if (!(totalWeight > 0.0f))
         return obs;
 
-    const float angleRad = atan2f(sy, sx);
-    const float vectorMagnitude = sqrtf(sx * sx + sy * sy);
+    float angleRad, vectorMagnitude;
+    cordic_atan2_mod(sy, sx, &angleRad, &vectorMagnitude);
     // Average the strongest sensors for a rough signal strength.
     const float strength = (top1 + top2 + top3) / 3.0f;
     const float rangeCm = lookupDistanceFromAmplitude(amplitudeLut_, distanceLut_, lutCount_, strength);
@@ -249,10 +374,11 @@ IRBallObservation IRBallProcessor::process(const uint16_t* raw, const uint32_t s
     obs.strength = strength;
     obs.confidence = clampf((vectorMagnitude / totalWeight) * (strength / (strength + 250.0f)), 0.0f, 1.0f);
 
-    // Convert the final bearing and range into Cartesian coordinates.
-    const float bearingRad = Math::degreesToRadians(obs.bearingDeg);
-    const float sinB = sinf(bearingRad);
-    const float cosB = cosf(bearingRad);
+    // atan2's output is already in [-π, π], so skip the deg→rad round-trip
+    // and use angleRad directly for x/y. bearingDeg above is retained for
+    // the public observation API (consumers expect [0, 360)).
+    float sinB, cosB;
+    cordic_sin_cos(angleRad, &sinB, &cosB);
     obs.x = rangeCm * cosB;
     obs.y = rangeCm * sinB;
 

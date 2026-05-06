@@ -30,7 +30,8 @@ class StrategyFSM
 {
 public:
     static StrategyCommand update(const DigitalField& field, GameState_t current,
-                                  bool lineDetected, bool stuckDetected);
+                                  bool lineDetected, bool stuckDetected,
+                                  bool s0Locked);
 
 private:
     // Convert field-frame target to body-frame mm and call drive_to_waypoint.

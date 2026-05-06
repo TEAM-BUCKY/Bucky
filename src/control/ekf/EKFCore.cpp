@@ -4,10 +4,11 @@
 #include <cstdint>
 
 #include "helpers/Math.h"
+#include "io/cordic/cordic.h"
 
 namespace EKFCore
 {
-    void symmetrize(float* P, const uint8_t n)
+    void symmetrize(float* __restrict__ P, const uint8_t n)
     {
         for (uint8_t r = 0; r < n; ++r)
         {
@@ -20,7 +21,10 @@ namespace EKFCore
         }
     }
 
-    bool predictCovariance(float* P, const float* F, const float* qDiag, const uint8_t n)
+    bool predictCovariance(float* __restrict__ P,
+                           const float* __restrict__ F,
+                           const float* __restrict__ qDiag,
+                           const uint8_t n)
     {
         if (P == nullptr || F == nullptr || qDiag == nullptr || n == 0)
             return false;
@@ -61,11 +65,18 @@ namespace EKFCore
             for (uint8_t c = 0; c < n; ++c)
                 P[r * n + c] = newP[r * n + c];
 
-        symmetrize(P, n);
+        // No post-predict symmetrize: F*P*F'+Q is analytically symmetric, and
+        // updateScalar always symmetrizes downstream. Any ULP-level drift is
+        // corrected on the next sensor update.
         return true;
     }
 
-    bool updateScalar(float* x, float* P, const float* H, const float innovation, const float R, const uint8_t n)
+    bool updateScalar(float* __restrict__ x,
+                      float* __restrict__ P,
+                      const float* __restrict__ H,
+                      const float innovation,
+                      const float R,
+                      const uint8_t n)
     {
         if (x == nullptr || P == nullptr || H == nullptr || n == 0)
             return false;
@@ -111,6 +122,60 @@ namespace EKFCore
         return true;
     }
 
+    bool updateScalarPrefix(float* __restrict__ x,
+                            float* __restrict__ P,
+                            const float* __restrict__ H,
+                            const float innovation,
+                            const float R,
+                            const uint8_t n,
+                            const uint8_t m)
+    {
+        if (x == nullptr || P == nullptr || H == nullptr || n == 0 || m == 0 || m > n)
+            return false;
+
+        // H is zero for indices >= m. All inner loops that contract against H
+        // iterate only up to m, cutting 2*(n-m)*n MACs per sonar/compass update.
+        float PHt[6] = {};
+        for (uint8_t r = 0; r < n; ++r)
+        {
+            float acc = 0.0f;
+            for (uint8_t k = 0; k < m; ++k)
+                acc += P[r * n + k] * H[k];
+            PHt[r] = acc;
+        }
+
+        float S = R;
+        for (uint8_t i = 0; i < m; ++i)
+            S += H[i] * PHt[i];
+
+        if (S < 1.0e-9f)
+            return false;
+
+        float K[6] = {};
+        const float invS = 1.0f / S;
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            K[i] = PHt[i] * invS;
+            x[i] += K[i] * innovation;
+        }
+
+        float HP[6] = {};
+        for (uint8_t c = 0; c < n; ++c)
+        {
+            float acc = 0.0f;
+            for (uint8_t k = 0; k < m; ++k)
+                acc += H[k] * P[k * n + c];
+            HP[c] = acc;
+        }
+
+        for (uint8_t r = 0; r < n; ++r)
+            for (uint8_t c = 0; c < n; ++c)
+                P[r * n + c] -= K[r] * HP[c];
+
+        symmetrize(P, n);
+        return true;
+    }
+
     bool updatePosition2Of4(float x[4],
                             float P[4][4],
                             const float zX,
@@ -142,7 +207,7 @@ namespace EKFCore
         const float d2 = y0 * (inv00 * y0 + inv01 * y1) + y1 * (inv01 * y0 + inv11 * y1);
         if (mahalOut != nullptr) *mahalOut = d2;
 
-        const float norm = 1.0f / (2.0f * PI_F * sqrtf(det));
+        const float norm = 1.0f / (2.0f * PI_F * cordic_sqrt(det));
         if (likelihoodOut != nullptr) *likelihoodOut = fmaxf(1.0e-8f, norm * expf(-0.5f * d2));
 
         if (d2 > gate)

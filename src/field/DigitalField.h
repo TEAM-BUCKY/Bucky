@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "helpers/Math.h"
+#include "io/cordic/cordic.h"
 
 enum BallMode : uint8_t {
     BALL_MODE_FREE = 0,
@@ -33,6 +34,12 @@ typedef struct DigitalField_s {
         float innovation_mag = 0.0f;
         uint8_t visible = 0;
         uint16_t lost_ms = 0;
+        // Derived each tick in RobotBrain::tick so strategy, main loop
+        // possession-hint, and drive helpers can read them without redoing
+        // hypotf + cordic_sin_cos for the same ball-to-self delta.
+        float bxBody = 0.0f;   // body-frame ball delta x (m)
+        float byBody = 0.0f;   // body-frame ball delta y (m)
+        float distM  = 0.0f;   // hypotf(bdx, bdy) in m
     } ball;
 
     struct {
@@ -80,8 +87,8 @@ FORCE_INLINE float fieldClampY(const DigitalField& field, const float y)
 FORCE_INLINE void bodyToField(const float vxBody, const float vyBody, const float theta,
                               float* vxField, float* vyField)
 {
-    const float c = cosf(theta);
-    const float s = sinf(theta);
+    float s, c;
+    cordic_sin_cos(theta, &s, &c);
     *vxField = vxBody * c - vyBody * s;
     *vyField = vxBody * s + vyBody * c;
 }
@@ -89,10 +96,22 @@ FORCE_INLINE void bodyToField(const float vxBody, const float vyBody, const floa
 FORCE_INLINE void fieldToBody(const float vxField, const float vyField, const float theta,
                               float* vxBody, float* vyBody)
 {
-    const float c = cosf(theta);
-    const float s = sinf(theta);
+    float s, c;
+    cordic_sin_cos(theta, &s, &c);
     *vxBody = vxField * c + vyField * s;
     *vyBody = -vxField * s + vyField * c;
+}
+
+// Populate the per-tick ball derived-values cache (body-frame delta + range).
+// Must be called after ball.bx/by and self.x/y/theta are set, before any
+// consumer (StrategyFSM, possession-hint) reads the cache. Centralised so
+// test fixtures and the real brain stay in sync.
+FORCE_INLINE void digitalFieldRefreshBallCache(DigitalField& f)
+{
+    const float bdx = f.ball.bx - f.self.x;
+    const float bdy = f.ball.by - f.self.y;
+    f.ball.distM = hypotf(bdx, bdy);
+    fieldToBody(bdx, bdy, f.self.theta, &f.ball.bxBody, &f.ball.byBody);
 }
 
 #endif // BUCKY_DIGITALFIELD_H

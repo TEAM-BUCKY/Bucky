@@ -27,6 +27,10 @@ void testCompassCalibrate(const TestContext& ctx);
 void testADCRaw(const TestContext& ctx);
 void testCompass(const TestContext& ctx);
 void testIRPositioning(const TestContext& ctx);
+void testIRBallSeek(const TestContext& ctx);
+void testMainLoopSensors(const TestContext& ctx);
+void testStuckDetector(const TestContext& ctx);
+void testStrategyFSM(const TestContext& ctx);
 
 // Load calibration from EEPROM (saved by testCalibrate / testCompassCalibrate).
 // Returns true if valid calibration was found and applied.
