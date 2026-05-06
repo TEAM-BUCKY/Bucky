@@ -1,4 +1,4 @@
-#include "tests.h"
+#include "../tests.h"
 #include "debug.h"
 #include <Arduino.h>
 #include <EEPROM.h>
