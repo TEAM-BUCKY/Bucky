@@ -55,16 +55,19 @@ def main() -> None:
         viz_server.start()
         print(f"Viz server → ws://localhost:{args.viz_port}  (open http://localhost:5173/viz)")
 
+    # SubprocVecEnv pickles the env factory — VizServer contains threading locks that can't
+    # be pickled, so we never pass viz_server to the train envs. Visualization is fed from
+    # the eval env instead, which runs in-process via DummyVecEnv.
     train_env = make_vec_env(
-        make_env(args.stage, domain_rand, viz_server),
+        make_env(args.stage, domain_rand),
         n_envs=args.n_envs,
         seed=args.seed,
         vec_env_cls=SubprocVecEnv,
     )
 
     eval_env = make_vec_env(
-        make_env(args.stage, domain_rand=False),
-        n_envs=4,
+        make_env(args.stage, domain_rand=False, viz_server=viz_server),
+        n_envs=1,
         seed=args.seed + 1000,
     )
 
