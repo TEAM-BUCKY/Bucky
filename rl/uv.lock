@@ -17,42 +17,6 @@ wheels = [
 ]
 
 [[package]]
-name = "bucky-rl"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "gymnasium" },
-    { name = "numpy" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "pettingzoo" },
-    { name = "stable-baselines3" },
-    { name = "tensorboard" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gymnasium", specifier = ">=0.29" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "onnx", specifier = ">=1.16" },
-    { name = "onnxruntime", specifier = ">=1.18" },
-    { name = "pettingzoo", specifier = ">=1.24" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "stable-baselines3", specifier = ">=2.3" },
-    { name = "tensorboard", specifier = ">=2.17" },
-    { name = "websockets", specifier = ">=12.0" },
-]
-provides-extras = ["dev"]
-
-[[package]]
 name = "cloudpickle"
 version = "3.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -859,6 +823,42 @@ sdist = { url = "https://files.pythonhosted.org/packages/84/0e/b5858858d74958632
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/5a/ba30a81239b909821b3153e303e7def45178bf353da4f72380e6c5e8793b/pytest-9.1.0-py3-none-any.whl", hash = "sha256:8ebb0e7888bdf2bdfc602ec51f8f62d50200af37356c74e503c79a94f5c81f32", size = 386453, upload-time = "2026-06-13T18:52:44.045Z" },
 ]
+
+[[package]]
+name = "rl"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "gymnasium" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "pettingzoo" },
+    { name = "stable-baselines3" },
+    { name = "tensorboard" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gymnasium", specifier = ">=0.29" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "onnx", specifier = ">=1.16" },
+    { name = "onnxruntime", specifier = ">=1.18" },
+    { name = "pettingzoo", specifier = ">=1.24" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "stable-baselines3", specifier = ">=2.3" },
+    { name = "tensorboard", specifier = ">=2.17" },
+    { name = "websockets", specifier = ">=12.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ruff"
