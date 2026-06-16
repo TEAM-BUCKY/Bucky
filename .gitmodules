@@ -1,3 +1,0 @@
-[submodule "simulation/libs/raylib"]
-	path = simulation/libs/raylib
-	url = git@github.com:raysan5/raylib
