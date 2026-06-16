@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { RewardTerms } from '$lib/state/simulation.svelte';
+	import * as Card from '$lib/components/ui/card';
 
-	let { terms }: { terms: RewardTerms | null } = $props();
+	let { terms, total }: { terms: RewardTerms | null; total: number | null } = $props();
 
 	const TERM_ORDER = [
 		'ball_to_goal',
@@ -14,33 +15,62 @@
 		'action_magnitude'
 	];
 
-	function barWidth(val: number): string {
-		const pct = Math.min(Math.abs(val) * 200, 100);
-		return `${pct}%`;
+	const POS = '#34d399';
+	const NEG = '#f87171';
+
+	const scale = $derived(
+		terms ? Math.max(0.02, ...TERM_ORDER.map((k) => Math.abs(terms[k] ?? 0))) : 1
+	);
+
+	function pct(val: number): number {
+		return Math.min((Math.abs(val) / scale) * 50, 50);
 	}
 </script>
 
-<div class="rounded-lg border border-border bg-card p-3 text-xs font-mono">
-	<div class="mb-2 text-sm font-semibold text-foreground">Reward Terms</div>
-	{#if terms}
-		{#each TERM_ORDER as key}
-			{@const val = terms[key] ?? 0}
-			<div class="mb-1">
-				<div class="flex justify-between text-muted-foreground">
-					<span>{key}</span>
-					<span class={val >= 0 ? 'text-green-400' : 'text-red-400'}>
-						{val >= 0 ? '+' : ''}{val.toFixed(4)}
-					</span>
-				</div>
-				<div class="mt-0.5 h-1.5 w-full rounded bg-muted">
-					<div
-						class="h-full rounded {val >= 0 ? 'bg-green-500' : 'bg-red-500'}"
-						style="width: {barWidth(val)}"
-					></div>
-				</div>
+<Card.Root>
+	<Card.Header class="pb-2">
+		<div class="flex items-baseline justify-between">
+			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
+				Reward
+			</Card.Title>
+			{#if total !== null}
+				<span class="font-mono text-xs tabular-nums" style="color: {total >= 0 ? POS : NEG}">
+					Σ {total >= 0 ? '+' : ''}{total.toFixed(3)}
+				</span>
+			{/if}
+		</div>
+	</Card.Header>
+	<Card.Content>
+		{#if terms}
+			<div class="flex flex-col gap-1.5">
+				{#each TERM_ORDER as key}
+					{@const val = terms[key] ?? 0}
+					<div>
+						<div class="flex justify-between font-mono text-[11px]">
+							<span class="text-muted-foreground">{key}</span>
+							<span class="tabular-nums" style="color: {val >= 0 ? POS : NEG}">
+								{val >= 0 ? '+' : ''}{val.toFixed(4)}
+							</span>
+						</div>
+						<div class="relative mt-0.5 h-1.5 w-full rounded-sm bg-muted/60">
+							<div class="absolute inset-y-0 left-1/2 w-px bg-border"></div>
+							{#if val >= 0}
+								<div
+									class="absolute inset-y-0 left-1/2 rounded-r-sm"
+									style="width: {pct(val)}%; background: {POS}"
+								></div>
+							{:else}
+								<div
+									class="absolute inset-y-0 rounded-l-sm"
+									style="right: 50%; width: {pct(val)}%; background: {NEG}"
+								></div>
+							{/if}
+						</div>
+					</div>
+				{/each}
 			</div>
-		{/each}
-	{:else}
-		<p class="text-muted-foreground">Waiting for data…</p>
-	{/if}
-</div>
+		{:else}
+			<p class="font-mono text-xs text-muted-foreground">Waiting for the live rollout…</p>
+		{/if}
+	</Card.Content>
+</Card.Root>
