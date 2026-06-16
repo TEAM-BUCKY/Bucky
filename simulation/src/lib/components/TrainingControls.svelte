@@ -5,7 +5,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import * as Select from '$lib/components/ui/select';
+	import Combobox from '$lib/components/ui/combobox/Combobox.svelte';
 	import { Play, Square, Loader2 } from '@lucide/svelte';
 
 	const STAGES = [
@@ -75,16 +75,7 @@
 	<Card.Content class="flex flex-col gap-3">
 		<div class="flex flex-col gap-1">
 			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Stage</Label>
-			<Select.Root bind:value={cfg.stage} disabled={busy} type="single">
-				<Select.Trigger class="h-9 font-mono text-sm">
-					<Select.Value />
-				</Select.Trigger>
-				<Select.Content>
-					{#each STAGES as s}
-						<Select.Item value={s.value} label={s.label} disabled={s.stub} />
-					{/each}
-				</Select.Content>
-			</Select.Root>
+			<Combobox bind:value={cfg.stage} items={STAGES} disabled={busy} searchPlaceholder="Search stages…" />
 		</div>
 
 		<div class="grid grid-cols-3 gap-2">
@@ -142,29 +133,23 @@
 			<div class="grid grid-cols-1 gap-2 rounded-md border border-border/70 bg-input/20 p-2">
 				<div class="flex flex-col gap-1">
 					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Source run</Label>
-					<Select.Root bind:value={srcRun} disabled={busy} type="single">
-						<Select.Trigger class="h-8 font-mono text-xs">
-							<Select.Value />
-						</Select.Trigger>
-						<Select.Content>
-							{#each runs as r}
-								<Select.Item value={r.run} label={r.run} />
-							{/each}
-						</Select.Content>
-					</Select.Root>
+					<Combobox
+						bind:value={srcRun}
+						items={runs.map((r) => ({ value: r.run, label: r.run }))}
+						disabled={busy}
+						size="sm"
+						searchPlaceholder="Search runs…"
+					/>
 				</div>
 				<div class="flex flex-col gap-1">
 					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</Label>
-					<Select.Root bind:value={srcCkpt} disabled={busy} type="single">
-						<Select.Trigger class="h-8 font-mono text-xs">
-							<Select.Value />
-						</Select.Trigger>
-						<Select.Content>
-							{#each srcCheckpoints as c}
-								<Select.Item value={c} label={c.replace(/\.zip$/, '')} />
-							{/each}
-						</Select.Content>
-					</Select.Root>
+					<Combobox
+						bind:value={srcCkpt}
+						items={srcCheckpoints.map((c) => ({ value: c, label: c.replace(/\.zip$/, '') }))}
+						disabled={busy}
+						size="sm"
+						searchPlaceholder="Search checkpoints…"
+					/>
 				</div>
 				<p class="font-mono text-[10px] leading-snug text-muted-foreground">
 					Seeds weights from this checkpoint into a new <span class="text-foreground/80">…_cont</span> run.
