@@ -76,7 +76,9 @@
 		<div class="flex flex-col gap-1">
 			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Stage</Label>
 			<Select.Root bind:value={cfg.stage} disabled={busy} type="single">
-				<Select.Trigger class="h-9 font-mono text-sm" />
+				<Select.Trigger class="h-9 font-mono text-sm">
+					<Select.Value />
+				</Select.Trigger>
 				<Select.Content>
 					{#each STAGES as s}
 						<Select.Item value={s.value} label={s.label} disabled={s.stub} />
@@ -141,7 +143,9 @@
 				<div class="flex flex-col gap-1">
 					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Source run</Label>
 					<Select.Root bind:value={srcRun} disabled={busy} type="single">
-						<Select.Trigger class="h-8 font-mono text-xs" />
+						<Select.Trigger class="h-8 font-mono text-xs">
+							<Select.Value />
+						</Select.Trigger>
 						<Select.Content>
 							{#each runs as r}
 								<Select.Item value={r.run} label={r.run} />
@@ -152,7 +156,9 @@
 				<div class="flex flex-col gap-1">
 					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</Label>
 					<Select.Root bind:value={srcCkpt} disabled={busy} type="single">
-						<Select.Trigger class="h-8 font-mono text-xs" />
+						<Select.Trigger class="h-8 font-mono text-xs">
+							<Select.Value />
+						</Select.Trigger>
 						<Select.Content>
 							{#each srcCheckpoints as c}
 								<Select.Item value={c} label={c.replace(/\.zip$/, '')} />
