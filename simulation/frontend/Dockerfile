@@ -1,5 +1,8 @@
 # Frontend: build the static SPA, then serve it with nginx.
-FROM node:22-alpine AS build
+# Build on Debian (glibc), NOT alpine: Vite 8 / rolldown and lightningcss load native
+# binaries, and pnpm --frozen-lockfile can fail to resolve the musl variant on alpine,
+# making `pnpm build` die with exit code 1. glibc uses the proven *-gnu bindings.
+FROM node:22-slim AS build
 WORKDIR /app
 RUN corepack enable
 
