@@ -1,53 +1,44 @@
-# Bucky deployment stack: Traefik (HTTPS) + FastAPI backend + static frontend.
-# Deploy on a VPS:  cp .env.example .env  (fill it in)  →  docker compose up -d --build
+# Bucky deployment stack: FastAPI backend + static frontend, behind a SHARED Traefik.
+#
+# This stack does NOT run its own Traefik. It attaches to an existing Traefik instance
+# (deployed separately) via the external `traefik_public` network, the same way the
+# `closeby` stack does. The shared Traefik owns ports 80/443, the ACME email, and the
+# `leresolver` certificate resolver — we only declare routing via labels here.
 #
 # Traefik serves the public frontend at https://${DOMAIN} and proxies /api to the
 # backend (the more specific Host+PathPrefix rule wins automatically). WebSockets
 # (/api/stream) upgrade transparently. Control endpoints are gated by Basic auth in
 # the backend itself (APP_USERNAME / APP_PASSWORD).
+#
+# Required env (local `.env`, auto-loaded for interpolation, or Portainer stack vars):
+#   DOMAIN, APP_PASSWORD, INGEST_TOKEN   (APP_USERNAME, CORS_ORIGINS optional)
 
 services:
-  traefik:
-    image: traefik:v3.1
-    restart: unless-stopped
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      # Redirect all HTTP to HTTPS.
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      # Let's Encrypt via HTTP-01 challenge.
-      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.le.acme.httpchallenge=true
-      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/letsencrypt:/letsencrypt
-    networks: [web]
-
   backend:
     build: ./backend
     restart: unless-stopped
-    env_file: .env
+    # Variables come from the deployment environment: a local `.env` (auto-loaded by
+    # `docker compose` for interpolation) or the stack env vars in Portainer/the CI UI.
+    # We pass them through explicitly instead of `env_file: .env` so deployment does not
+    # require a committed `.env` (it is gitignored, so git-based deploys never have it).
     environment:
       - PORT=8000
+      - APP_USERNAME=${APP_USERNAME:-admin}
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      - INGEST_TOKEN=${INGEST_TOKEN:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
     volumes:
       - ./data/checkpoints:/app/checkpoints
       - ./data/runs:/app/runs
       - ./data/state:/app/state
+    networks:
+      - traefik_public
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.backend.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)
-      - traefik.http.routers.backend.entrypoints=websecure
-      - traefik.http.routers.backend.tls.certresolver=le
-      - traefik.http.services.backend.loadbalancer.server.port=8000
-    networks: [web]
+      - "traefik.enable=true"
+      - "traefik.http.routers.bucky-backend.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.bucky-backend.entrypoints=websecure"
+      - "traefik.http.routers.bucky-backend.tls.certresolver=leresolver"
+      - "traefik.http.services.bucky-backend.loadbalancer.server.port=8000"
 
   frontend:
     build:
@@ -56,13 +47,22 @@ services:
         # Same-origin: the SPA calls /api on its own host (proxied to backend).
         VITE_API_BASE: /api
     restart: unless-stopped
+    networks:
+      - traefik_public
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)
-      - traefik.http.routers.frontend.entrypoints=websecure
-      - traefik.http.routers.frontend.tls.certresolver=le
-      - traefik.http.services.frontend.loadbalancer.server.port=80
-    networks: [web]
+      - "traefik.enable=true"
+      - "traefik.http.routers.bucky-frontend.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.bucky-frontend.entrypoints=websecure"
+      - "traefik.http.routers.bucky-frontend.tls.certresolver=leresolver"
+      - "traefik.http.services.bucky-frontend.loadbalancer.server.port=80"
+      # Security headers for the public site (HSTS + clickjacking/sniffing protection).
+      - "traefik.http.middlewares.bucky-headers.headers.stsSeconds=63072000"
+      - "traefik.http.middlewares.bucky-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.bucky-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.bucky-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.bucky-headers.headers.frameDeny=true"
+      - "traefik.http.routers.bucky-frontend.middlewares=bucky-headers"
 
 networks:
-  web:
+  traefik_public:
+    external: true

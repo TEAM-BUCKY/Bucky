@@ -8,7 +8,7 @@ username/password set in `.env`.
 simulation/
 ├── frontend/            SvelteKit SPA (static build, served by nginx)
 ├── backend/             FastAPI app + the training/simulation code (package: bucky)
-├── docker-compose.yml   Traefik (HTTPS) + backend + frontend
+├── docker-compose.yml   backend + frontend, behind a shared external Traefik
 └── .env.example         Copy to .env and fill in
 ```
 
@@ -23,24 +23,30 @@ simulation/
     token-gated).
   The backend spawns `scripts/train.py` / `scripts/play.py` as subprocesses and fans
   their frames out to all stream clients.
-- **traefik** — terminates HTTPS (Let's Encrypt), serves the frontend at
-  `https://${DOMAIN}` and routes `/api` to the backend.
+- **Traefik** — NOT part of this stack. A shared Traefik instance (deployed
+  separately, on the external `traefik_public` network) terminates HTTPS via the
+  `leresolver` resolver, serves the frontend at `https://${DOMAIN}`, and routes
+  `/api` to the backend. This stack only declares its routes via labels.
 
 ## Deploy on a VPS
 
 1. Point a DNS record for your domain at the server's IP.
-2. Install Docker + the Compose plugin.
+2. Install Docker + the Compose plugin, and make sure a shared Traefik is running
+   with a `leresolver` cert resolver. Create its network once if it doesn't exist:
+   ```bash
+   docker network create traefik_public
+   ```
 3. Clone and configure:
    ```bash
    git clone <repo> && cd <repo>/simulation
    cp .env.example .env
-   $EDITOR .env            # set DOMAIN, ACME_EMAIL, APP_USERNAME, APP_PASSWORD, INGEST_TOKEN
+   $EDITOR .env            # set DOMAIN, APP_USERNAME, APP_PASSWORD, INGEST_TOKEN
    ```
 4. Bring it up:
    ```bash
    docker compose up -d --build
    ```
-   Traefik fetches a certificate automatically. The site is then live at
+   The shared Traefik fetches a certificate automatically. The site is then live at
    `https://${DOMAIN}`; log in with `APP_USERNAME`/`APP_PASSWORD` to start jobs.
 
 Checkpoints and run logs persist in `./data/` on the host. To update: `git pull`
