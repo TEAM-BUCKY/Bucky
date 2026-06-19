@@ -1,0 +1,68 @@
+# Bucky deployment stack: Traefik (HTTPS) + FastAPI backend + static frontend.
+# Deploy on a VPS:  cp .env.example .env  (fill it in)  →  docker compose up -d --build
+#
+# Traefik serves the public frontend at https://${DOMAIN} and proxies /api to the
+# backend (the more specific Host+PathPrefix rule wins automatically). WebSockets
+# (/api/stream) upgrade transparently. Control endpoints are gated by Basic auth in
+# the backend itself (APP_USERNAME / APP_PASSWORD).
+
+services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Redirect all HTTP to HTTPS.
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # Let's Encrypt via HTTP-01 challenge.
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/letsencrypt:/letsencrypt
+    networks: [web]
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=8000
+    volumes:
+      - ./data/checkpoints:/app/checkpoints
+      - ./data/runs:/app/runs
+      - ./data/state:/app/state
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.backend.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)
+      - traefik.http.routers.backend.entrypoints=websecure
+      - traefik.http.routers.backend.tls.certresolver=le
+      - traefik.http.services.backend.loadbalancer.server.port=8000
+    networks: [web]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Same-origin: the SPA calls /api on its own host (proxied to backend).
+        VITE_API_BASE: /api
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.frontend.entrypoints=websecure
+      - traefik.http.routers.frontend.tls.certresolver=le
+      - traefik.http.services.frontend.loadbalancer.server.port=80
+    networks: [web]
+
+networks:
+  web:

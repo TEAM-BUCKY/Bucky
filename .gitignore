@@ -10,3 +10,28 @@ build
 .idea
 
 .claude
+
+checkpoints
+runs
+state
+
+.svelte-kit
+node_modules
+
+# Python envs / caches
+.venv
+.ruff_cache
+.pytest_cache
+__pycache__/
+*.pyc
+
+# Deployment secrets & state
+simulation/.env
+simulation/data/
+simulation/traefik/letsencrypt/acme.json
+
+# Trained model exports
+*.onnx
+*.onnx.data
+
+.playwright-mcp

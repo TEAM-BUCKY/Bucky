@@ -1,0 +1,85 @@
+<script lang="ts">
+	import Calendar from '$lib/components/ui/calendar/calendar.svelte';
+	import * as Popover from '$lib/components/ui/popover/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import { X } from '@lucide/svelte';
+	import { getLocalTimeZone, type DateValue } from '@internationalized/date';
+
+	// `value` is epoch seconds (local wall-clock), or null when nothing is picked.
+	let {
+		value = $bindable<number | null>(null),
+		placeholder = 'Select date'
+	}: { value?: number | null; placeholder?: string } = $props();
+
+	let open = $state(false);
+	let dateVal = $state<DateValue | undefined>(undefined);
+	let timeVal = $state('12:00:00');
+
+	// Let a parent clear the field by setting value back to null.
+	$effect(() => {
+		if (value === null && dateVal) dateVal = undefined;
+	});
+
+	function commit() {
+		if (!dateVal) {
+			value = null;
+			return;
+		}
+		const [h, m, s] = timeVal.split(':').map((n) => parseInt(n, 10));
+		const js = dateVal.toDate(getLocalTimeZone());
+		js.setHours(h || 0, m || 0, s || 0, 0);
+		value = Math.floor(js.getTime() / 1000);
+	}
+
+	function clear() {
+		dateVal = undefined;
+		value = null;
+	}
+</script>
+
+<div class="flex gap-2">
+	<Popover.Root bind:open>
+		<Popover.Trigger>
+			{#snippet child({ props })}
+				<Button
+					{...props}
+					variant="outline"
+					class="flex-1 justify-between font-mono text-[11px] font-normal {dateVal
+						? ''
+						: 'text-muted-foreground'}"
+				>
+					{dateVal ? dateVal.toDate(getLocalTimeZone()).toLocaleDateString() : placeholder}
+					<ChevronDownIcon class="size-3.5 opacity-60" />
+				</Button>
+			{/snippet}
+		</Popover.Trigger>
+		<Popover.Content class="w-auto overflow-hidden p-0" align="start">
+			<Calendar
+				type="single"
+				bind:value={dateVal}
+				onValueChange={() => {
+					commit();
+					open = false;
+				}}
+				captionLayout="dropdown"
+			/>
+			{#if value != null}
+				<div class="flex justify-end border-t border-border p-2">
+					<Button variant="ghost" size="xs" class="font-mono text-[11px]" onclick={clear}>
+						<X class="size-3" />Clear
+					</Button>
+				</div>
+			{/if}
+		</Popover.Content>
+	</Popover.Root>
+
+	<Input
+		type="time"
+		step="1"
+		bind:value={timeVal}
+		onchange={commit}
+		class="w-24 bg-background font-mono text-[11px] appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+	/>
+</div>

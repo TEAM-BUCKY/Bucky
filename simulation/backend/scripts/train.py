@@ -1,0 +1,266 @@
+#!/usr/bin/env python
+"""Train Bucky agent with PPO.
+
+Usage:
+    uv run python scripts/train.py --stage APPROACH_STATIC_BALL --timesteps 200000
+    uv run python scripts/train.py --stage PUSH_TO_EMPTY_GOAL --timesteps 1000000 --n-envs 8
+
+Live visualization is driven by the FastAPI backend (app/): pass --stream-url and this
+trainer streams frames + metrics back to its /api/ingest endpoint. The backend normally
+launches this script for you when you click "Launch" in the UI, so you rarely run
+--stream-url by hand.
+"""
+from __future__ import annotations
+import argparse
+import os
+import signal
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+import torch
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, CheckpointCallback
+
+
+class StopAtTime(BaseCallback):
+    """Stop training at a wall-clock deadline (epoch seconds).
+
+    Returning False from a callback makes SB3's ``learn`` exit cleanly between
+    steps, so the normal post-training save runs — a time-limited run finishes
+    and checkpoints exactly like a step-limited one.
+    """
+
+    def __init__(self, deadline: float) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def _on_step(self) -> bool:
+        return time.time() < self._deadline
+
+from bucky.curriculum import Stage
+from bucky.envs.bucky_single import BuckySingleEnv
+from bucky.envs.bucky_selfplay import BuckySelfPlayEnv
+
+
+def make_env(stage: str, domain_rand: bool):
+    self_play = stage == Stage.SELF_PLAY_1V1.value
+
+    def _init():
+        if self_play:
+            return BuckySelfPlayEnv(stage=stage, domain_rand=domain_rand)
+        return BuckySingleEnv(stage=stage, domain_rand=domain_rand)
+    return _init
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stage", default="APPROACH_STATIC_BALL",
+                        choices=[s.value for s in Stage])
+    parser.add_argument("--timesteps", type=int, default=500_000)
+    parser.add_argument("--duration", type=float, default=None,
+                        help="Wall-clock seconds to train, then stop and save. "
+                             "Overrides --timesteps as the stop condition.")
+    parser.add_argument("--until", type=float, default=None,
+                        help="Absolute epoch time to train until, then stop and save. "
+                             "Overrides --timesteps and --duration.")
+    parser.add_argument("--n-envs", type=int, default=16)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--run-name", default=None)
+    parser.add_argument("--no-domain-rand", action="store_true")
+    parser.add_argument("--resume-from", default=None,
+                        help="Path to a .zip checkpoint to seed weights from "
+                             "(continues training in this new run)")
+    parser.add_argument("--stream-url", default=None,
+                        help="ws:// URL of the viz hub ingest endpoint (enables live viz)")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "auto"],
+                        help="Torch device. CPU is fastest for this tiny MLP — the GPU's "
+                             "per-step host<->device copies outweigh its compute here.")
+    args = parser.parse_args()
+
+    # The hub may launch us from a backgrounded process whose SIGINT is set to
+    # SIG_IGN (POSIX background-job behaviour); restore the default so a "Kill"
+    # SIGINT reliably raises KeyboardInterrupt and we can checkpoint before exit.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+
+    run_name = args.run_name or f"{args.stage}_seed{args.seed}"
+    log_dir = f"runs/{run_name}"
+    ckpt_dir = f"checkpoints/{run_name}"
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(ckpt_dir, exist_ok=True)
+
+    domain_rand = not args.no_domain_rand
+    self_play = args.stage == Stage.SELF_PLAY_1V1.value
+    snapshot_base = f"{ckpt_dir}/opponent_snapshot"
+    snapshot_path = f"{snapshot_base}.zip"
+
+    # The policy net is tiny ([64,64] MLP on 17-dim obs). PyTorch's default inter-op
+    # parallelism spawns more threads than the kernel can usefully schedule alongside
+    # the SubprocVecEnv workers, so pin it to 1 to eliminate that contention.
+    torch.set_num_threads(1)
+
+    # Live visualization: stream frames + training scalars to the hub. The viz is fed
+    # by a dedicated in-process "shadow" rollout (LiveVizCallback), so it animates
+    # continuously and never has to be wired into the (unpicklable) SubprocVecEnv.
+    stream = None
+    extra_callbacks = []
+    if args.stream_url:
+        from bucky.stream_client import StreamClient
+        from bucky.callbacks import (
+            LiveVizCallback, MetricsCallback, SelfPlayVizCallback,
+        )
+        stream = StreamClient(args.stream_url)
+        stream.start()
+        viz = (SelfPlayVizCallback(stream, opponent_path=snapshot_path)
+               if self_play else
+               LiveVizCallback(stream, stage=args.stage, domain_rand=False))
+        extra_callbacks = [viz, MetricsCallback(stream)]
+
+    train_env = make_vec_env(
+        make_env(args.stage, domain_rand),
+        n_envs=args.n_envs,
+        seed=args.seed,
+        vec_env_cls=SubprocVecEnv,
+    )
+
+    # Same vec_env_cls as train_env so SB3's EvalCallback doesn't warn about a type
+    # mismatch (SubprocVecEnv vs the default DummyVecEnv).
+    eval_env = make_vec_env(
+        make_env(args.stage, domain_rand=False),
+        n_envs=1,
+        seed=args.seed + 1000,
+        vec_env_cls=SubprocVecEnv,
+    )
+
+    # PPO hyperparameters tuned for low-dim continuous control (17-dim obs, 3-dim act).
+    # net_arch=[64,64] chosen to fit Cortex-M4F after int8 quantization.
+    # n_steps=512, batch_size=256 → 8 minibatches per update.
+    if args.resume_from:
+        # Seed weights + optimizer state from an existing checkpoint and keep training.
+        # Resume requires the checkpoint's obs/action spaces to match the current env's.
+        # That holds for curriculum transfer between today's stages (they share the
+        # 17-dim obs), but NOT for checkpoints saved before the observation layout
+        # changed — those have a different input size and cannot be loaded.
+        print(f"Resuming from {args.resume_from}")
+        try:
+            model = PPO.load(
+                args.resume_from,
+                env=train_env,
+                tensorboard_log=log_dir,
+                device=args.device,
+            )
+        except ValueError as e:
+            if "spaces do not match" not in str(e):
+                raise
+            sys.exit(
+                f"\nCannot resume from {args.resume_from}: it was trained with a "
+                f"different observation/action space than the current environment.\n"
+                f"  {e}\n"
+                f"This checkpoint is stale (the observation layout changed). Train a "
+                f"fresh model instead by launching without 'resume from' / --resume-from.\n"
+            )
+    else:
+        model = PPO(
+            policy="MlpPolicy",
+            env=train_env,
+            verbose=1,
+            tensorboard_log=log_dir,
+            seed=args.seed,
+            learning_rate=3e-4,
+            n_steps=1024,
+            batch_size=512,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            policy_kwargs={"net_arch": [64, 64]},
+            device=args.device,
+        )
+
+    # Self-play bootstrap: freeze the freshly-built policy as the initial opponent and
+    # hand it to every worker before training starts, then refresh it periodically.
+    if self_play:
+        from bucky.callbacks import SelfPlaySnapshotCallback
+        model.save(snapshot_base)
+        train_env.env_method("set_opponent", snapshot_path)
+        eval_env.env_method("set_opponent", snapshot_path)
+        extra_callbacks.append(
+            SelfPlaySnapshotCallback(snapshot_base, every=max(50_000 // args.n_envs, 1))
+        )
+
+    callbacks = [
+        EvalCallback(
+            eval_env,
+            best_model_save_path=ckpt_dir,
+            log_path=log_dir,
+            eval_freq=max(10_000 // args.n_envs, 1),
+            n_eval_episodes=20,
+            deterministic=True,
+        ),
+        CheckpointCallback(
+            save_freq=max(50_000 // args.n_envs, 1),
+            save_path=ckpt_dir,
+            name_prefix="model",
+        ),
+        *extra_callbacks,
+    ]
+
+    # Optional wall-clock stop. --until wins over --duration; either one runs the
+    # step budget up to a very large number so time is the binding constraint.
+    deadline = None
+    if args.until is not None:
+        deadline = float(args.until)
+    elif args.duration is not None:
+        deadline = time.time() + float(args.duration)
+    if deadline is not None:
+        callbacks.append(StopAtTime(deadline))
+
+    if deadline is not None:
+        mins = max(0.0, (deadline - time.time()) / 60)
+        print(f"\nTraining {run_name} | stage={args.stage} | ~{mins:.1f} min (until time) | {args.n_envs} envs")
+    else:
+        print(f"\nTraining {run_name} | stage={args.stage} | {args.timesteps:,} steps | {args.n_envs} envs")
+    if stream:
+        stream.send({"type": "trainer_status", "phase": "started", "run_name": run_name, "run_type": "train"})
+
+    save_path = f"{ckpt_dir}/final_model"
+    try:
+        model.learn(total_timesteps=args.timesteps, callback=callbacks, progress_bar=True)
+    except (KeyboardInterrupt, EOFError, BrokenPipeError, ConnectionResetError):
+        # Hub "Kill" sends SIGINT precisely so we can checkpoint before exiting.
+        # (A broken worker pipe surfaces as EOFError/BrokenPipeError, so catch those too.)
+        print("\nInterrupted — saving model…")
+        save_path = f"{ckpt_dir}/interrupted_model"
+        if stream:
+            stream.send({"type": "trainer_status", "phase": "saving", "run_name": run_name, "run_type": "train"})
+        try:
+            model.save(save_path)
+            print(f"Saved to {save_path}.zip")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not save on interrupt: {exc}")
+        if stream:
+            stream.send({"type": "trainer_status", "phase": "interrupted", "run_name": run_name, "run_type": "train"})
+    else:
+        model.save(save_path)
+        if stream:
+            stream.send({"type": "trainer_status", "phase": "done", "run_name": run_name, "run_type": "train"})
+        print(f"\nDone. Model saved to {save_path}.zip")
+    finally:
+        for env in (train_env, eval_env):
+            try:
+                env.close()
+            except Exception:  # noqa: BLE001 — best-effort worker cleanup
+                pass
+        if stream:
+            time.sleep(0.3)  # let the final status frame flush to the hub
+            stream.stop()
+
+
+if __name__ == "__main__":
+    main()

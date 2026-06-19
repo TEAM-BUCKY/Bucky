@@ -1,0 +1,50 @@
+[project]
+name = "bucky"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.3",
+    "numpy>=1.26",
+    "pettingzoo>=1.24",
+    "onnx>=1.16",
+    "onnxruntime>=1.18",
+    "tensorboard>=2.17",
+    "websockets>=12.0",
+    "tqdm>=4.66",
+    "rich>=13.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+# Pull the CPU-only torch build (the VPS has no GPU); avoids the multi-GB CUDA wheels.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bucky", "app"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]

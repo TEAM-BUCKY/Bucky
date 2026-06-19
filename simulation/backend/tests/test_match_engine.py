@@ -1,0 +1,66 @@
+"""Tests for the 1v1 match engine (scoreboard + auto-reset + frame schema)."""
+import numpy as np
+
+from bucky.match import MatchEngine
+from bucky.physics.python_backend import FIELD_W
+from bucky.selfplay import SELF_PLAY_OBS_DIM
+
+
+class FixedModel:
+    """Stand-in policy returning a constant action (no NN needed for logic tests)."""
+
+    def __init__(self, action=(0.0, 0.0, 0.0)):
+        self._a = np.array(action, dtype=np.float32)
+
+    def predict(self, obs, deterministic=True):
+        return self._a.copy(), None
+
+
+def test_tick_frame_has_required_keys():
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
+    f = eng.tick()
+    for k in ("robot_pos", "robot_heading", "robot2_pos", "robot2_heading",
+              "ball_pos", "score", "mode", "obs", "episode", "step"):
+        assert k in f, f"missing {k}"
+    assert f["mode"] == "play"
+    assert f["score"] == {"a": 0, "b": 0}
+    assert len(f["robot_pos"]) == 2 and len(f["robot2_pos"]) == 2
+    assert len(f["obs"]) == SELF_PLAY_OBS_DIM
+
+
+def test_goal_for_a_increments_score_and_resets():
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
+    eng._phys._ball_pos = np.array([FIELD_W / 2 + 0.05, 0.0])
+    eng._phys._ball_vel = np.zeros(2)
+    f = eng.tick()
+    assert f["score"] == {"a": 1, "b": 0}
+    assert f["episode"] == 1                          # episode advanced on reset
+    assert np.linalg.norm(np.array(f["ball_pos"])) < 0.5   # ball re-centered
+
+
+def test_goal_for_b_increments_score():
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
+    eng._phys._ball_pos = np.array([-(FIELD_W / 2 + 0.05), 0.0])
+    eng._phys._ball_vel = np.zeros(2)
+    f = eng.tick()
+    assert f["score"] == {"a": 0, "b": 1}
+
+
+def test_conceding_team_gets_kickoff_after_goal():
+    # A scores → B was scored against → B should restart on the ball.
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
+    eng._phys._ball_pos = np.array([FIELD_W / 2 + 0.05, 0.0])
+    eng._phys._ball_vel = np.zeros(2)
+    f = eng.tick()
+    a = np.array(f["robot_pos"])
+    b = np.array(f["robot2_pos"])
+    ball = np.array(f["ball_pos"])
+    assert np.linalg.norm(b - ball) < np.linalg.norm(a - ball)
+
+
+def test_step_counter_advances_without_goal():
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
+    f1 = eng.tick()
+    f2 = eng.tick()
+    assert f1["step"] == 1 and f2["step"] == 2
+    assert f1["episode"] == 0 and f2["episode"] == 0
