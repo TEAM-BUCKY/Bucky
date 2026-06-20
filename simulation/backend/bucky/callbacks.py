@@ -97,14 +97,16 @@ class SelfPlaySnapshotCallback(BaseCallback):
     def __init__(self, snapshot_base: str, every: int = 200, verbose: int = 0) -> None:
         super().__init__(verbose)
         self._base = snapshot_base
-        self._path = snapshot_base + ".zip"
+        self._npz = snapshot_base + ".npz"
         self._every = max(1, every)
 
     def _on_step(self) -> bool:
         if self.n_calls % self._every == 0:
-            self.model.save(self._base)
+            from bucky.selfplay import export_policy_npz
+            self.model.save(self._base)              # resumable .zip checkpoint
+            export_policy_npz(self.model, self._npz)  # numpy weights the workers reload
             try:
-                self.training_env.env_method("set_opponent", self._path)
+                self.training_env.env_method("set_opponent", self._npz)
             except Exception:  # noqa: BLE001 — best effort; workers keep the old opponent
                 pass
         return True

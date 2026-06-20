@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, CheckpointCallback
 
 
@@ -94,8 +94,10 @@ def main() -> None:
 
     domain_rand = not args.no_domain_rand
     self_play = args.stage == Stage.SELF_PLAY_1V1.value
-    snapshot_base = f"{ckpt_dir}/opponent_snapshot"
-    snapshot_path = f"{snapshot_base}.zip"
+    snapshot_base = f"{ckpt_dir}/opponent_snapshot"   # model.save() writes {base}.zip
+    # Workers drive the frozen opponent from this pure-numpy weight dump (no torch in the
+    # workers — see bucky.selfplay), refreshed alongside the .zip snapshot.
+    snapshot_npz = f"{snapshot_base}.npz"
 
     # The policy net is tiny ([64,64] MLP on 17-dim obs). PyTorch's default inter-op
     # parallelism spawns more threads than the kernel can usefully schedule alongside
@@ -114,16 +116,24 @@ def main() -> None:
         )
         stream = StreamClient(args.stream_url)
         stream.start()
-        viz = (SelfPlayVizCallback(stream, opponent_path=snapshot_path)
+        viz = (SelfPlayVizCallback(stream, opponent_path=snapshot_npz)
                if self_play else
                LiveVizCallback(stream, stage=args.stage, domain_rand=False))
         extra_callbacks = [viz, MetricsCallback(stream)]
+
+    # Self-play envs are tiny pure-numpy steppers and the frozen opponent now runs in numpy
+    # too (no torch in the env), so run them in-process with DummyVecEnv: torch is loaded
+    # once instead of once per SubprocVecEnv worker — ~0.7 GB vs ~5.5 GB for 16 envs, the
+    # difference between fitting an 8 GB host and being OOM-killed — and it is actually
+    # faster here, since the per-step IPC of SubprocVecEnv outweighs the trivial env compute.
+    # Single-agent stages keep SubprocVecEnv (their working, memory-light path is unchanged).
+    vec_cls = DummyVecEnv if self_play else SubprocVecEnv
 
     train_env = make_vec_env(
         make_env(args.stage, domain_rand),
         n_envs=args.n_envs,
         seed=args.seed,
-        vec_env_cls=SubprocVecEnv,
+        vec_env_cls=vec_cls,
     )
 
     # Same vec_env_cls as train_env so SB3's EvalCallback doesn't warn about a type
@@ -132,7 +142,7 @@ def main() -> None:
         make_env(args.stage, domain_rand=False),
         n_envs=1,
         seed=args.seed + 1000,
-        vec_env_cls=SubprocVecEnv,
+        vec_env_cls=vec_cls,
     )
 
     # PPO hyperparameters tuned for low-dim continuous control (17-dim obs, 3-dim act).
@@ -187,9 +197,11 @@ def main() -> None:
     # hand it to every worker before training starts, then refresh it periodically.
     if self_play:
         from bucky.callbacks import SelfPlaySnapshotCallback
+        from bucky.selfplay import export_policy_npz
         model.save(snapshot_base)
-        train_env.env_method("set_opponent", snapshot_path)
-        eval_env.env_method("set_opponent", snapshot_path)
+        export_policy_npz(model, snapshot_npz)
+        train_env.env_method("set_opponent", snapshot_npz)
+        eval_env.env_method("set_opponent", snapshot_npz)
         extra_callbacks.append(
             SelfPlaySnapshotCallback(snapshot_base, every=max(50_000 // args.n_envs, 1))
         )

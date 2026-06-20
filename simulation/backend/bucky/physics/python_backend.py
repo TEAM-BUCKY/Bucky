@@ -159,7 +159,8 @@ class PyPhysics(PhysicsBackend):
         # get pinned in the corners). The goal mouth is an opening in the white-line
         # goal line, so a ball heading into it passes through to score instead.
         hx, hy = ARENA_HALF_X - BALL_RADIUS, ARENA_HALF_Y - BALL_RADIUS
-        in_goal_y = abs(self._ball_pos[1]) < GOAL_WIDTH / 2
+        ghw = GOAL_WIDTH / 2
+        in_goal_y = abs(self._ball_pos[1]) < ghw
         if not in_goal_y:
             if self._ball_pos[0] < -hx:
                 self._ball_pos[0] = -hx
@@ -170,6 +171,19 @@ class PyPhysics(PhysicsBackend):
         if abs(self._ball_pos[1]) > hy:
             self._ball_vel[1] *= -BALL_RESTITUTION
             self._ball_pos[1] = np.sign(self._ball_pos[1]) * hy
+
+        # Goal side walls. The goal is a box recessed behind the goal line: its mouth (the
+        # GOAL_WIDTH opening at x = ±HALF_W) is open, but the two side walls running back
+        # from the goalposts at y = ±GOAL_WIDTH/2 are solid. Without them a ball loose in
+        # the neutral band behind a goal line could drift laterally into the goal strip and
+        # score "from the side" without ever passing through the mouth. Keep a ball that is
+        # behind a goal line and outside the mouth on the outside of these walls; the only
+        # way into the strip (and thus a goal) is through the mouth at the goal line itself.
+        if abs(self._ball_pos[0]) > HALF_W:
+            side = ghw + BALL_RADIUS
+            if ghw <= abs(self._ball_pos[1]) < side:
+                self._ball_pos[1] = np.sign(self._ball_pos[1]) * side
+                self._ball_vel[1] = np.sign(self._ball_pos[1]) * abs(self._ball_vel[1]) * BALL_RESTITUTION
 
     def _check_goal(self) -> bool:
         return (abs(self._ball_pos[0]) > FIELD_W / 2 and

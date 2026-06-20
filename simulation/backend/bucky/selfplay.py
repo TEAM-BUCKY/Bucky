@@ -156,3 +156,67 @@ def predict_opponent_action(
     obs = build_opponent_obs(b_state, opp_a_pos, add_noise=add_noise, rng=rng)
     raw, _ = model.predict(obs, deterministic=True)
     return mirror_action(raw)
+
+
+# ── pure-numpy frozen opponent (no torch in the workers) ─────────────────────
+# Self-play runs the frozen opponent inside every SubprocVecEnv worker. Loading a full
+# PPO/torch model there imports torch (~0.5 GB RSS) into each of the N workers, which on
+# a memory-capped host OOM-kills the trainer. The opponent only ever needs a deterministic
+# forward pass through a tiny MLP, so we evaluate it in numpy instead and keep torch out
+# of the workers entirely. The trainer (which has torch) exports the policy weights to a
+# .npz next to each snapshot via :func:`export_policy_npz`; workers load that with
+# :func:`load_numpy_opponent`.
+
+class NumpyOpponent:
+    """A frozen PPO ``MlpPolicy`` evaluated in pure numpy.
+
+    Replicates SB3's deterministic action for the default (non-squashed) Box policy used
+    here: the action is the Gaussian mean ``action_net(policy_net(obs))`` with ``tanh``
+    activations between the hidden layers, then clipped to ``[-1, 1]`` exactly as
+    ``BasePolicy.predict`` does. Valid only for that config — identity (Flatten) features,
+    no ``VecNormalize``, ``tanh`` activation, separate (un-shared) policy layers — which is
+    what :mod:`scripts.train` builds.
+    """
+
+    def __init__(self, hidden, out_w: np.ndarray, out_b: np.ndarray) -> None:
+        self._hidden = hidden          # list of (W, b) tanh layers, applied in order
+        self._out_w = out_w
+        self._out_b = out_b
+
+    def predict(self, obs, deterministic: bool = True):
+        """Mirror of ``model.predict`` — returns ``(action, None)`` so it is a drop-in for
+        :func:`predict_opponent_action`. ``deterministic`` is accepted for API parity; the
+        frozen opponent is always evaluated at its mean action."""
+        x = np.asarray(obs, dtype=np.float32).reshape(-1)
+        for w, b in self._hidden:
+            x = np.tanh(w @ x + b)
+        a = np.clip(self._out_w @ x + self._out_b, -1.0, 1.0).astype(np.float32)
+        return a, None
+
+
+def load_numpy_opponent(path: str) -> NumpyOpponent:
+    """Load a :class:`NumpyOpponent` from a ``.npz`` written by :func:`export_policy_npz`.
+    Pure numpy — safe to call inside a SubprocVecEnv worker without importing torch."""
+    data = np.load(path)
+    n_hidden = int(data["n_hidden"])
+    hidden = [(data[f"h{i}_W"].astype(np.float32), data[f"h{i}_b"].astype(np.float32))
+              for i in range(n_hidden)]
+    return NumpyOpponent(hidden, data["out_W"].astype(np.float32), data["out_b"].astype(np.float32))
+
+
+def export_policy_npz(model, path: str) -> None:
+    """Dump a PPO ``MlpPolicy``'s deterministic-action weights to ``path`` (.npz) so the
+    workers can drive the frozen opponent in numpy. Runs in the trainer (torch) process
+    only; torch is imported lazily so importing this module in a worker never pulls it in.
+    """
+    import torch.nn as nn  # lazy: keep torch out of worker imports
+
+    pol = model.policy
+    layers = [m for m in pol.mlp_extractor.policy_net if isinstance(m, nn.Linear)]
+    arrays: dict[str, np.ndarray] = {"n_hidden": np.array(len(layers))}
+    for i, m in enumerate(layers):
+        arrays[f"h{i}_W"] = m.weight.detach().cpu().numpy()
+        arrays[f"h{i}_b"] = m.bias.detach().cpu().numpy()
+    arrays["out_W"] = pol.action_net.weight.detach().cpu().numpy()
+    arrays["out_b"] = pol.action_net.bias.detach().cpu().numpy()
+    np.savez(path, **arrays)

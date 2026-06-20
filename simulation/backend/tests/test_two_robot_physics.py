@@ -8,6 +8,7 @@ from bucky.physics.python_backend import (
 from bucky.field import in_penalty_area
 
 ZERO = (0.0, 0.0, 0.0)
+GOAL_HALF = GOAL_WIDTH / 2
 
 
 @pytest.fixture
@@ -71,6 +72,40 @@ def test_goal_b_when_ball_in_minus_x_goal(phys):
     info = phys.step(ZERO, ZERO)
     assert info["goal_b"] is True
     assert info["goal_a"] is False
+
+
+@pytest.mark.parametrize("goal_sign", [+1, -1])
+@pytest.mark.parametrize("y_sign", [+1, -1])
+def test_ball_cannot_enter_goal_from_the_side(phys, goal_sign, y_sign):
+    """A ball loose in the neutral band behind a goal line, outside the goal mouth,
+    must not slip *laterally* into the goal strip and score — the goal has side walls,
+    so the only way in is through the mouth at the goal line."""
+    phys.reset(seed=0)
+    phys._a_pos = np.array([0.0, 0.0])      # robots parked at centre, well clear of the goal
+    phys._b_pos = np.array([0.0, 0.3])
+    # Ball behind the goal line (|x| > HALF_W) but outside the mouth, drifting laterally
+    # toward the goal centre line.
+    phys._ball_pos = np.array([goal_sign * 1.0, y_sign * 0.30])
+    phys._ball_vel = np.array([0.0, -y_sign * 0.5])
+    for _ in range(80):
+        info = phys.step(ZERO, ZERO)
+        assert info["goal_a"] is False, "ball scored in +x goal from the side"
+        assert info["goal_b"] is False, "ball scored in -x goal from the side"
+        bx, by = phys.state_a().ball_pos
+        if abs(bx) > FIELD_W / 2:           # while behind a goal line it must stay
+            assert abs(by) >= GOAL_HALF - 1e-6  # out of the goal strip (blocked by side wall)
+
+
+def test_ball_still_scores_through_the_mouth(phys):
+    """Regression guard: the side walls must not block a legitimate goal scored by a ball
+    entering through the mouth off-centre."""
+    phys.reset(seed=0)
+    phys._a_pos = np.array([0.0, 0.5])
+    phys._b_pos = np.array([0.0, -0.5])
+    phys._ball_pos = np.array([FIELD_W / 2 - 0.05, 0.1])   # just in front of the mouth, off-centre
+    phys._ball_vel = np.array([3.0, 0.0])                  # driven straight through the opening
+    info = phys.step(ZERO, ZERO)
+    assert info["goal_a"] is True
 
 
 def test_robot_a_moves_forward(phys):

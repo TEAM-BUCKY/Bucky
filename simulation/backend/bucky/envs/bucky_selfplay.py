@@ -21,7 +21,9 @@ from bucky.physics.python_backend import TwoRobotPhysics
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
 from bucky.referee import Referee
 from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
-from bucky.selfplay import SELF_PLAY_OBS_DIM, build_robot_obs, predict_opponent_action
+from bucky.selfplay import (
+    SELF_PLAY_OBS_DIM, build_robot_obs, load_numpy_opponent, predict_opponent_action,
+)
 
 MAX_LINEAR = 1.0
 MAX_OMEGA = 6.0
@@ -64,13 +66,16 @@ class BuckySelfPlayEnv(gym.Env):
 
     # ── opponent management ───────────────────────────────────────────────────
     def set_opponent(self, path: str | None) -> None:
-        """Load (or clear) the frozen opponent policy. ``None`` → opponent stands still."""
+        """Load (or clear) the frozen opponent policy. ``None`` → opponent stands still.
+
+        ``path`` is a ``.npz`` of exported policy weights (see ``bucky.selfplay``); it is
+        evaluated in pure numpy so this stays torch-free inside SubprocVecEnv workers.
+        """
         if not path:
             self._opponent = None
             return
         try:
-            from stable_baselines3 import PPO
-            self._opponent = PPO.load(path, device="cpu")
+            self._opponent = load_numpy_opponent(path)
         except Exception:  # noqa: BLE001 — fall back to a passive opponent
             self._opponent = None
 
