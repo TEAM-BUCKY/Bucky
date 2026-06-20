@@ -38,6 +38,10 @@ class Settings:
     cors_origins: list[str] = field(
         default_factory=lambda: _origins(os.getenv("CORS_ORIGINS", "*"))
     )
+    # When true, the server runs its own in-process worker: it leases queued jobs and
+    # trains them locally (today's single-machine behaviour). Disable to make the
+    # server a pure coordinator/store that only registered guest devices train for.
+    enable_local_worker: bool = os.getenv("ENABLE_LOCAL_WORKER", "1") not in ("0", "false", "False")
 
     @property
     def control_enabled(self) -> bool:

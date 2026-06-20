@@ -23,12 +23,45 @@ echo "APP_PASSWORD=dev" > .env     # enable control actions locally (omit → vi
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
-- Public (no auth): `GET /api/status`, `GET /api/runs`, `GET /api/health`, `WS /api/stream`.
-- Gated (HTTP Basic, `APP_USERNAME`/`APP_PASSWORD` from `.env`): `POST /api/jobs`, `POST /api/jobs/stop`.
+- Public (no auth): `GET /api/status`, `GET /api/runs`, `GET /api/models`, `GET /api/queue`,
+  `GET /api/devices`, `GET /api/health`, `WS /api/stream`.
+- Gated (HTTP Basic, `APP_USERNAME`/`APP_PASSWORD` from `.env`): `POST /api/jobs`,
+  `POST /api/jobs/stop`, the `POST/DELETE /api/queue*` routes, `GET /api/models/{run}/{ckpt}/download`,
+  `DELETE /api/models/...`, and `POST/DELETE /api/devices` (register/revoke guest devices).
+- Device-token gated (guest workers): `POST /api/worker/{lease,heartbeat,complete}`,
+  `POST /api/models/{run}/upload`.
 
 Launching a job from `POST /api/jobs` spawns `scripts/train.py` (or `play.py`) as a
 subprocess and streams its frames to all `/api/stream` viewers. You can also run the
 scripts directly, as below.
+
+## Models & the admin panel
+
+Every training run carries a per-model **config** and **metadata**: create a named,
+versioned model in the web admin panel (`/admin`) with its own PPO hyperparameters,
+network architecture (`net_arch`) and reward-term weights. These are written as
+`checkpoints/<run>/config.json` + `meta.json` and threaded into `scripts/train.py` via
+`--config`. The admin panel browses, downloads and deletes models; running
+`train.py --config <model.json>` reproduces a model exactly.
+
+## Distributed training (guest devices)
+
+The server holds a shared job **queue**. Besides the server's own in-process worker, any
+trusted machine can register as a **guest device** and lease jobs from that queue — so you
+can keep training locally while all checkpoints land centrally on the server.
+
+```bash
+# On the server: register a device in the admin panel (Devices tab) → copy its token.
+# On the guest machine (from this backend/ directory):
+uv run python scripts/worker.py --server https://your-bucky-host --token <device-token>
+```
+
+The worker polls for jobs, runs `scripts/train.py` locally, streams live frames back (the
+browser's device selector lets you watch any device), and uploads the resulting checkpoints.
+A lease that stops heart-beating is reclaimed and the job returns to the queue.
+
+Set `ENABLE_LOCAL_WORKER=0` to make the server a pure coordinator/store that only guest
+devices train for (default `1` — the server also trains, preserving single-machine use).
 
 ## Train
 

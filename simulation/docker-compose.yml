@@ -27,6 +27,9 @@ services:
       - APP_PASSWORD=${APP_PASSWORD:-}
       - INGEST_TOKEN=${INGEST_TOKEN:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      # 1 = the server also trains queued jobs locally (default); 0 = pure coordinator,
+      # only registered guest devices (scripts/worker.py) consume the queue.
+      - ENABLE_LOCAL_WORKER=${ENABLE_LOCAL_WORKER:-1}
     volumes:
       - ./data/checkpoints:/app/checkpoints
       - ./data/runs:/app/runs

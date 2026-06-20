@@ -5,14 +5,14 @@
 	import RewardBreakdown from './panels/RewardBreakdown.svelte';
 	import ObservationInspector from './panels/ObservationInspector.svelte';
 	import TrainingMetrics from './panels/TrainingMetrics.svelte';
-	import TrainingControls from './TrainingControls.svelte';
+	import Controls from './VisualizerControls.svelte';
 	import QueuePanel from './QueuePanel.svelte';
 	import LoginControl from './LoginControl.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import DialogsState from '$lib/state/dialog.svelte.js';
 	import TrainingScalarsDialog from "$lib/components/dialog/simulation/TrainingScalarsDialog.svelte";
 	import {Button} from "$lib/components/ui/button";
-	import { ChartLine } from '@lucide/svelte';
+	import { ChartLine, Boxes } from '@lucide/svelte';
 
 
 	onMount(() => {
@@ -68,6 +68,14 @@
 	}
 	const statusA = $derived(statusLabel(simulation.frame?.status?.a));
 	const statusB = $derived(statusLabel(simulation.frame?.status?.b));
+
+	// Live streams by source device — lets the viewer follow one when several
+	// devices (the server + guest workers) train concurrently. '' = auto (latest).
+	const deviceName = (id: string) =>
+		id === 'server' ? 'Server' : (simulation.devices.find((d) => d.id === id)?.name ?? id);
+	const streamOptions = $derived(
+		simulation.streamingDevices.map((id) => ({ id, label: deviceName(id) }))
+	);
 
 	const conn = $derived.by(() => {
 		if (simulation.live) return { label: 'Live', color: '#34d399', pulse: true };
@@ -187,6 +195,22 @@
 						<span class="font-mono text-[11px] capitalize text-muted-foreground">{train.label}</span>
 					</span>
 
+					{#if streamOptions.length > 1}
+						<select
+							bind:value={simulation.selectedDevice}
+							class="h-7 rounded-md border border-border bg-background/60 px-2 font-mono text-[11px] text-muted-foreground outline-none"
+							title="Which device's live stream to watch"
+						>
+							<option value="">Auto (latest)</option>
+							{#each streamOptions as o (o.id)}
+								<option value={o.id}>{o.label}</option>
+							{/each}
+						</select>
+					{/if}
+
+					<Button href="/overview" variant="ghost" size="xs" class="font-mono text-[11px]">
+						<Boxes class="size-3" />Overview
+					</Button>
 					<LoginControl />
 				</div>
 			</div>
@@ -220,25 +244,11 @@
 		</Card.Content>
 	</Card.Root>
 
-	<div class="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)_20rem]">
+	<div class="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)_20rem]">
 		<div class="flex flex-col gap-2 lg:min-h-0 lg:overflow-y-auto">
-			<div class="shrink-0"><TrainingControls bind:mode={mode} /></div>
+			<div class="shrink-0"><Controls bind:mode={mode} /></div>
 
 			<div class="shrink-0"><QueuePanel /></div>
-
-			{#if mode === 'train'}
-				<Button
-						variant="outline"
-						size="sm"
-						class="shrink-0 font-mono text-[11px]"
-						onclick={async () => await DialogsState.open({
-						component: TrainingScalarsDialog,
-						data: {}
-					})}
-				>
-					<ChartLine class="size-3.5" />Open training scalars
-				</Button>
-			{/if}
 		</div>
 
 		<div class="flex min-w-0 flex-col gap-4 lg:min-h-0">
@@ -283,7 +293,19 @@
 		</div>
 
 		{#if mode === 'train'}
-			<div class="flex flex-col gap-4 lg:min-h-0">
+			<div class="flex flex-col gap-4 lg:min-h-0 w-full">
+				<Button
+						variant="outline"
+						size="sm"
+						class="shrink-0 font-mono text-[11px]"
+						onclick={async () => await DialogsState.open({
+						component: TrainingScalarsDialog,
+						data: {}
+					})}
+				>
+					<ChartLine class="size-3.5" />Open training scalars
+				</Button>
+
 				<TrainingMetrics frame={simulation.frame} episodeReturns={simulation.episodeReturns} />
 
 				<RewardBreakdown

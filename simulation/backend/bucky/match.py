@@ -33,11 +33,13 @@ class MatchEngine:
 
     def tick(self) -> dict:
         sa, sb = self._phys.state_a(), self._phys.state_b()
+        a_ready = 1.0 if self._phys._a_kick_cooldown == 0 else 0.0
+        b_ready = 1.0 if self._phys._b_kick_cooldown == 0 else 0.0
         obs_a = build_robot_obs(sa, opponent_pos=sb.robot_pos,
-                                add_noise=self._dr, rng=self._rng)
+                                add_noise=self._dr, rng=self._rng, kick_ready=a_ready)
         act_a, _ = self._model_a.predict(obs_a, deterministic=True)
         act_b = predict_opponent_action(self._model_b, sb, sa.robot_pos,
-                                        add_noise=self._dr, rng=self._rng)
+                                        add_noise=self._dr, rng=self._rng, kick_ready=b_ready)
 
         info = self._phys.step(act_a, act_b)
         decision = self._ref.update(self._phys, info)

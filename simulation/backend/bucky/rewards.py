@@ -6,6 +6,7 @@ Potential-based shaping: R_shaping = Φ(s) - Φ(s') so moving toward goal gives 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
 
 import numpy as np
 
@@ -33,8 +34,28 @@ class RewardConfig:
     w_defective: float = -10.0            # removed as defective (rules §4.7)
     w_spin: float = -0.2
 
+    # Skilled-play terms (kicker + opponent-aware; see bucky.play_events).
+    w_steal: float = 3.0                  # capture ball from enemy, × field-position gradient
+    w_blocked_shot: float = 5.0           # block an enemy shot on our goal
+    w_kick_goal: float = 6.0              # bonus: goal scored from a kick (vs dribbling it in)
+    w_bank_shot: float = 4.0              # bonus: goal scored off a wall bounce
+    w_risky_shot: float = 2.0             # kick threaded past the opponent toward goal, × risk factor
+    w_kick_lost: float = -6.0             # extra punishment: our kicked ball captured by enemy
+
     w_time: float = -0.001
     w_action_mag: float = -0.005
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "RewardConfig":
+        """Build from a (partial) mapping of ``w_*`` weights, ignoring unknown keys.
+
+        Missing keys keep their default — so a model config may override only the
+        weights it cares about and leave the rest at the tuned defaults above.
+        """
+        if not data:
+            return cls()
+        fields = {f.name for f in dataclass_fields(cls)}
+        return cls(**{k: float(v) for k, v in data.items() if k in fields})
 
 
 @dataclass
@@ -53,6 +74,13 @@ class RewardTerms:
     defective: float = 0.0
     spin: float = 0.0
 
+    steal: float = 0.0
+    blocked_shot: float = 0.0
+    kick_goal: float = 0.0
+    bank_shot: float = 0.0
+    risky_shot: float = 0.0
+    kick_lost: float = 0.0
+
     time_penalty: float = 0.0
     action_magnitude: float = 0.0
 
@@ -61,7 +89,9 @@ class RewardTerms:
         return (self.approach + self.ball_to_goal + self.possession +
                 self.front_alignment + self.goal + self.goal_against +
                 self.out_of_bounds + self.lack_of_progress + self.defective +
-                self.spin + self.time_penalty + self.action_magnitude)
+                self.spin + self.steal + self.blocked_shot + self.kick_goal +
+                self.bank_shot + self.risky_shot + self.kick_lost +
+                self.time_penalty + self.action_magnitude)
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -75,6 +105,12 @@ class RewardTerms:
             "lack_of_progress": self.lack_of_progress,
             "defective": self.defective,
             "spin": self.spin,
+            "steal": self.steal,
+            "blocked_shot": self.blocked_shot,
+            "kick_goal": self.kick_goal,
+            "bank_shot": self.bank_shot,
+            "risky_shot": self.risky_shot,
+            "kick_lost": self.kick_lost,
             "time_penalty": self.time_penalty,
             "action_magnitude": self.action_magnitude,
         }
@@ -136,12 +172,30 @@ def compute_rewards(
     if info.get("defective", False):
         terms.defective = config.w_defective
 
+    # Skilled-play terms. These are driven by flags the env attaches to ``info`` (the
+    # opponent-aware ones come from bucky.play_events, since PhysicsState only carries one
+    # robot). They default off, so single-agent stages simply leave them zero.
+    if info.get("stole_ball", False):
+        terms.steal = config.w_steal * float(info.get("steal_gradient", 0.0))
+    if info.get("blocked_shot", False):
+        terms.blocked_shot = config.w_blocked_shot
+    if info.get("goal_scored", False) and info.get("kicked_goal", False):
+        terms.kick_goal = config.w_kick_goal
+    if info.get("goal_scored", False) and info.get("bank_shot", False):
+        terms.bank_shot = config.w_bank_shot
+    if info.get("risky_shot", False):
+        terms.risky_shot = config.w_risky_shot * float(info.get("risky_factor", 1.0))
+    if info.get("kick_lost", False):
+        terms.kick_lost = config.w_kick_lost
+
     excess_spin = max(0.0, abs(s1.robot_omega) - MAX_OMEGA_PENALTY)
     terms.spin = config.w_spin * excess_spin
 
     terms.time_penalty = config.w_time
 
     if action is not None:
-        terms.action_magnitude = config.w_action_mag * float(np.sum(action**2))
+        # Drive dims only — the kick dim has its own cooldown gating and dedicated
+        # rewards, so it shouldn't be doubly penalized by the action-magnitude term.
+        terms.action_magnitude = config.w_action_mag * float(np.sum(np.asarray(action[:3])**2))
 
     return terms

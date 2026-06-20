@@ -33,8 +33,11 @@ def _json_default(o):
 class StreamClient:
     """Thread-safe, non-blocking WS client for streaming viz frames to the hub."""
 
-    def __init__(self, url: str, max_queue: int = 128) -> None:
+    def __init__(self, url: str, max_queue: int = 128, headers: dict | None = None) -> None:
         self._url = url
+        # Optional handshake headers (e.g. an auth token), kept out of the URL so the
+        # secret never reaches proxy/access logs via the query string.
+        self._headers = headers or None
         self._queue: queue.Queue[str] = queue.Queue(maxsize=max_queue)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -72,12 +75,23 @@ class StreamClient:
             log.error("websockets not installed — pip install websockets")
             return
 
+        def _open():
+            """Open the connection, passing headers under whichever keyword the
+            installed ``websockets`` supports (additional_headers ≥ v14, else
+            extra_headers)."""
+            base = dict(ping_interval=20, ping_timeout=20)
+            if self._headers:
+                for kw in ("additional_headers", "extra_headers"):
+                    try:
+                        return websockets.connect(self._url, **{kw: self._headers}, **base)
+                    except TypeError:
+                        continue
+            return websockets.connect(self._url, **base)
+
         backoff = 0.5
         while not self._stop.is_set():
             try:
-                async with websockets.connect(
-                    self._url, ping_interval=20, ping_timeout=20
-                ) as ws:
+                async with _open() as ws:
                     log.info("StreamClient connected to %s", self._url)
                     backoff = 0.5
                     await self._pump(ws)

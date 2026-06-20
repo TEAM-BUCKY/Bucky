@@ -104,6 +104,20 @@ export interface StopCondition {
 	value: number;
 }
 
+/** PPO hyperparameters; any subset may be sent (missing keys keep server defaults). */
+export interface Hyperparams {
+	learning_rate?: number;
+	n_steps?: number;
+	batch_size?: number;
+	n_epochs?: number;
+	gamma?: number;
+	gae_lambda?: number;
+	clip_range?: number;
+	ent_coef?: number;
+	vf_coef?: number;
+	max_grad_norm?: number;
+}
+
 export interface LaunchConfig {
 	stage: string;
 	timesteps: number;
@@ -112,6 +126,16 @@ export interface LaunchConfig {
 	domain_rand: boolean;
 	stop?: StopCondition;
 	resume_from?: { run: string; checkpoint: string };
+	// Per-model config (optional — creates a named/versioned "kind" of model).
+	name?: string;
+	version?: string;
+	hyperparams?: Hyperparams;
+	net_arch?: number[];
+	reward_weights?: Record<string, number>;
+	/** Keep periodic model_<N>_steps.zip snapshots (off by default). */
+	save_step_checkpoints?: boolean;
+	/** Where the run executes: 'any' (default), 'server', or a device id. */
+	target?: string;
 }
 
 /** A queued run waiting to launch (back-to-back, optionally at a scheduled time). */
@@ -142,9 +166,43 @@ export interface RunInfo {
 	checkpoints: string[];
 }
 
+/** A single checkpoint file within a model run. */
+export interface ModelCheckpoint {
+	file: string;
+	size: number;
+	mtime: number;
+}
+
+/** An enriched model record for the overview panel (one per run directory). */
+export interface ModelInfo {
+	run: string;
+	name: string;
+	version: string | null;
+	stage: string | null;
+	status: string | null;
+	created_at: number | null;
+	created_by: string | null;
+	timesteps_trained?: number | null;
+	parent?: string | null;
+	best_eval: number | null;
+	has_meta: boolean;
+	config?: Record<string, unknown> | null;
+	checkpoints: ModelCheckpoint[];
+}
+
 export interface MetricPoint {
 	x: number; // num_timesteps
 	y: number;
+}
+
+/** A registered guest training device. */
+export interface DeviceInfo {
+	id: string;
+	name: string;
+	created_at: number;
+	last_seen: number | null;
+	current_job: string | null;
+	online: boolean;
 }
 
 const RETURNS_CAP = 50;
@@ -178,6 +236,18 @@ class SimulationState {
 	metrics = $state<Record<string, MetricPoint[]>>({});
 	/** Existing runs + their checkpoints, for the "continue from checkpoint" picker. */
 	runs = $state<RunInfo[]>([]);
+	/** Enriched model records (name/version/config/best-eval) for the overview panel. */
+	models = $state<ModelInfo[]>([]);
+	/** Registered guest training devices. */
+	devices = $state<DeviceInfo[]>([]);
+	/** Latest live frame per source device ('server' = the in-process trainer). */
+	framesByDevice = $state<Record<string, SimFrame>>({});
+	/** Live phase/steps reported by remote workers, keyed by device id. */
+	remoteStatus = $state<Record<string, { phase?: string; num_timesteps?: number; run?: string }>>(
+		{}
+	);
+	/** Which device's stream to follow in the viewer; '' = auto (latest to arrive). */
+	selectedDevice = $state<string>('');
 	/** Scheduled/queued runs waiting to launch. */
 	queue = $state<QueueItem[]>([]);
 	/** Epoch ms of the most recent message — used to show live vs stale. */
@@ -351,6 +421,72 @@ class SimulationState {
 		await this._control('/queue/clear');
 	}
 
+	/** Create + launch a new model version now. `config` carries name/version/settings. */
+	async createModel(config: LaunchConfig) {
+		await this.launch(config);
+	}
+
+	/** Queue a new model version (optionally at a scheduled time). */
+	async queueModel(config: LaunchConfig, startAt: number | null = null) {
+		await this.enqueue(config, startAt);
+	}
+
+	async deleteModel(run: string) {
+		await this._control(`/models/${encodeURIComponent(run)}`, undefined, 'DELETE');
+	}
+
+	async deleteCheckpoint(run: string, checkpoint: string) {
+		await this._control(
+			`/models/${encodeURIComponent(run)}/${encodeURIComponent(checkpoint)}`,
+			undefined,
+			'DELETE'
+		);
+	}
+
+	/** Delete the periodic *_steps.zip snapshots in a run (keeps best/final). */
+	async pruneStepCheckpoints(run: string) {
+		await this._control(`/models/${encodeURIComponent(run)}/prune-steps`);
+	}
+
+	/**
+	 * Download a checkpoint .zip. Uses an authenticated fetch → blob → object-URL
+	 * because the download endpoint is gated by Basic auth, which a plain <a href>
+	 * cannot carry.
+	 */
+	async downloadModel(run: string, checkpoint: string) {
+		if (!this.hasCredentials) {
+			this.authError = 'Log in to download models.';
+			return;
+		}
+		const { httpBase } = apiBases();
+		const path = `/models/${encodeURIComponent(run)}/${encodeURIComponent(checkpoint)}/download`;
+		try {
+			const res = await fetch(httpBase + path, {
+				headers: { Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`) }
+			});
+			if (res.status === 401) {
+				this.authError = 'Invalid username or password.';
+				return;
+			}
+			if (!res.ok) {
+				this.status = { ...this.status, message: `Download failed (${res.status})` };
+				return;
+			}
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `${run}_${checkpoint}`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+			this.authError = null;
+		} catch {
+			this.status = { ...this.status, message: 'Cannot reach the server.' };
+		}
+	}
+
 	private async _control(
 		path: string,
 		body?: Record<string, unknown>,
@@ -397,6 +533,78 @@ class SimulationState {
 		}
 	}
 
+	// ── devices (distributed training) ──────────────────────────────────────────
+	/** Register a guest device. Returns its one-time token, or null on failure. */
+	async registerDevice(name: string): Promise<string | null> {
+		if (!this.hasCredentials) {
+			this.authError = 'Log in to register devices.';
+			return null;
+		}
+		const { httpBase } = apiBases();
+		try {
+			const res = await fetch(httpBase + '/devices', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`)
+				},
+				body: JSON.stringify({ name })
+			});
+			if (res.status === 401) {
+				this.authError = 'Invalid username or password.';
+				return null;
+			}
+			if (!res.ok) {
+				this.status = { ...this.status, message: `Register failed (${res.status})` };
+				return null;
+			}
+			this.authError = null;
+			const j = await res.json();
+			return (j?.token as string) ?? null;
+		} catch {
+			this.status = { ...this.status, message: 'Cannot reach the server.' };
+			return null;
+		}
+	}
+
+	async revokeDevice(id: string) {
+		await this._control(`/devices/${encodeURIComponent(id)}`, undefined, 'DELETE');
+	}
+
+	/** Issue a fresh token for a device (old one stops working). Returns it once, or null. */
+	async rotateDeviceToken(id: string): Promise<string | null> {
+		if (!this.hasCredentials) {
+			this.authError = 'Log in to manage devices.';
+			return null;
+		}
+		const { httpBase } = apiBases();
+		try {
+			const res = await fetch(httpBase + `/devices/${encodeURIComponent(id)}/token`, {
+				method: 'POST',
+				headers: { Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`) }
+			});
+			if (res.status === 401) {
+				this.authError = 'Invalid username or password.';
+				return null;
+			}
+			if (!res.ok) {
+				this.status = { ...this.status, message: `Token rotation failed (${res.status})` };
+				return null;
+			}
+			this.authError = null;
+			const j = await res.json();
+			return (j?.token as string) ?? null;
+		} catch {
+			this.status = { ...this.status, message: 'Cannot reach the server.' };
+			return null;
+		}
+	}
+
+	/** Base URL a worker passes as `--server` (the API origin, sans the `/api` suffix). */
+	get workerServerUrl(): string {
+		return apiBases().httpBase.replace(/\/api$/, '');
+	}
+
 	// ── internals ────────────────────────────────────────────────────────────
 	private _dispatch(data: Record<string, unknown>) {
 		switch (data.type) {
@@ -412,6 +620,25 @@ class SimulationState {
 			case 'runs':
 				if (Array.isArray(data.runs)) this.runs = data.runs as RunInfo[];
 				break;
+			case 'models':
+				if (Array.isArray(data.models)) this.models = data.models as ModelInfo[];
+				break;
+			case 'devices':
+				if (Array.isArray(data.devices)) this.devices = data.devices as DeviceInfo[];
+				break;
+			case 'remote_status': {
+				const dev = data.device as string;
+				if (dev)
+					this.remoteStatus = {
+						...this.remoteStatus,
+						[dev]: {
+							phase: data.phase as string | undefined,
+							num_timesteps: data.num_timesteps as number | undefined,
+							run: data.run as string | undefined
+						}
+					};
+				break;
+			}
 			case 'queue':
 				if (Array.isArray(data.items)) this.queue = data.items as QueueItem[];
 				break;
@@ -424,6 +651,15 @@ class SimulationState {
 	}
 
 	private _onStep(data: SimFrame) {
+		// Tag-aware: frames carry `device` ('server' for the local trainer). Keep the
+		// latest per device, and only drive the viewer (frame + episode returns) for
+		// the followed device — '' means auto-follow whichever device is streaming.
+		const dev = (data as SimFrame & { device?: string }).device ?? 'server';
+		this.framesByDevice = { ...this.framesByDevice, [dev]: data };
+
+		const target = this.selectedDevice || dev;
+		if (dev !== target) return;
+
 		if (data.episode !== this._lastEpisode) {
 			if (this.frame && typeof this.frame.total_return === 'number') {
 				this.episodeReturns = [
@@ -434,6 +670,11 @@ class SimulationState {
 			this._lastEpisode = data.episode;
 		}
 		this.frame = data;
+	}
+
+	/** Device ids that have streamed at least one frame this session. */
+	get streamingDevices(): string[] {
+		return Object.keys(this.framesByDevice);
 	}
 
 	private _onMetrics(data: { num_timesteps: number; values: Record<string, number> }) {

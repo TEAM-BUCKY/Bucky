@@ -51,10 +51,11 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         goal_present=True,
         active_reward_terms=[
             "approach", "ball_to_goal", "possession", "front_alignment", "goal",
+            "kick_goal", "bank_shot",
             "out_of_bounds", "spin", "time_penalty", "action_magnitude",
         ],
         opponent_present=False,
-        description="Stage 2: robot learns to drive the ball into an empty goal.",
+        description="Stage 2: robot learns to drive/kick the ball into an empty goal.",
     ),
     Stage.SELF_PLAY_1V1: StageConfig(
         stage=Stage.SELF_PLAY_1V1,
@@ -63,6 +64,7 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         goal_present=True,
         active_reward_terms=[
             "approach", "ball_to_goal", "possession", "front_alignment", "goal", "goal_against",
+            "steal", "blocked_shot", "kick_goal", "bank_shot", "risky_shot", "kick_lost",
             "out_of_bounds", "lack_of_progress", "defective", "spin", "time_penalty",
             "action_magnitude",
         ],

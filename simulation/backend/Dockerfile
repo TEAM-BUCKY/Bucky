@@ -10,13 +10,19 @@ ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
-# Dependency layer (cached unless pyproject changes). The source is needed because
-# the project installs itself; a stub import keeps the build self-contained.
-COPY pyproject.toml ./
+# Dependency layer — cached until pyproject.toml or uv.lock changes.
+# --no-install-project installs only external deps, not the project itself.
+# This keeps this heavy layer (torch, sb3, tensorboard) intact on source-only changes.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev --no-install-project
+
+# Source layer — only re-runs the cheap project-install step on code changes.
 COPY bucky ./bucky
 COPY app ./app
 COPY scripts ./scripts
-RUN uv sync --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

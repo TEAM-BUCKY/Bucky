@@ -9,7 +9,7 @@ def state():
     return p.reset(seed=0)
 
 def test_obs_dim_constant():
-    assert OBS_DIM == 17
+    assert OBS_DIM == 18
 
 def test_obs_shape(state):
     obs = build_observation(state)

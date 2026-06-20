@@ -39,6 +39,48 @@ MOTOR_TAU = 0.05   # first-order lag time constant (s)
 BALL_DAMPING = 0.3
 BALL_RESTITUTION = 0.7
 
+# ── Kicker (rule 3.8.1) ──────────────────────────────────────────────────────
+# A kicker may launch an RCJ-05 ball onto a 20° ramp 220 mm along the hypotenuse, and the
+# ball may not pass the top of that ramp. Reading this as a 20° projectile whose peak height
+# equals the ramp top fixes the legal max ball speed:
+#   h     = 0.220 * sin(20°)            = 0.0752 m   (ramp-top height)
+#   v_y   = sqrt(2 * 9.81 * h)          = 1.215 m/s  (vertical launch speed to reach h)
+#   v_max = v_y / sin(20°)              ≈ 3.55 m/s   (total launch speed at 20°)
+# The 2-D sim has no vertical axis, so v_max is applied as the max horizontal speed the
+# kicker can impart to the ball. Ball mass (0.045 kg) / g (9.81) only enter this offline
+# derivation, never the sim.
+KICK_MAX_SPEED = 3.55          # m/s, legal upper limit (selectable force scales 0..1 of this)
+KICK_RANGE = 0.16              # ball must be within this of the robot centre (≈ COLLISION_DIST + margin)
+KICK_FRONT_COS = 0.766         # cos(40°): ball must lie within a ±40° forward cone to be kicked
+KICK_COOLDOWN_STEPS = 50       # 1.0 s recharge at 50 Hz
+KICK_DEADZONE = 0.05           # kick command below this fires nothing
+
+
+def apply_kick(ball_pos, ball_vel, r_pos, r_heading, kick_cmd, cooldown):
+    """Apply a kicker impulse to the ball along the robot heading, subject to gating.
+
+    Fires only when the kicker has recharged (``cooldown == 0``), the ball is within
+    ``KICK_RANGE`` and inside a ±40° forward cone, and ``kick_cmd`` clears the deadzone.
+    The selectable force ``clip(kick_cmd, 0, 1)`` scales the imparted speed up to
+    ``KICK_MAX_SPEED``.
+
+    Returns ``(ball_vel, new_cooldown, kicked, kick_speed)``.
+    """
+    if cooldown > 0:
+        return ball_vel, cooldown - 1, False, 0.0
+    force = float(np.clip(kick_cmd, 0.0, 1.0))
+    if force < KICK_DEADZONE:
+        return ball_vel, 0, False, 0.0
+    delta = ball_pos - r_pos
+    dist = float(np.linalg.norm(delta))
+    if dist > KICK_RANGE or dist < 1e-6:
+        return ball_vel, 0, False, 0.0
+    heading_vec = np.array([np.cos(r_heading), np.sin(r_heading)])
+    if float(np.dot(heading_vec, delta / dist)) < KICK_FRONT_COS:
+        return ball_vel, 0, False, 0.0
+    kick_speed = force * KICK_MAX_SPEED
+    return ball_vel + heading_vec * kick_speed, KICK_COOLDOWN_STEPS, True, kick_speed
+
 
 def omni_kinematics(vx: float, vy: float, omega: float) -> np.ndarray:
     """Convert body-frame velocity to 3-wheel speeds.
@@ -71,6 +113,7 @@ class PyPhysics(PhysicsBackend):
         self._omega_cmd = 0.0
         self._ball_pos = np.zeros(2)
         self._ball_vel = np.zeros(2)
+        self._kick_cooldown = 0
 
     @property
     def dt(self) -> float:
@@ -87,9 +130,11 @@ class PyPhysics(PhysicsBackend):
         self._omega_cmd = 0.0
         self._ball_pos = self._rng.uniform(-0.1, 0.1, 2)
         self._ball_vel = np.zeros(2)
+        self._kick_cooldown = 0
         return self._make_state()
 
-    def step(self, vx_body: float, vy_body: float, omega: float) -> tuple[PhysicsState, dict]:
+    def step(self, vx_body: float, vy_body: float, omega: float,
+             kick: float = 0.0) -> tuple[PhysicsState, dict]:
         mag = np.sqrt(vx_body**2 + vy_body**2)
         if mag > 1.0:
             vx_body /= mag
@@ -113,8 +158,13 @@ class PyPhysics(PhysicsBackend):
         self._ball_vel *= (1.0 - BALL_DAMPING * self._dt)
         self._ball_pos += self._ball_vel * self._dt
 
+        self._ball_vel, self._kick_cooldown, kicked, kick_speed = apply_kick(
+            self._ball_pos, self._ball_vel, self._robot_pos, self._robot_heading,
+            kick, self._kick_cooldown,
+        )
+
         self._resolve_robot_ball_collision()
-        self._resolve_ball_walls()
+        bounced = self._resolve_ball_walls()
 
         # Robot is bounded by the arena walls, not the white lines — it may roam the
         # outer band freely.
@@ -129,6 +179,9 @@ class PyPhysics(PhysicsBackend):
             "goal_scored": goal,
             "ball_out": self._check_ball_out(goal),
             "robot_fully_out": self._check_robot_fully_out(),
+            "kicked": kicked,
+            "kick_speed": kick_speed,
+            "ball_wall_bounce": bounced,
         }
         return self._make_state(), info
 
@@ -154,10 +207,12 @@ class PyPhysics(PhysicsBackend):
             if impulse < 0:
                 self._ball_vel -= (1 + BALL_RESTITUTION) * impulse * normal
 
-    def _resolve_ball_walls(self) -> None:
+    def _resolve_ball_walls(self) -> bool:
         # The ball bounces off the arena walls (so it can roll into the outer band and
         # get pinned in the corners). The goal mouth is an opening in the white-line
         # goal line, so a ball heading into it passes through to score instead.
+        # Returns True if any wall bounce occurred this step (used for bank-shot detection).
+        bounced = False
         hx, hy = ARENA_HALF_X - BALL_RADIUS, ARENA_HALF_Y - BALL_RADIUS
         ghw = GOAL_WIDTH / 2
         in_goal_y = abs(self._ball_pos[1]) < ghw
@@ -165,12 +220,15 @@ class PyPhysics(PhysicsBackend):
             if self._ball_pos[0] < -hx:
                 self._ball_pos[0] = -hx
                 self._ball_vel[0] = abs(self._ball_vel[0]) * BALL_RESTITUTION
+                bounced = True
             elif self._ball_pos[0] > hx:
                 self._ball_pos[0] = hx
                 self._ball_vel[0] = -abs(self._ball_vel[0]) * BALL_RESTITUTION
+                bounced = True
         if abs(self._ball_pos[1]) > hy:
             self._ball_vel[1] *= -BALL_RESTITUTION
             self._ball_pos[1] = np.sign(self._ball_pos[1]) * hy
+            bounced = True
 
         # Goal side walls. The goal is a box recessed behind the goal line: its mouth (the
         # GOAL_WIDTH opening at x = ±HALF_W) is open, but the two side walls running back
@@ -184,6 +242,8 @@ class PyPhysics(PhysicsBackend):
             if ghw <= abs(self._ball_pos[1]) < side:
                 self._ball_pos[1] = np.sign(self._ball_pos[1]) * side
                 self._ball_vel[1] = np.sign(self._ball_pos[1]) * abs(self._ball_vel[1]) * BALL_RESTITUTION
+                bounced = True
+        return bounced
 
     def _check_goal(self) -> bool:
         return (abs(self._ball_pos[0]) > FIELD_W / 2 and
@@ -232,6 +292,8 @@ class TwoRobotPhysics:
         self._b_omega = 0.0
         self._ball_pos = np.zeros(2)
         self._ball_vel = np.zeros(2)
+        self._a_kick_cooldown = 0
+        self._b_kick_cooldown = 0
         # Referee-controlled removal: a removed robot is parked off-field and ignores
         # its action until the referee re-enters it.
         self._a_removed = False
@@ -304,6 +366,8 @@ class TwoRobotPhysics:
         self._b_omega = 0.0
         self._ball_pos = ball
         self._ball_vel = np.zeros(2)
+        self._a_kick_cooldown = 0
+        self._b_kick_cooldown = 0
         self._a_removed = False
         self._b_removed = False
 
@@ -320,13 +384,29 @@ class TwoRobotPhysics:
         self._ball_vel = self._ball_vel * (1.0 - BALL_DAMPING * self._dt)
         self._ball_pos = self._ball_pos + self._ball_vel * self._dt
 
+        # Kicks (4th action dim). A removed robot can't kick; its cooldown still ticks.
+        kick_a = float(action_a[3]) if len(action_a) > 3 else 0.0
+        kick_b = float(action_b[3]) if len(action_b) > 3 else 0.0
+        kicked_a = kicked_b = False
+        kick_speed_a = kick_speed_b = 0.0
+        if not self._a_removed:
+            self._ball_vel, self._a_kick_cooldown, kicked_a, kick_speed_a = apply_kick(
+                self._ball_pos, self._ball_vel, self._a_pos, self._a_heading,
+                kick_a, self._a_kick_cooldown,
+            )
+        if not self._b_removed:
+            self._ball_vel, self._b_kick_cooldown, kicked_b, kick_speed_b = apply_kick(
+                self._ball_pos, self._ball_vel, self._b_pos, self._b_heading,
+                kick_b, self._b_kick_cooldown,
+            )
+
         if not self._a_removed:
             self._resolve_robot_ball(self._a_pos, self._a_vel)
         if not self._b_removed:
             self._resolve_robot_ball(self._b_pos, self._b_vel)
         if not (self._a_removed or self._b_removed):
             self._resolve_robot_robot()
-        self._resolve_ball_walls()
+        bounced = self._resolve_ball_walls()
 
         if not self._a_removed:
             self._a_pos = self._clamp_robot(self._a_pos)
@@ -340,6 +420,11 @@ class TwoRobotPhysics:
             "goal_a": goal_a,
             "goal_b": goal_b,
             "ball_out": past_line and not (goal_a or goal_b),
+            "kicked_a": kicked_a,
+            "kicked_b": kicked_b,
+            "kick_speed_a": kick_speed_a,
+            "kick_speed_b": kick_speed_b,
+            "ball_wall_bounce": bounced,
         }
 
     def state_a(self) -> PhysicsState:

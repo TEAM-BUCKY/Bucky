@@ -12,6 +12,7 @@ launches this script for you when you click "Launch" in the UI, so you rarely ru
 """
 from __future__ import annotations
 import argparse
+import json
 import os
 import signal
 import sys
@@ -46,13 +47,15 @@ from bucky.envs.bucky_single import BuckySingleEnv
 from bucky.envs.bucky_selfplay import BuckySelfPlayEnv
 
 
-def make_env(stage: str, domain_rand: bool):
+def make_env(stage: str, domain_rand: bool, reward_config=None):
     self_play = stage == Stage.SELF_PLAY_1V1.value
 
     def _init():
         if self_play:
-            return BuckySelfPlayEnv(stage=stage, domain_rand=domain_rand)
-        return BuckySingleEnv(stage=stage, domain_rand=domain_rand)
+            return BuckySelfPlayEnv(stage=stage, domain_rand=domain_rand,
+                                    reward_config=reward_config)
+        return BuckySingleEnv(stage=stage, domain_rand=domain_rand,
+                              reward_config=reward_config)
     return _init
 
 
@@ -74,8 +77,15 @@ def main() -> None:
     parser.add_argument("--resume-from", default=None,
                         help="Path to a .zip checkpoint to seed weights from "
                              "(continues training in this new run)")
+    parser.add_argument("--config", default=None,
+                        help="Path to a ModelConfig JSON. When set, its hyperparameters, "
+                             "net_arch and reward weights drive the run (and its "
+                             "stage/n_envs/seed/domain_rand override the matching flags).")
     parser.add_argument("--stream-url", default=None,
                         help="ws:// URL of the viz hub ingest endpoint (enables live viz)")
+    parser.add_argument("--stream-token", default=None,
+                        help="Auth token for the stream, sent as the X-Device-Token "
+                             "handshake header (keeps it out of the URL/logs).")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "auto"],
                         help="Torch device. CPU is fastest for this tiny MLP — the GPU's "
                              "per-step host<->device copies outweigh its compute here.")
@@ -85,6 +95,22 @@ def main() -> None:
     # SIG_IGN (POSIX background-job behaviour); restore the default so a "Kill"
     # SIGINT reliably raises KeyboardInterrupt and we can checkpoint before exit.
     signal.signal(signal.SIGINT, signal.default_int_handler)
+
+    # Optional ModelConfig: when present it is authoritative for the run shape, so
+    # a model "kind" (network size, reward weights, PPO knobs) reproduces exactly.
+    from bucky.rewards import RewardConfig
+    cfg = {}
+    if args.config:
+        with open(args.config) as f:
+            cfg = json.load(f)
+        args.stage = cfg.get("stage", args.stage)
+        args.n_envs = int(cfg.get("n_envs", args.n_envs))
+        args.seed = int(cfg.get("seed", args.seed))
+        if "domain_rand" in cfg:
+            args.no_domain_rand = not bool(cfg["domain_rand"])
+    hyperparams = cfg.get("hyperparams", {})
+    net_arch = cfg.get("net_arch", [64, 64])
+    reward_config = RewardConfig.from_dict(cfg.get("reward_weights"))
 
     run_name = args.run_name or f"{args.stage}_seed{args.seed}"
     log_dir = f"runs/{run_name}"
@@ -114,7 +140,8 @@ def main() -> None:
         from bucky.callbacks import (
             LiveVizCallback, MetricsCallback, SelfPlayVizCallback,
         )
-        stream = StreamClient(args.stream_url)
+        stream_headers = {"X-Device-Token": args.stream_token} if args.stream_token else None
+        stream = StreamClient(args.stream_url, headers=stream_headers)
         stream.start()
         viz = (SelfPlayVizCallback(stream, opponent_path=snapshot_npz)
                if self_play else
@@ -130,7 +157,7 @@ def main() -> None:
     vec_cls = DummyVecEnv if self_play else SubprocVecEnv
 
     train_env = make_vec_env(
-        make_env(args.stage, domain_rand),
+        make_env(args.stage, domain_rand, reward_config=reward_config),
         n_envs=args.n_envs,
         seed=args.seed,
         vec_env_cls=vec_cls,
@@ -139,7 +166,7 @@ def main() -> None:
     # Same vec_env_cls as train_env so SB3's EvalCallback doesn't warn about a type
     # mismatch (SubprocVecEnv vs the default DummyVecEnv).
     eval_env = make_vec_env(
-        make_env(args.stage, domain_rand=False),
+        make_env(args.stage, domain_rand=False, reward_config=reward_config),
         n_envs=1,
         seed=args.seed + 1000,
         vec_env_cls=vec_cls,
@@ -173,23 +200,28 @@ def main() -> None:
                 f"fresh model instead by launching without 'resume from' / --resume-from.\n"
             )
     else:
+        # Hyperparameters come from the ModelConfig when supplied, else fall back to
+        # the tuned defaults (the values that were previously hardcoded here).
+        def hp(key, default):
+            return hyperparams.get(key, default)
+
         model = PPO(
             policy="MlpPolicy",
             env=train_env,
             verbose=1,
             tensorboard_log=log_dir,
             seed=args.seed,
-            learning_rate=3e-4,
-            n_steps=1024,
-            batch_size=512,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            ent_coef=0.01,
-            vf_coef=0.5,
-            max_grad_norm=0.5,
-            policy_kwargs={"net_arch": [64, 64]},
+            learning_rate=hp("learning_rate", 3e-4),
+            n_steps=hp("n_steps", 1024),
+            batch_size=hp("batch_size", 512),
+            n_epochs=hp("n_epochs", 10),
+            gamma=hp("gamma", 0.99),
+            gae_lambda=hp("gae_lambda", 0.95),
+            clip_range=hp("clip_range", 0.2),
+            ent_coef=hp("ent_coef", 0.01),
+            vf_coef=hp("vf_coef", 0.5),
+            max_grad_norm=hp("max_grad_norm", 0.5),
+            policy_kwargs={"net_arch": list(net_arch)},
             device=args.device,
         )
 
@@ -215,13 +247,18 @@ def main() -> None:
             n_eval_episodes=20,
             deterministic=True,
         ),
-        CheckpointCallback(
-            save_freq=max(50_000 // args.n_envs, 1),
-            save_path=ckpt_dir,
-            name_prefix="model",
-        ),
         *extra_callbacks,
     ]
+    # Periodic step snapshots (model_<N>_steps.zip) are opt-in — they pile up disk
+    # fast and the best/final checkpoints are usually all you need.
+    if cfg.get("save_step_checkpoints"):
+        callbacks.append(
+            CheckpointCallback(
+                save_freq=max(50_000 // args.n_envs, 1),
+                save_path=ckpt_dir,
+                name_prefix="model",
+            )
+        )
 
     # Optional wall-clock stop. --until wins over --duration; either one runs the
     # step budget up to a very large number so time is the binding constraint.
@@ -241,6 +278,25 @@ def main() -> None:
     if stream:
         stream.send({"type": "trainer_status", "phase": "started", "run_name": run_name, "run_type": "train"})
 
+    def update_meta(status: str) -> None:
+        """Best-effort refresh of the run's meta.json after a save (status, steps,
+        best eval). Lets the admin panel — and the guest-worker upload — reflect how
+        the run actually finished."""
+        try:
+            from pathlib import Path
+
+            from app.models import best_eval, write_meta
+            meta = {
+                "status": status,
+                "timesteps_trained": int(getattr(model, "num_timesteps", 0) or 0),
+                "best_eval": best_eval(Path("runs"), run_name),
+            }
+            if cfg:
+                meta.update({"name": cfg.get("name"), "version": cfg.get("version"), "config": cfg})
+            write_meta(Path("checkpoints"), run_name, meta)
+        except Exception:  # noqa: BLE001 — metadata is non-critical
+            pass
+
     save_path = f"{ckpt_dir}/final_model"
     try:
         model.learn(total_timesteps=args.timesteps, callback=callbacks, progress_bar=True)
@@ -256,10 +312,12 @@ def main() -> None:
             print(f"Saved to {save_path}.zip")
         except Exception as exc:  # noqa: BLE001
             print(f"Could not save on interrupt: {exc}")
+        update_meta("interrupted")
         if stream:
             stream.send({"type": "trainer_status", "phase": "interrupted", "run_name": run_name, "run_type": "train"})
     else:
         model.save(save_path)
+        update_meta("done")
         if stream:
             stream.send({"type": "trainer_status", "phase": "done", "run_name": run_name, "run_type": "train"})
         print(f"\nDone. Model saved to {save_path}.zip")

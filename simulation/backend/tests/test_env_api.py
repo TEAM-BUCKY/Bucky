@@ -21,7 +21,7 @@ def test_obs_in_bounds(env):
     assert env.observation_space.contains(obs.astype(np.float32))
 
 def test_action_space_shape(env):
-    assert env.action_space.shape == (3,)
+    assert env.action_space.shape == (4,)
 
 def test_step_returns_correct_types(env):
     env.reset(seed=0)
@@ -35,7 +35,7 @@ def test_step_returns_correct_types(env):
 def test_episode_terminates(env):
     env.reset(seed=0)
     for _ in range(1000):
-        obs, reward, term, trunc, info = env.step(np.array([1.0, 0.0, 0.0]))
+        obs, reward, term, trunc, info = env.step(np.array([1.0, 0.0, 0.0, 0.0]))
         if term or trunc:
             break
     else:
@@ -49,5 +49,5 @@ def test_reward_info_keys(env):
 def test_push_to_goal_stage():
     env = BuckySingleEnv(stage=Stage.PUSH_TO_EMPTY_GOAL, domain_rand=False)
     obs, _ = env.reset(seed=0)
-    assert obs.shape == (17,)
+    assert obs.shape == (18,)
     env.close()

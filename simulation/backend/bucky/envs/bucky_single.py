@@ -15,6 +15,7 @@ from bucky import field
 from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.obs import OBS_DIM, build_observation
 from bucky.physics.python_backend import PyPhysics
+from bucky.play_events import CONTACT_DIST, KICK_GOAL_WINDOW
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
 from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
 
@@ -53,7 +54,7 @@ class BuckySingleEnv(gym.Env):
         self._viz_callback = viz_callback
 
         self.observation_space = spaces.Box(OBS_LOW, OBS_HIGH, dtype=np.float32)
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
 
         self._physics = PyPhysics()
         self._rng = np.random.default_rng()
@@ -63,6 +64,8 @@ class BuckySingleEnv(gym.Env):
         self._heading_drift = 0.0
         self._ball_out_steps = 0
         self._robot_penalty_steps = 0
+        self._kick_goal_timer = 0
+        self._bounce_since_kick = False
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -76,6 +79,8 @@ class BuckySingleEnv(gym.Env):
         self._heading_drift = 0.0
         self._ball_out_steps = 0
         self._robot_penalty_steps = 0
+        self._kick_goal_timer = 0
+        self._bounce_since_kick = False
         obs = self._get_obs()
         return obs, {}
 
@@ -85,7 +90,7 @@ class BuckySingleEnv(gym.Env):
         # Robot is frozen during OOB penalty — ignore the agent's action.
         if self._robot_penalty_steps > 0:
             self._robot_penalty_steps -= 1
-            vx, vy, omega = 0.0, 0.0, 0.0
+            vx, vy, omega, kick = 0.0, 0.0, 0.0, 0.0
         else:
             self._action_buffer.append(action.copy())
             latency = self._ep_rand.action_latency_steps
@@ -98,9 +103,24 @@ class BuckySingleEnv(gym.Env):
             vx = delayed_action[0] * MAX_LINEAR * sat
             vy = delayed_action[1] * MAX_LINEAR * sat
             omega = delayed_action[2] * MAX_OMEGA
+            kick = delayed_action[3]
 
         state0 = self._physics._make_state()
-        state1, info = self._physics.step(vx, vy, omega)
+        state1, info = self._physics.step(vx, vy, omega, kick)
+
+        # Skilled-goal tracking (no opponent here): a goal counts as "kicked" if it follows
+        # a recent kick with the ball free, and as a "bank shot" if a wall bounce intervened.
+        if info["kicked"]:
+            self._kick_goal_timer = KICK_GOAL_WINDOW
+            self._bounce_since_kick = False
+        if self._kick_goal_timer > 0 and info["ball_wall_bounce"]:
+            self._bounce_since_kick = True
+        if info["goal_scored"] and self._kick_goal_timer > 0:
+            d_robot_ball = float(np.linalg.norm(state1.ball_pos - state1.robot_pos))
+            info["kicked_goal"] = d_robot_ball > CONTACT_DIST
+            info["bank_shot"] = self._bounce_since_kick
+        if self._kick_goal_timer > 0:
+            self._kick_goal_timer -= 1
 
         self._heading_drift += self._ep_rand.heading_drift_rate
 
@@ -150,11 +170,13 @@ class BuckySingleEnv(gym.Env):
         if state is None:
             state = self._physics._make_state()
         add_noise = self._rand_cfg.enabled
+        kick_ready = 1.0 if self._physics._kick_cooldown == 0 else 0.0
         obs = build_observation(
             state,
             add_noise=add_noise,
             rng=self._rng,
             heading_drift=self._heading_drift,
+            kick_ready=kick_ready,
         )
         return np.clip(obs, OBS_LOW, OBS_HIGH)
 

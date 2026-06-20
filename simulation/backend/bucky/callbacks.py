@@ -16,7 +16,7 @@ class LiveVizCallback(BaseCallback):
 
     Holds its own in-process ``BuckySingleEnv`` (a "shadow" env). Every ``every``
     steps it predicts an action with the current policy, advances the shadow env one
-    step, and streams a ``step`` frame with the real 17-dim observation and reward
+    step, and streams a ``step`` frame with the real 18-dim observation and reward
     terms. This keeps the field animating during the whole run rather than only
     during periodic evaluation.
     """

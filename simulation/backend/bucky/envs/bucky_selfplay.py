@@ -2,8 +2,8 @@
 
 The learning agent controls robot A (attacks +x). Robot B is the opponent, driven by a
 *frozen* policy snapshot via the x-axis mirror trick (:mod:`bucky.selfplay`). The agent's
-observation is opponent-aware: the 17-dim single-agent vector plus a 4-beam sonar block
-(21 dims total). Rewards reuse :func:`bucky.rewards.compute_rewards` from robot A's frame.
+observation is opponent-aware: the 18-dim single-agent vector plus a 4-beam sonar block
+(22 dims total). Rewards reuse :func:`bucky.rewards.compute_rewards` from robot A's frame.
 
 The frozen opponent is hot-swappable via :meth:`set_opponent` so the trainer can refresh
 it with newer snapshots during ``learn()`` (callable per-worker through ``env_method``).
@@ -18,6 +18,7 @@ from gymnasium import spaces
 
 from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.physics.python_backend import TwoRobotPhysics
+from bucky.play_events import PlayEventTracker
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
 from bucky.referee import Referee
 from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
@@ -50,13 +51,14 @@ class BuckySelfPlayEnv(gym.Env):
         self._reward_cfg = reward_config or RewardConfig()
 
         self.observation_space = spaces.Box(OBS_LOW, OBS_HIGH, dtype=np.float32)
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
 
         self._phys = TwoRobotPhysics()
         self._ref = Referee(match_mode=False)
         self._rng = np.random.default_rng()
         self._ep_rand: EpisodeRandomization = EpisodeRandomization()
         self._action_buffer: deque[np.ndarray] = deque()
+        self._events = PlayEventTracker()
         self._step_count = 0
         self._heading_drift = 0.0
         self._opponent = None
@@ -91,6 +93,7 @@ class BuckySelfPlayEnv(gym.Env):
         self._ref.reset(self._phys)
         self._ep_rand = sample_episode_randomization(self._rand_cfg, self._rng)
         self._action_buffer.clear()
+        self._events.reset()
         self._step_count = 0
         self._heading_drift = 0.0
         return self._get_obs(), {}
@@ -105,12 +108,13 @@ class BuckySelfPlayEnv(gym.Env):
             self._action_buffer.popleft()
 
         sat = self._ep_rand.motor_saturation
-        act_a = (delayed[0] * sat, delayed[1] * sat, delayed[2])
+        act_a = (delayed[0] * sat, delayed[1] * sat, delayed[2], delayed[3])
         act_b = self._opponent_action()
 
         state0 = self._phys.state_a()
         info = self._phys.step(act_a, act_b)
         state1 = self._phys.state_a()                 # post-physics, pre-referee (shaping)
+        state_b1 = self._phys.state_b()
 
         # The referee enforces all rules and may relocate the ball / remove a robot.
         decision = self._ref.update(self._phys, info)
@@ -126,6 +130,8 @@ class BuckySelfPlayEnv(gym.Env):
             "defective": any(e.startswith("defective_a") for e in decision.events),
             "ball_out": decision.ball_relocated,
         }
+        # Opponent-aware skilled-play events (steal, block, risky shot, kick lost, kicked/bank goal).
+        reward_info.update(self._events.update(state1, state_b1, info))
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info, action=action)
         self._last_terms = reward_terms
         reward = self._filter_reward(reward_terms)
@@ -161,19 +167,21 @@ class BuckySelfPlayEnv(gym.Env):
     # ── helpers ───────────────────────────────────────────────────────────────
     def _opponent_action(self):
         if self._opponent is None:
-            return (0.0, 0.0, 0.0)
+            return (0.0, 0.0, 0.0, 0.0)
+        kick_ready = 1.0 if self._phys._b_kick_cooldown == 0 else 0.0
         return predict_opponent_action(
             self._opponent, self._phys.state_b(), self._phys.state_a().robot_pos,
-            add_noise=self._rand_cfg.enabled, rng=self._rng,
+            add_noise=self._rand_cfg.enabled, rng=self._rng, kick_ready=kick_ready,
         )
 
     def _get_obs(self) -> np.ndarray:
         state_a = self._phys.state_a()
         opp_pos = self._phys.state_b().robot_pos
+        kick_ready = 1.0 if self._phys._a_kick_cooldown == 0 else 0.0
         obs = build_robot_obs(
             state_a, opponent_pos=opp_pos,
             add_noise=self._rand_cfg.enabled, rng=self._rng,
-            heading_drift=self._heading_drift,
+            heading_drift=self._heading_drift, kick_ready=kick_ready,
         )
         return np.clip(obs, OBS_LOW, OBS_HIGH)
 

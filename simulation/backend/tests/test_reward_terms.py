@@ -96,3 +96,54 @@ def test_total_is_weighted_sum(physics, config):
     d = terms.as_dict()
     expected = sum(d.values())
     assert abs(terms.total - expected) < 1e-6
+
+
+# ── skilled-play terms (driven by env-supplied info flags) ───────────────────
+def test_steal_scales_with_gradient(physics, config):
+    s = physics._make_state()
+    terms = compute_rewards(s, s, config, info={"stole_ball": True, "steal_gradient": 0.8})
+    assert abs(terms.steal - config.w_steal * 0.8) < 1e-6
+
+
+def test_steal_zero_without_flag(physics, config):
+    s = physics._make_state()
+    assert compute_rewards(s, s, config, info={}).steal == 0.0
+
+
+def test_blocked_shot_positive(physics, config):
+    s = physics._make_state()
+    assert compute_rewards(s, s, config, info={"blocked_shot": True}).blocked_shot > 0.0
+
+
+def test_kick_goal_bonus_only_on_goal(physics, config):
+    s = physics._make_state()
+    scored = compute_rewards(s, s, config, info={"goal_scored": True, "kicked_goal": True})
+    assert abs(scored.kick_goal - config.w_kick_goal) < 1e-6
+    # kicked flag without an actual goal → no bonus
+    assert compute_rewards(s, s, config, info={"kicked_goal": True}).kick_goal == 0.0
+
+
+def test_bank_shot_bonus_only_on_goal(physics, config):
+    s = physics._make_state()
+    scored = compute_rewards(s, s, config, info={"goal_scored": True, "bank_shot": True})
+    assert abs(scored.bank_shot - config.w_bank_shot) < 1e-6
+    assert compute_rewards(s, s, config, info={"bank_shot": True}).bank_shot == 0.0
+
+
+def test_risky_shot_scales_with_factor(physics, config):
+    s = physics._make_state()
+    terms = compute_rewards(s, s, config, info={"risky_shot": True, "risky_factor": 0.5})
+    assert abs(terms.risky_shot - config.w_risky_shot * 0.5) < 1e-6
+
+
+def test_kick_lost_is_extra_punishment(physics, config):
+    s = physics._make_state()
+    assert compute_rewards(s, s, config, info={"kick_lost": True}).kick_lost < 0.0
+
+
+def test_action_magnitude_ignores_kick_dim(physics, config):
+    s = physics._make_state()
+    action = np.array([0.5, 0.5, 0.0, 1.0])   # big kick dim must not be penalized
+    terms = compute_rewards(s, s, config, info={}, action=action)
+    expected = config.w_action_mag * (0.5**2 + 0.5**2)
+    assert abs(terms.action_magnitude - expected) < 1e-6

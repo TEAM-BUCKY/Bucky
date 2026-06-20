@@ -21,7 +21,7 @@ def test_obs_shape_and_bounds(env):
 
 
 def test_action_space(env):
-    assert env.action_space.shape == (3,)
+    assert env.action_space.shape == (4,)
 
 
 def test_step_returns_types(env):
@@ -42,7 +42,7 @@ def test_gymnasium_check_env():
 def test_episode_terminates(env):
     env.reset(seed=0)
     for _ in range(2000):
-        _, _, term, trunc, _ = env.step(np.array([1.0, 0.0, 0.0]))
+        _, _, term, trunc, _ = env.step(np.array([1.0, 0.0, 0.0, 0.0]))
         if term or trunc:
             break
     else:
@@ -52,5 +52,5 @@ def test_episode_terminates(env):
 def test_runs_with_standstill_opponent(env):
     env.reset(seed=0)
     env.set_opponent(None)                       # no frozen model → opponent stays put
-    obs, r, term, trunc, info = env.step(np.array([0.0, 0.0, 0.0]))
+    obs, r, term, trunc, info = env.step(np.array([0.0, 0.0, 0.0, 0.0]))
     assert obs.shape == (SELF_PLAY_OBS_DIM,)

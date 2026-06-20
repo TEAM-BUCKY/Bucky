@@ -1,6 +1,6 @@
 """Observation builder — single source of truth for the observation vector.
 
-Layout (total 17 dims):
+Layout (total 18 dims):
   [0:2]  ball_bearing (sin, cos)            — avoids angle wrap
   [2]    ball_distance (normalized)
   [3:5]  ball_vel (vx, vy) robot frame
@@ -10,6 +10,7 @@ Layout (total 17 dims):
   [10:13] nearest_edge (sin, cos, proximity)
   [13]   over_goal_area_flag
   [14:17] teammate (rel_x, rel_y, has_ball) — zeroed in stage 1
+  [17]   kick_ready (1.0 = kicker recharged, 0.0 = on cooldown)
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ _FIELD_DIAG = (_FIELD_W**2 + _FIELD_H**2) ** 0.5
 _MAX_OMEGA = 6.0
 _MAX_VEL = 1.0
 
-OBS_DIM: int = 17
+OBS_DIM: int = 18
 
 _NOISE_BEARING_STD = np.deg2rad(3.0)
 _NOISE_DIST_FRAC_STD = 0.15
@@ -41,8 +42,12 @@ def build_observation(
     add_noise: bool = False,
     rng: np.random.Generator | None = None,
     heading_drift: float = 0.0,
+    kick_ready: float = 1.0,
 ) -> np.ndarray:
-    """Build a 17-dim float32 observation from a PhysicsState."""
+    """Build an 18-dim float32 observation from a PhysicsState.
+
+    ``kick_ready`` (1.0 recharged / 0.0 on cooldown) lets the policy time its kicks.
+    """
     if rng is None:
         rng = np.random.default_rng()
 
@@ -104,6 +109,7 @@ def build_observation(
         proximity,
         over_goal,
         0.0, 0.0, 0.0,   # teammate (stage-1 zeros)
+        float(kick_ready),
     ], dtype=np.float32)
 
     return obs

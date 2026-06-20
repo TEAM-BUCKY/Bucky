@@ -36,6 +36,11 @@ def test_mirror_action_keeps_forward_flips_strafe_and_spin():
     assert np.allclose(mirror_action(np.array([0.0, 0.0, 1.0])), [0.0, 0.0, -1.0])
 
 
+def test_mirror_action_preserves_kick_dim():
+    # 4-D action: forward & kick unchanged, strafe & spin flip.
+    assert np.allclose(mirror_action(np.array([0.5, 0.3, 0.2, 0.8])), [0.5, -0.3, -0.2, 0.8])
+
+
 def test_reflect_state_is_involution():
     st = PhysicsState(
         robot_pos=np.array([0.3, -0.2]), robot_vel=np.array([0.1, 0.4]),
@@ -49,14 +54,14 @@ def test_reflect_state_is_involution():
     assert np.allclose(back.ball_pos, st.ball_pos)
 
 
-def test_build_robot_obs_is_21_dims():
+def test_build_robot_obs_is_22_dims():
     st = PhysicsState(
         robot_pos=np.array([0.0, 0.0]), robot_vel=np.zeros(2),
         robot_heading=0.0, robot_omega=0.0,
         ball_pos=np.array([0.5, 0.0]), ball_vel=np.zeros(2),
     )
     obs = build_robot_obs(st, opponent_pos=np.array([0.6, 0.0]))
-    assert obs.shape == (21,)
+    assert obs.shape == (22,)
     assert obs.dtype == np.float32
     # First OBS_DIM dims match the single-agent observation exactly.
     assert np.allclose(obs[:OBS_DIM], build_observation(st))

@@ -4,7 +4,7 @@ The single-agent policy is trained to attack the **+x** goal. Robot B attacks **
 to drive B with the same policy we reflect the world across the x-axis (B then "sees" itself
 attacking +x), run the policy, and un-mirror the resulting action. Opponent perception is via
 a 4-beam sonar model (the real robot only has 4 ultrasonic sensors at 90° spacing), appended
-to the 17-dim single-agent observation → a 21-dim opponent-aware observation.
+to the 18-dim single-agent observation → a 22-dim opponent-aware observation.
 """
 from __future__ import annotations
 import numpy as np
@@ -20,7 +20,7 @@ MAX_SONAR_RANGE = 1.5               # metres; beyond this a beam reads "clear" (
 _SONAR_NOISE_STD = 0.02             # metres, when domain randomization is on
 _SONAR_DROPOUT_P = 0.05             # chance a beam misses (reads clear)
 
-SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 17 base + 4 sonar = 21
+SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 18 base + 4 sonar = 22
 
 
 def _wrap(a: float) -> float:
@@ -46,9 +46,14 @@ def reflect_omega(w: float) -> float:
 
 
 def mirror_action(a) -> np.ndarray:
-    """Body-frame action under x-reflection: forward unchanged, strafe & spin flip."""
+    """Body-frame action under x-reflection: forward & kick unchanged, strafe & spin flip.
+
+    Accepts a 3-D drive action or a 4-D drive+kick action (kick is frame-invariant)."""
     a = np.asarray(a, dtype=np.float32)
-    return np.array([a[0], -a[1], -a[2]], dtype=np.float32)
+    mirrored = [a[0], -a[1], -a[2]]
+    if a.shape[0] > 3:
+        mirrored.append(a[3])
+    return np.array(mirrored, dtype=np.float32)
 
 
 def reflect_state(state: PhysicsState) -> PhysicsState:
@@ -123,8 +128,10 @@ def build_robot_obs(
     add_noise: bool = False,
     rng: np.random.Generator | None = None,
     heading_drift: float = 0.0,
+    kick_ready: float = 1.0,
 ) -> np.ndarray:
-    base = build_observation(state, add_noise=add_noise, rng=rng, heading_drift=heading_drift)
+    base = build_observation(state, add_noise=add_noise, rng=rng, heading_drift=heading_drift,
+                             kick_ready=kick_ready)
     sonar = sonar_ranges(state.robot_pos, state.robot_heading, opponent_pos,
                          add_noise=add_noise, rng=rng)
     return np.concatenate([base, sonar]).astype(np.float32)
@@ -137,11 +144,13 @@ def build_opponent_obs(
     add_noise: bool = False,
     rng: np.random.Generator | None = None,
     heading_drift: float = 0.0,
+    kick_ready: float = 1.0,
 ) -> np.ndarray:
     """Opponent-aware obs for robot B, built in B's reflected (+x-attacking) frame."""
     mirrored = reflect_state(b_state)
     return build_robot_obs(mirrored, reflect_pos(np.asarray(opp_a_pos, dtype=float)),
-                           add_noise=add_noise, rng=rng, heading_drift=heading_drift)
+                           add_noise=add_noise, rng=rng, heading_drift=heading_drift,
+                           kick_ready=kick_ready)
 
 
 def predict_opponent_action(
@@ -151,9 +160,10 @@ def predict_opponent_action(
     *,
     add_noise: bool = False,
     rng: np.random.Generator | None = None,
+    kick_ready: float = 1.0,
 ) -> np.ndarray:
     """Run ``model`` for robot B via the mirror trick; returns a real-world body action."""
-    obs = build_opponent_obs(b_state, opp_a_pos, add_noise=add_noise, rng=rng)
+    obs = build_opponent_obs(b_state, opp_a_pos, add_noise=add_noise, rng=rng, kick_ready=kick_ready)
     raw, _ = model.predict(obs, deterministic=True)
     return mirror_action(raw)
 
