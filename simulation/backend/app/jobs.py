@@ -632,6 +632,11 @@ class JobManager:
         is held so its slot is preserved."""
         async with self._lease_lock:
             now = time.time()
+            # Every poll — even when the queue is empty and nothing is leased — is a
+            # check-in. Touch first so an idle worker stays "online"; otherwise a
+            # happily-polling device that never gets a job reads as "never online".
+            self._devices.touch(device_id)
+            await self._bc.broadcast(self.devices_msg())
             dev = self._devices.public(device_id)["name"] if device_id else "device"
             for q in self._queue:
                 if q.get("status") != "pending":
