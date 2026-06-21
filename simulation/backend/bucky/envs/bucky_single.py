@@ -19,8 +19,8 @@ from bucky.play_events import CONTACT_DIST, KICK_GOAL_WINDOW
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
 from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
 
-MAX_LINEAR = 1.0
-MAX_OMEGA = 6.0
+# Action scaling (MAX_LINEAR / MAX_OMEGA) lives in PyPhysics.step — this env passes raw
+# normalized actions through (with the motor-saturation factor on the linear dims).
 OOB_GRACE_STEPS = 50
 ROBOT_OOB_PENALTY_STEPS = 50
 
@@ -99,10 +99,12 @@ class BuckySingleEnv(gym.Env):
             if len(self._action_buffer) > latency + 1:
                 self._action_buffer.popleft()
 
+            # Pass raw normalized actions; PyPhysics.step scales them to physical units. Motor
+            # saturation (a domain-rand factor ≤1) still attenuates the linear command here.
             sat = self._ep_rand.motor_saturation
-            vx = delayed_action[0] * MAX_LINEAR * sat
-            vy = delayed_action[1] * MAX_LINEAR * sat
-            omega = delayed_action[2] * MAX_OMEGA
+            vx = delayed_action[0] * sat
+            vy = delayed_action[1] * sat
+            omega = delayed_action[2]
             kick = delayed_action[3]
 
         state0 = self._physics._make_state()

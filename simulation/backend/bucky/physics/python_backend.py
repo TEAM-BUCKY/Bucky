@@ -32,8 +32,16 @@ from bucky.field import (
 )
 from bucky.physics.backend import PhysicsBackend, PhysicsState
 
-MAX_LINEAR = 1.0   # m/s
-MAX_OMEGA = 6.0    # rad/s
+# Drivetrain limits derived from the real robot (Pololu 4842: 9.7:1, 1000 rpm no-load output;
+# wheel radius 0.05 m; wheel mounting radius d = 0.09 m):
+#   ω_wheel = 1000/60 · 2π   = 104.72 rad/s
+#   v_rim   = ω_wheel · 0.05 = 5.236 m/s   → MAX_LINEAR (straight-line top speed)
+#   ω_robot = v_rim / 0.09   ≈ 58.18 rad/s → MAX_OMEGA  (pure in-place rotation)
+# Action dims [0:3] are normalized [-1, 1]; the physics scales them to ±MAX_LINEAR / ±MAX_OMEGA
+# (see _drive / PyPhysics.step). These are no-load ceilings — see also rewards.MAX_OMEGA_PENALTY
+# and obs._MAX_VEL / obs._MAX_OMEGA, which track these so observations don't saturate.
+MAX_LINEAR = 5.236  # m/s
+MAX_OMEGA = 58.18   # rad/s
 DT = 0.02          # s
 MOTOR_TAU = 0.05   # first-order lag time constant (s)
 BALL_DAMPING = 0.3
@@ -139,7 +147,9 @@ class PyPhysics(PhysicsBackend):
         if mag > 1.0:
             vx_body /= mag
             vy_body /= mag
-        omega = np.clip(omega, -MAX_OMEGA, MAX_OMEGA)
+        # Inputs are normalized [-1, 1]; scale to physical units here (single source of scaling,
+        # symmetric with TwoRobotPhysics._drive). The env must pass raw normalized actions.
+        omega = float(np.clip(omega, -1.0, 1.0)) * MAX_OMEGA
 
         c, s = np.cos(self._robot_heading), np.sin(self._robot_heading)
         R = np.array([[c, -s], [s, c]])
@@ -459,7 +469,10 @@ class TwoRobotPhysics:
         if mag > 1.0:
             vx_body /= mag
             vy_body /= mag
-        omega_cmd = float(np.clip(omega_cmd, -MAX_OMEGA, MAX_OMEGA))
+        # Action dim [2] is normalized [-1, 1]; scale to the physical max turn rate. (Earlier
+        # this only *clipped* to ±MAX_OMEGA, so a normalized action could never exceed 1 rad/s
+        # in matches/self-play — robots, including the human's, barely turned.)
+        omega_cmd = float(np.clip(omega_cmd, -1.0, 1.0)) * MAX_OMEGA
 
         c, s = np.cos(heading), np.sin(heading)
         R = np.array([[c, -s], [s, c]])

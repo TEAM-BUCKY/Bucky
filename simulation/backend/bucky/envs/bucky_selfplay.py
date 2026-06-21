@@ -26,8 +26,8 @@ from bucky.selfplay import (
     SELF_PLAY_OBS_DIM, build_robot_obs, load_numpy_opponent, predict_opponent_action,
 )
 
-MAX_LINEAR = 1.0
-MAX_OMEGA = 6.0
+# Action scaling (MAX_LINEAR / MAX_OMEGA) lives in python_backend and is applied inside
+# TwoRobotPhysics._drive — this env passes the raw normalized action straight through.
 
 # Stochastic-opponent exploration scale (training only). The frozen opponent samples its
 # action around the policy mean at this fraction of the policy's own std, so the learner

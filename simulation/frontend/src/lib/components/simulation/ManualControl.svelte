@@ -17,7 +17,17 @@
 	let { fieldEl }: { fieldEl: HTMLElement | null } = $props();
 
 	const SEND_HZ = 30;
-	const OMEGA_GAIN = 1.6; // heading-error (rad) → normalized ω command, clipped to ±1
+	// Physics scales action[2] to ±MAX_OMEGA rad/s (keep in sync with python_backend.MAX_OMEGA).
+	// The robot's real top turn rate (~58 rad/s) is far too fast to aim by hand, so the human
+	// controller targets a comfortable rate and normalizes it down — physics fidelity for the AI,
+	// playable sensitivity for the human.
+	const MAX_OMEGA = 58.18; // rad/s, physical max (mirrors backend)
+	const MAX_LINEAR = 5.236; // m/s, physical max (mirrors backend)
+	const AIM_KP = 6.0; // rad/s of turn per rad of heading error
+	const AIM_TURN_CAP = 8.0; // rad/s — comfortable human aiming cap (well below the physical max)
+	// Comfortable human drive speed; at full MAX_LINEAR the robot crosses the field in ~0.35 s.
+	const HUMAN_LINEAR_CAP = 1.5; // m/s
+	const DRIVE_SCALE = HUMAN_LINEAR_CAP / MAX_LINEAR; // normalized drive command ceiling
 	const SCALE = 1000; // mm per metre, matching SoccerField's 1 unit = 1 mm
 
 	let redMode = $state<'human' | 'ai'>('human');
@@ -67,18 +77,22 @@
 	}
 
 	function computeAction(): number[] {
-		const fwd = (keys.has('w') ? 1 : 0) - (keys.has('s') ? 1 : 0);
+		// Scaled to a comfortable speed: physics multiplies these back up by MAX_LINEAR.
+		const fwd = ((keys.has('w') ? 1 : 0) - (keys.has('s') ? 1 : 0)) * DRIVE_SCALE;
 		// Body-frame +vy is to the robot's left, so A (left) → +vy, D (right) → −vy.
-		const strafe = (keys.has('a') ? 1 : 0) - (keys.has('d') ? 1 : 0);
+		const strafe = ((keys.has('a') ? 1 : 0) - (keys.has('d') ? 1 : 0)) * DRIVE_SCALE;
 
 		let omega = 0;
 		const target = aimHeading();
 		const f = simulation.frame;
 		if (target != null && f && f.robot2_heading != null) {
-			omega = clamp(wrapPi(target - f.robot2_heading) * OMEGA_GAIN, -1, 1);
+			// P-controller on heading error → a comfortable turn rate, then normalize to the
+			// action's [-1, 1] range (physics multiplies it back up by MAX_OMEGA).
+			const desiredRad = clamp(wrapPi(target - f.robot2_heading) * AIM_KP, -AIM_TURN_CAP, AIM_TURN_CAP);
+			omega = desiredRad / MAX_OMEGA;
 		} else {
-			// Fallback when not aiming: Q/E rotate left/right.
-			omega = (keys.has('q') ? 1 : 0) - (keys.has('e') ? 1 : 0);
+			// Fallback when not aiming: Q/E rotate left/right at the same comfortable rate.
+			omega = ((keys.has('q') ? 1 : 0) - (keys.has('e') ? 1 : 0)) * (AIM_TURN_CAP / MAX_OMEGA);
 		}
 
 		const kick = kicking || keys.has(' ') ? 1 : 0;

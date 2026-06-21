@@ -22,8 +22,12 @@ from bucky.field import PENALTY_DEPTH, PENALTY_HALF_WIDTH
 from bucky.physics.backend import PhysicsState
 
 _FIELD_DIAG = (_FIELD_W**2 + _FIELD_H**2) ** 0.5
-_MAX_OMEGA = 6.0
-_MAX_VEL = 1.0
+# Normalizer for the observed angular velocity — kept equal to the drivetrain's real max turn
+# rate (physics.MAX_OMEGA ≈ 58 rad/s) so obs[7] spans ~[-1, 1] instead of saturating.
+_MAX_OMEGA = 58.18
+# Velocity normalizer — equal to the drivetrain's real top speed (physics.MAX_LINEAR ≈ 5.24 m/s)
+# so robot/ball velocity observations span ~[-1, 1] instead of clipping.
+_MAX_VEL = 5.236
 
 OBS_DIM: int = 18
 

@@ -14,10 +14,15 @@ from bucky.field import OPP_GOAL
 from bucky.physics.backend import PhysicsState
 
 CAPTURE_RADIUS = 0.14
-MAX_OMEGA_PENALTY = 3.0
+# Spin penalty only kicks in above this turn rate. Kept at ~50% of the drivetrain's real
+# max turn rate (physics.MAX_OMEGA ≈ 58 rad/s) so ordinary aiming turns are free and only
+# pathological spinning is punished — same fraction this used under the old 6 rad/s cap.
+MAX_OMEGA_PENALTY = 29.0
 ALIGN_RADIUS = 0.4  # proximity fade-in distance for front_alignment (m)
-SHOT_SPEED_THRESHOLD = 1.2  # m/s; above this a free ball counts as a struck shot, not a dribble
-                            # (dribbling tops out near MAX_LINEAR=1.0; kicks reach KICK_MAX_SPEED=3.55)
+SHOT_SPEED_THRESHOLD = 1.2  # m/s; above this a free ball counts as a struck shot, not a dribble.
+                            # NOTE: with the real MAX_LINEAR≈5.24 m/s a hard dribble can now exceed
+                            # this, so the threshold no longer cleanly separates dribble vs kick —
+                            # revisit if shot_on_goal starts firing on driven balls.
 
 
 @dataclass
