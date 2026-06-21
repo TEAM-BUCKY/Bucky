@@ -44,9 +44,13 @@ def main() -> None:
     parser.add_argument("--stream-url", default=None,
                         help="ws:// URL of the viz hub ingest endpoint")
     parser.add_argument("--control-url", default=None,
-                        help="ws:// URL of the hub control-sink endpoint (manual red control)")
+                        help="ws:// URL of the hub control-sink endpoint (human control). When "
+                             "set, either side may be driven by a human (online play / manual test)")
     parser.add_argument("--manual-red", action="store_true",
-                        help="Let a human drive robot A (red) via --control-url instead of its policy")
+                        help="Legacy: start red (robot B) under human control by default "
+                             "(single-human 'test against the AI' feature)")
+    parser.add_argument("--mode", choices=("match", "casual"), default="match",
+                        help="match → full 2×7 min referee; casual → endless human-vs-human play")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, signal.default_int_handler)
@@ -77,17 +81,20 @@ def main() -> None:
                  f"{SELF_PLAY_OBS_DIM}-dim (opponent-aware). Train it on SELF_PLAY_1V1 first.")
             sys.exit(1)
 
-    # Manual control: subscribe to the hub's control-sink so a human can drive red (A).
+    # Manual control: subscribe to the hub's control-sink so humans can drive either side.
+    # The legacy single-human feature (--manual-red) starts red (B) under human control; an
+    # online game leaves both sides on "ai" until each browser starts sending human input.
     control = None
     control_source = None
-    if args.manual_red and args.control_url:
+    if args.control_url:
         from bucky.stream_client import ControlClient
-        control = ControlClient(args.control_url)
+        default_modes = {"a": "ai", "b": "human"} if args.manual_red else None
+        control = ControlClient(args.control_url, default_modes=default_modes)
         control.start()
         control_source = control.latest
 
     engine = MatchEngine(model_a, model_b, seed=args.seed, domain_rand=args.domain_rand,
-                         control_source=control_source)
+                         control_source=control_source, mode=args.mode)
     if stream:
         stream.send({"type": "trainer_status", "phase": "started", "run_name": "match", "run_type": "match"})
 

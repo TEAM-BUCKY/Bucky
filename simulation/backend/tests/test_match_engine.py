@@ -93,3 +93,39 @@ def test_ai_mode_uses_policy_not_human_action():
     for _ in range(10):
         eng.tick()
     assert np.linalg.norm(eng._phys.state_b().robot_pos - start) < 0.01
+
+
+def test_human_control_drives_blue_side_a():
+    # New per-side shape: a human on side "a" drives blue while its policy would sit still.
+    control = {"a": {"mode": "human", "action": [1.0, 0.0, 0.0, 0.0]}}
+    eng = MatchEngine(FixedModel((0.0, 0.0, 0.0)), FixedModel(), seed=0,
+                      control_source=lambda: control)
+    start = eng._phys.state_a().robot_pos.copy()
+    for _ in range(10):
+        eng.tick()
+    assert np.linalg.norm(eng._phys.state_a().robot_pos - start) > 0.01
+
+
+def test_both_sides_human_simultaneously():
+    # Two players, one per side — both robots move under human control.
+    control = {"a": {"mode": "human", "action": [1.0, 0.0, 0.0, 0.0]},
+               "b": {"mode": "human", "action": [1.0, 0.0, 0.0, 0.0]}}
+    eng = MatchEngine(FixedModel((0.0, 0.0, 0.0)), FixedModel((0.0, 0.0, 0.0)), seed=0,
+                      control_source=lambda: control)
+    a0 = eng._phys.state_a().robot_pos.copy()
+    b0 = eng._phys.state_b().robot_pos.copy()
+    for _ in range(10):
+        eng.tick()
+    assert np.linalg.norm(eng._phys.state_a().robot_pos - a0) > 0.01
+    assert np.linalg.norm(eng._phys.state_b().robot_pos - b0) > 0.01
+
+
+def test_casual_mode_never_ends_and_scores():
+    # Casual mode has no clock; a goal still increments the score and re-centres the ball.
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0, mode="casual")
+    eng._phys._ball_pos = np.array([FIELD_W / 2 + 0.05, 0.0])
+    eng._phys._ball_vel = np.zeros(2)
+    f = eng.tick()
+    assert f["score"] == {"a": 1, "b": 0}
+    assert f["match_over"] is False
+    assert eng._ref._casual is True and eng._ref._match_mode is False

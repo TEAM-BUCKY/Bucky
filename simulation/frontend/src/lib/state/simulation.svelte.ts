@@ -179,6 +179,19 @@ export interface MatchConfig {
 	manualRed?: boolean;
 }
 
+/** A "play a friend by game code" session this browser is part of. */
+export interface GameSession {
+	code: string;
+	runName: string;
+	mode: 'casual' | 'match';
+	/** Which robot this browser drives: 'a' = blue, 'b' = red, null = spectator. */
+	side: 'a' | 'b' | null;
+	/** Secret per-side token that authorises control (open guest play — no login). */
+	sideToken: string;
+	spectator: boolean;
+	opponentPresent: boolean;
+}
+
 export interface RunInfo {
 	run: string;
 	checkpoints: string[];
@@ -252,6 +265,7 @@ const RETURNS_CAP = 50;
 const METRIC_CAP = 400;
 const STALE_MS = 5000;
 const CREDS_KEY = 'bucky.creds';
+const GAME_KEY = 'bucky.game';
 
 /** Resolve the HTTP + WS base URLs from VITE_API_BASE (default same-origin '/api'). */
 function apiBases() {
@@ -285,6 +299,9 @@ class SimulationState {
 	devices = $state<DeviceInfo[]>([]);
 	/** Latest live frame per source device ('server' = the in-process trainer). */
 	framesByDevice = $state<Record<string, SimFrame>>({});
+	/** Latest live frame per run name — lets the play view follow a specific match even
+	 * when other runs (e.g. training) stream concurrently from the same device. */
+	framesByRun = $state<Record<string, SimFrame>>({});
 	/** Live phase/steps reported by remote workers, keyed by device id. */
 	remoteStatus = $state<Record<string, { phase?: string; num_timesteps?: number; run?: string }>>(
 		{}
@@ -317,6 +334,11 @@ class SimulationState {
 	authUser = $state<{ login: string; name: string | null; avatar_url: string | null } | null>(null);
 	/** True once /auth/me has been read at least once (so the UI can avoid flicker). */
 	authReady = $state(false);
+
+	/** The "play a friend by game code" session this browser is in, or null. */
+	game = $state<GameSession | null>(null);
+	/** Last error from a game create/join/leave action, surfaced in the lobby. */
+	gameError = $state<string | null>(null);
 
 	private _password = '';
 	private ws: WebSocket | null = null;
@@ -452,6 +474,7 @@ class SimulationState {
 	// ── connection (public, read-only stream) ──────────────────────────────────
 	connect() {
 		this._loadCredentials();
+		this._loadGame();
 		// Determine auth mode (OAuth vs password) and current user, in the background.
 		void this.refreshAuth();
 		this._manualClose = false;
@@ -554,6 +577,188 @@ class SimulationState {
 			});
 		} catch {
 			/* control is best-effort; ignore transient errors */
+		}
+	}
+
+	// ── play a friend by game code (open guest play — no login) ──────────────────
+	/** Latest live frame for the current game's match (null until one arrives). */
+	get gameFrame(): SimFrame | null {
+		const run = this.game?.runName;
+		return run ? (this.framesByRun[run] ?? null) : null;
+	}
+
+	get gameRun(): string | null {
+		return this.game?.runName ?? null;
+	}
+
+	private async _errDetail(res: Response, fallback: string): Promise<string> {
+		try {
+			const j = await res.json();
+			if (j?.detail) return String(j.detail);
+		} catch {
+			/* non-JSON error body */
+		}
+		return fallback;
+	}
+
+	/** Host a new game; returns true on success. Claims `side` (blue 'a' by default) and
+	 * stores the secret token that authorises this browser's control. */
+	async createGame(mode: 'casual' | 'match' = 'casual', side: 'a' | 'b' = 'a'): Promise<boolean> {
+		const { httpBase } = apiBases();
+		try {
+			const res = await fetch(httpBase + '/games', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ mode, claim_side: side })
+			});
+			if (!res.ok) {
+				this.gameError = await this._errDetail(res, 'Could not start a game.');
+				return false;
+			}
+			const j = await res.json();
+			this.game = {
+				code: j.code,
+				runName: j.run_name,
+				mode: j.mode,
+				side: j.your_side ?? null,
+				sideToken: j.side_token ?? '',
+				spectator: false,
+				opponentPresent: false
+			};
+			this._saveGame();
+			this.gameError = null;
+			return true;
+		} catch {
+			this.gameError = 'Cannot reach the server.';
+			return false;
+		}
+	}
+
+	/** Join an existing game by its code. Takes a free side, or becomes a spectator if full. */
+	async joinGame(code: string): Promise<boolean> {
+		const { httpBase } = apiBases();
+		const c = code.trim().toUpperCase();
+		if (!c) {
+			this.gameError = 'Enter a game code.';
+			return false;
+		}
+		try {
+			const res = await fetch(httpBase + `/games/${encodeURIComponent(c)}/join`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({})
+			});
+			if (!res.ok) {
+				this.gameError = await this._errDetail(res, 'Could not join that game.');
+				return false;
+			}
+			const j = await res.json();
+			this.game = {
+				code: c,
+				runName: j.run_name,
+				mode: j.mode,
+				side: j.your_side ?? null,
+				sideToken: j.side_token ?? '',
+				spectator: !!j.spectator,
+				opponentPresent: !!j.opponent_present
+			};
+			this._saveGame();
+			this.gameError = null;
+			return true;
+		} catch {
+			this.gameError = 'Cannot reach the server.';
+			return false;
+		}
+	}
+
+	/** Leave the current game (releases the side so someone else can take it). */
+	async leaveGame(): Promise<void> {
+		const g = this.game;
+		this.game = null;
+		this._clearGame();
+		if (!g || g.spectator || !g.side) return;
+		const { httpBase } = apiBases();
+		try {
+			await fetch(httpBase + `/games/${encodeURIComponent(g.code)}/leave`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ side: g.side, token: g.sideToken })
+			});
+		} catch {
+			/* best-effort */
+		}
+	}
+
+	/** Poll the room: track whether the opponent is present, and detect a game that ended. */
+	async refreshGame(): Promise<void> {
+		const g = this.game;
+		if (!g) return;
+		const { httpBase } = apiBases();
+		try {
+			const res = await fetch(httpBase + `/games/${encodeURIComponent(g.code)}`);
+			if (res.status === 404) {
+				this.game = null;
+				this._clearGame();
+				this.gameError = 'The game has ended.';
+				return;
+			}
+			if (!res.ok) return;
+			const j = await res.json();
+			if (g.side) {
+				const opp = g.side === 'a' ? 'b' : 'a';
+				this.game = { ...g, opponentPresent: !!j.slots?.[opp]?.claimed };
+			}
+		} catch {
+			/* ignore transient poll errors */
+		}
+	}
+
+	/** Send this player's control to their side of the game. Best-effort, fires at ~30 Hz. */
+	async pushGameControl(payload: { action?: number[]; mode?: 'human' | 'ai' }): Promise<void> {
+		const g = this.game;
+		if (!g || g.spectator || !g.side) return;
+		const body: Record<string, unknown> = { side: g.side, token: g.sideToken };
+		if (payload.action) body.action = payload.action;
+		if (payload.mode) body.mode = payload.mode;
+		const { httpBase } = apiBases();
+		try {
+			await fetch(httpBase + `/games/${encodeURIComponent(g.code)}/control`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+		} catch {
+			/* control is best-effort; ignore transient errors */
+		}
+	}
+
+	private _saveGame() {
+		if (typeof window === 'undefined' || !this.game) return;
+		try {
+			window.localStorage.setItem(GAME_KEY, JSON.stringify(this.game));
+		} catch {
+			/* storage unavailable */
+		}
+	}
+
+	private _clearGame() {
+		if (typeof window === 'undefined') return;
+		try {
+			window.localStorage.removeItem(GAME_KEY);
+		} catch {
+			/* ignore */
+		}
+	}
+
+	private _loadGame() {
+		if (this.game || typeof window === 'undefined') return;
+		try {
+			const raw = window.localStorage.getItem(GAME_KEY);
+			if (!raw) return;
+			this.game = JSON.parse(raw) as GameSession;
+			void this.refreshGame(); // confirm it still exists; clears it if the match ended
+		} catch {
+			/* ignore malformed storage */
 		}
 	}
 
@@ -830,6 +1035,8 @@ class SimulationState {
 		// the followed device — '' means auto-follow whichever device is streaming.
 		const dev = (data as SimFrame & { device?: string }).device ?? 'server';
 		this.framesByDevice = { ...this.framesByDevice, [dev]: data };
+		// Also key by run so the play view can follow its match regardless of device.
+		if (data.run) this.framesByRun = { ...this.framesByRun, [data.run]: data };
 
 		const target = this.selectedDevice || dev;
 		if (dev !== target) return;

@@ -14,7 +14,7 @@
 	import DialogsState from '$lib/state/dialog.svelte.js';
 	import TrainingScalarsDialog from "$lib/components/dialog/simulation/TrainingScalarsDialog.svelte";
 	import {Button} from "$lib/components/ui/button";
-	import { ChartLine, Boxes } from '@lucide/svelte';
+	import { ChartLine, Boxes, Gamepad2 } from '@lucide/svelte';
 
 
 	onMount(() => {
@@ -214,6 +214,9 @@
 						</select>
 					{/if}
 
+					<Button href="/play" variant="ghost" size="xs" class="font-mono text-[11px]">
+						<Gamepad2 class="size-3" />Play a friend
+					</Button>
 					<Button href="/overview" variant="ghost" size="xs" class="font-mono text-[11px]">
 						<Boxes class="size-3" />Overview
 					</Button>

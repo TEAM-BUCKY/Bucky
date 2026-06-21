@@ -73,9 +73,14 @@ class RefereeDecision:
 
 class Referee:
     def __init__(self, dt: float = DT, *, match_mode: bool = False,
-                 first_kickoff: str = "a") -> None:
+                 first_kickoff: str = "a", casual: bool = False) -> None:
+        # ``casual`` is the relaxed human-vs-human mode: goals are still scored and the
+        # ball still relocates when stuck/out, but robots are never suspended or marked
+        # defective — so two people can knock the ball around without the referee
+        # benching them. Implies ``match_mode=False`` (no clock/halves → endless play).
         self._dt = dt
         self._match_mode = match_mode
+        self._casual = casual
         self._first_kickoff = first_kickoff
         self._score = {"a": 0, "b": 0}
         self._clock = 0.0
@@ -139,9 +144,13 @@ class Referee:
         scored = self._handle_goals(phys, step_info, dec)
 
         if not scored:
-            # 3) new robot violations (out-of-bounds, defective)
-            self._check_robot_violations(phys, dec)
-            # 4) ball relocation (out-of-reach, lack of progress)
+            # 3) new robot violations (out-of-bounds, defective). Skipped in casual mode:
+            # nobody gets suspended, so friends can roam freely and goals are never voided
+            # (the disallow branch keys off ``removed``, which stays False without this).
+            if not self._casual:
+                self._check_robot_violations(phys, dec)
+            # 4) ball relocation (out-of-reach, lack of progress) — kept in casual so a
+            # ball wedged in a corner or shoved out still frees itself and play continues.
             self._check_ball(phys, step_info, dec)
 
         # 5) advance the match clock / halves (match mode only)

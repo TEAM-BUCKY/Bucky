@@ -95,6 +95,28 @@ def test_lack_of_progress_relocates_then_centers_on_repeat(setup):
     assert np.linalg.norm(ball2 - field.CENTER_SPOT) < 1e-6
 
 
+# ── casual mode (online human-vs-human) ─────────────────────────────────────
+def test_casual_mode_does_not_suspend_out_of_bounds_robot():
+    phys = TwoRobotPhysics()
+    ref = Referee(match_mode=False, casual=True)
+    ref.reset(phys)
+    phys.place_robot("a", [field.HALF_W + field.ROBOT_RADIUS + 0.05, 0.0])  # fully out
+    dec = ref.update(phys, {})
+    assert dec.status["a"]["suspended"] is False
+    assert dec.status["a"]["removed"] is False
+    assert not phys.is_removed("a")
+
+
+def test_casual_mode_still_relocates_ball_out_of_play():
+    # Ball handling is kept in casual so a ball shoved out still comes back.
+    phys = TwoRobotPhysics()
+    ref = Referee(match_mode=False, casual=True)
+    ref.reset(phys)
+    phys.place_ball([0.0, field.HALF_H + 0.15])
+    dec = run(ref, phys, OUT_OF_REACH_SECONDS + 0.1)
+    assert _is_neutral_spot(phys.state_a().ball_pos)
+
+
 # ── robot out of bounds + suspension (§4.9) ──────────────────────────────────
 def test_robot_out_is_suspended_then_reenters_after_30s(setup):
     ref, phys = setup

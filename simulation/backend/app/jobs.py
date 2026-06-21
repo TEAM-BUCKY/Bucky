@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -37,6 +38,12 @@ from .models import (
 # coordinator reclaims it (returns the job to pending so another worker can take it).
 LEASE_TTL = 45.0
 MAX_LEASE_ATTEMPTS = 3
+
+# Online "play by game code" rooms.
+GAME_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no ambiguous O/0/I/1/L
+GAME_CODE_LEN = 4
+ROOM_IDLE_TTL = 120.0   # a room nobody is playing/watching is reaped after this many seconds
+MAX_ROOMS = 20          # safety cap on concurrent games
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +87,14 @@ class JobManager:
         # subprocess connects to /api/control_sink and we forward the browser's control
         # messages (human action / red mode toggle) to it. Best-effort; dropped if absent.
         self._control_sinks: dict = {}
+
+        # Online human-vs-human "play by game code" rooms. Ephemeral and in-memory: a code
+        # maps to a running match (run_name) plus two side slots, each with a secret join
+        # token that authorises that browser's control without a login. Lost on restart
+        # (acceptable — a game is a transient session, not a saved artifact).
+        self._rooms: dict[str, dict] = {}
+        self._rooms_by_run: dict[str, str] = {}
+        self._rooms_lock = asyncio.Lock()
 
         # Distributed training: registered guest devices lease train jobs from the
         # same queue. A lock serialises lease/heartbeat/complete against the local
@@ -258,6 +273,164 @@ class JobManager:
             return {"ok": False, "message": "Control channel is not connected."}
         return {"ok": True}
 
+    # ── online play-by-code rooms (browser ⇆ hub ⇆ play.py) ──────────────────────
+    def _new_game_code(self) -> str:
+        for _ in range(50):
+            code = "".join(secrets.choice(GAME_CODE_ALPHABET) for _ in range(GAME_CODE_LEN))
+            if code not in self._rooms:
+                return code
+        raise RuntimeError("could not allocate a unique game code")
+
+    def _default_policy(self) -> dict | None:
+        """Pick a trained opponent-aware checkpoint to seed a game's AI sides.
+
+        A match needs 21-dim self-play policies; ``opponent_snapshot.zip`` marks a self-play
+        run, so prefer those (newest first), and within a run ``final_model.zip`` then
+        ``best_model.zip``. Returns a ``{run, checkpoint}`` ref, or None if none exists."""
+        ckpt_root = self._base_dir / "checkpoints"
+        if not ckpt_root.is_dir():
+            return None
+        candidates = []
+        for d in ckpt_root.iterdir():
+            if not d.is_dir() or not (d / "opponent_snapshot.zip").is_file():
+                continue
+            for name in ("final_model.zip", "best_model.zip"):
+                if (d / name).is_file():
+                    candidates.append((d.stat().st_mtime, d.name, name))
+                    break
+        if not candidates:
+            return None
+        candidates.sort(reverse=True)
+        _mtime, run, ckpt = candidates[0]
+        return {"run": run, "checkpoint": ckpt}
+
+    def _claim_slot(self, room: dict, side: str) -> str:
+        """Mint a fresh join token for ``side`` and mark it claimed."""
+        token = secrets.token_urlsafe(18)
+        room["slots"][side].update(token=token, claimed=True, last_seen=time.time())
+        room["last_active"] = time.time()
+        return token
+
+    async def create_game(self, mode: str = "casual", seed: int = 0,
+                          claim_side: str | None = "a", policy_a: dict | None = None,
+                          policy_b: dict | None = None, actor: str | None = None) -> dict:
+        """Spawn a match and register a shareable game-code room for it.
+
+        ``claim_side`` (a|b|None) optionally reserves a side for the creator and returns its
+        secret token. AI policies fill any unclaimed side until a human takes over."""
+        if mode not in ("casual", "match"):
+            return self._reject("Unknown game mode.")
+        if claim_side not in ("a", "b", None):
+            return self._reject("Invalid side.")
+        if len(self._rooms) >= MAX_ROOMS:
+            return self._reject("Too many games are running right now; try again shortly.")
+        pol_a = policy_a or self._default_policy()
+        pol_b = policy_b or self._default_policy()
+        if not pol_a or not pol_b:
+            return self._reject("No trained model is available to host a game yet.")
+        cfg = {"mode": "play", "seed": seed, "policy_a": pol_a, "policy_b": pol_b,
+               "control": True, "game_mode": mode}
+        result = await self.launch(cfg, actor=actor)
+        if not result.get("ok"):
+            return result
+        run_name = result.get("run_name")
+        if not run_name:
+            return self._reject("Game launch did not report a run name.")
+        async with self._rooms_lock:
+            code = self._new_game_code()
+            now = time.time()
+            room = {
+                "code": code, "run_name": run_name, "mode": mode,
+                "created_at": now, "last_active": now,
+                "slots": {s: {"token": None, "claimed": False, "last_seen": None}
+                          for s in ("a", "b")},
+            }
+            self._rooms[code] = room
+            self._rooms_by_run[run_name] = code
+            your_side, side_token = None, None
+            if claim_side in ("a", "b"):
+                side_token = self._claim_slot(room, claim_side)
+                your_side = claim_side
+        self._audit("game_created", run_name, actor, detail=f"code={code} mode={mode}")
+        return {"ok": True, "code": code, "run_name": run_name, "mode": mode,
+                "your_side": your_side, "side_token": side_token}
+
+    async def join_game(self, code: str, side: str | None = None,
+                        actor: str | None = None) -> dict:
+        """Claim a free side in a game by its code (or become a spectator if full)."""
+        code = (code or "").strip().upper()
+        if side not in ("a", "b", None):
+            return {"ok": False, "status": 400, "message": "Invalid side."}
+        async with self._rooms_lock:
+            room = self._rooms.get(code)
+            if room is None:
+                return {"ok": False, "status": 404, "message": "Game not found."}
+            slots = room["slots"]
+            if side is None:
+                side = ("a" if not slots["a"]["claimed"]
+                        else "b" if not slots["b"]["claimed"] else None)
+            if side is None or slots[side]["claimed"]:
+                # Both sides taken (or the requested one is) → watch as a spectator.
+                return {"ok": True, "spectator": True, "run_name": room["run_name"],
+                        "mode": room["mode"]}
+            token = self._claim_slot(room, side)
+            opp = "b" if side == "a" else "a"
+            opponent_present = slots[opp]["claimed"]
+            run_name, game_mode = room["run_name"], room["mode"]
+        self._audit("game_joined", run_name, actor, detail=f"code={code} side={side}")
+        return {"ok": True, "run_name": run_name, "your_side": side, "side_token": token,
+                "mode": game_mode, "opponent_present": opponent_present}
+
+    def verify_game_token(self, code: str, side: str, token: str) -> bool:
+        """True iff ``token`` is the live join token for ``side`` of ``code`` (constant-time)."""
+        room = self._rooms.get((code or "").strip().upper())
+        if room is None or side not in ("a", "b") or not token:
+            return False
+        stored = room["slots"][side].get("token")
+        if not stored or not secrets.compare_digest(stored, token):
+            return False
+        room["slots"][side]["last_seen"] = time.time()
+        room["last_active"] = time.time()
+        return True
+
+    def game_run(self, code: str) -> str | None:
+        room = self._rooms.get((code or "").strip().upper())
+        return room["run_name"] if room else None
+
+    def game_state(self, code: str, touch: bool = True) -> dict | None:
+        """Public room view (no tokens) for the lobby/spectator. Touching keeps it alive."""
+        room = self._rooms.get((code or "").strip().upper())
+        if room is None:
+            return None
+        if touch:
+            room["last_active"] = time.time()   # an open lobby/spectator keeps the room alive
+        return {
+            "code": room["code"], "run_name": room["run_name"], "mode": room["mode"],
+            "slots": {s: {"claimed": room["slots"][s]["claimed"]} for s in ("a", "b")},
+        }
+
+    async def leave_game(self, code: str, side: str, token: str,
+                        actor: str | None = None) -> dict:
+        code = (code or "").strip().upper()
+        async with self._rooms_lock:
+            room = self._rooms.get(code)
+            if room is None:
+                return {"ok": True}   # already gone
+            if not self.verify_game_token(code, side, token):
+                return {"ok": False, "status": 403, "message": "Invalid game credentials."}
+            room["slots"][side].update(token=None, claimed=False, last_seen=None)
+            room["last_active"] = time.time()
+            run_name = room["run_name"]
+        self._audit("game_left", run_name, actor, detail=f"code={code} side={side}")
+        return {"ok": True}
+
+    def _drop_room_for_run(self, run_name: str) -> str | None:
+        """Forget the room bound to ``run_name`` (its match has ended). Returns the code."""
+        code = self._rooms_by_run.pop(run_name, None)
+        if code is not None:
+            self._rooms.pop(code, None)
+        return code
+
     # ── control ──────────────────────────────────────────────────────────────────
     async def launch(self, cfg: dict, actor: str | None = None) -> dict:
         # A distributed run isn't a single local job — fan it out into shard queue items
@@ -422,25 +595,33 @@ class JobManager:
             run_name, i = f"match{i}", i + 1
 
         manual_red = bool(cfg.get("manual_red"))
+        # Online games wire the control sink without forcing red-human (both sides start on
+        # AI and flip to human as each browser sends input). game_mode picks the rule set.
+        control_enabled = bool(cfg.get("control")) or manual_red
+        game_mode = "casual" if str(cfg.get("game_mode")) == "casual" else "match"
 
         args = [
             sys.executable, "scripts/play.py",
             "--policy-a", str(resolved["policy_a"][0]),
             "--policy-b", str(resolved["policy_b"][0]),
             "--seed", str(seed),
+            "--mode", game_mode,
             "--stream-url", self._ingest_url(run_name),
         ]
         if domain_rand:
             args.append("--domain-rand")
+        if control_enabled:
+            # play.py subscribes to the control sink for this run; humans drive their side.
+            args += ["--control-url", self._control_url(run_name)]
         if manual_red:
-            # Human drives red; play.py subscribes to the control sink for this run.
-            args += ["--manual-red", "--control-url", self._control_url(run_name)]
+            args.append("--manual-red")
 
         entry = {
             "run_name": run_name, "device": "server", "mode": "play",
             "run_type": "match", "state": "launching",
             "policy_a": resolved["policy_a"][1], "policy_b": resolved["policy_b"][1],
             "seed": seed, "domain_rand": domain_rand, "manual_red": manual_red,
+            "game_mode": game_mode,
             "phase": "launching", "num_timesteps": 0,
             "started_at": time.time(), "cancel_requested": False,
         }
@@ -455,7 +636,8 @@ class JobManager:
         self._audit("launch", run_name, actor, source="server", detail="mode=play")
         await self._bc.broadcast(self.status_msg())
         await self._bc.broadcast(self.active_runs_msg())
-        return {"ok": True, "message": "launched", "status": self.status_msg()}
+        return {"ok": True, "message": "launched", "status": self.status_msg(),
+                "run_name": run_name}
 
     async def kill(self, run_name: str | None = None, actor: str | None = None) -> dict:
         """Stop a run by name. ``None`` stops the primary local run (legacy single-run UI).
@@ -577,6 +759,7 @@ class JobManager:
                     entry["proc"] = None
                     del self._active[run_name]
                     self._drop_dist_group_if_idle(entry.get("dist_group"))
+                    self._drop_room_for_run(run_name)   # its game (if any) is over
                     exited.append((run_name, code))
             if exited:
                 for run_name, code in exited:
@@ -586,6 +769,16 @@ class JobManager:
                 await self._bc.broadcast(self.active_runs_msg())
                 await self._bc.broadcast(self.runs_msg())  # new checkpoints are now resumable
                 await self._bc.broadcast(self.models_msg())  # admin panel: refreshed metadata
+
+            # Reap game rooms nobody is playing or watching anymore: drop the room first so
+            # it isn't re-reaped next tick, then stop the match (its exit is handled above).
+            now = time.time()
+            idle_runs = [r["run_name"] for r in list(self._rooms.values())
+                         if now - r["last_active"] > ROOM_IDLE_TTL]
+            for run_name in idle_runs:
+                log.info("Reaping idle game room for %s", run_name)
+                self._drop_room_for_run(run_name)
+                await self.kill(run_name)
 
     async def _heartbeat_task(self) -> None:
         while True:

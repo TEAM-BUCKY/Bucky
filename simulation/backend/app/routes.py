@@ -112,6 +112,33 @@ class ControlRequest(BaseModel):
     red_mode: Optional[Literal["human", "ai"]] = None
 
 
+class CreateGameRequest(BaseModel):
+    # Online human-vs-human game. Open guest play: no login — the returned per-side token
+    # is the credential for sending control. "casual" = endless; "match" = full timed match.
+    mode: Literal["casual", "match"] = "casual"
+    seed: int = 0
+    claim_side: Optional[Literal["a", "b"]] = "a"
+    # Optional AI policies for the unclaimed/idle sides; defaults to a server-chosen baseline.
+    policy_a: Optional[PolicyRef] = None
+    policy_b: Optional[PolicyRef] = None
+
+
+class JoinGameRequest(BaseModel):
+    side: Optional[Literal["a", "b"]] = None   # None → first free side, or spectator if full
+
+
+class GameControlRequest(BaseModel):
+    side: Literal["a", "b"]
+    token: str
+    action: Optional[list[float]] = None        # [vx, vy, omega, kick], each in [-1, 1]
+    mode: Optional[Literal["human", "ai"]] = None
+
+
+class LeaveGameRequest(BaseModel):
+    side: Literal["a", "b"]
+    token: str
+
+
 class DeviceRegisterRequest(BaseModel):
     name: str = "device"
 
@@ -403,6 +430,87 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         if not msg:
             raise HTTPException(status_code=400, detail="nothing to send")
         result = await manager.push_control(req.run, msg)
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("message", "control failed"))
+        return result
+
+    # ── online play-by-game-code (open guest play, no login) ─────────────────────
+    # Lightweight per-IP throttle on the (subprocess-spawning) create/join calls so an
+    # anonymous endpoint can't be used to flood the server with games. Best-effort,
+    # in-memory; control messages (high-frequency) are NOT throttled here.
+    _game_hits: dict[str, list[float]] = {}
+
+    def _throttle_game(request: Request, limit: int = 12, window: float = 60.0) -> None:
+        ip = request.client.host if request.client else "?"
+        now = asyncio.get_event_loop().time()
+        hits = [t for t in _game_hits.get(ip, []) if now - t < window]
+        if len(hits) >= limit:
+            raise HTTPException(status_code=429, detail="Too many games; slow down a moment.")
+        hits.append(now)
+        _game_hits[ip] = hits
+
+    def _clip_action(action: list[float] | None) -> list[float] | None:
+        if action is None:
+            return None
+        if len(action) != 4:
+            raise HTTPException(status_code=400, detail="action must have 4 elements")
+        try:
+            return [max(-1.0, min(1.0, float(x))) for x in action]
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="action must be numeric")
+
+    @router.post("/games")
+    async def create_game(req: CreateGameRequest, request: Request) -> dict:
+        _throttle_game(request)
+        result = await manager.create_game(
+            mode=req.mode, seed=req.seed, claim_side=req.claim_side,
+            policy_a=req.policy_a.model_dump() if req.policy_a else None,
+            policy_b=req.policy_b.model_dump() if req.policy_b else None,
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("message", "could not start game"))
+        return result
+
+    @router.post("/games/{code}/join")
+    async def join_game(code: str, req: JoinGameRequest, request: Request) -> dict:
+        _throttle_game(request)
+        result = await manager.join_game(code, side=req.side)
+        if not result.get("ok"):
+            raise HTTPException(status_code=result.get("status", 400),
+                                detail=result.get("message", "could not join game"))
+        return result
+
+    @router.get("/games/{code}")
+    async def get_game(code: str) -> dict:
+        state = manager.game_state(code)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Game not found.")
+        return {"ok": True, **state}
+
+    @router.post("/games/{code}/leave")
+    async def leave_game(code: str, req: LeaveGameRequest) -> dict:
+        result = await manager.leave_game(code, req.side, req.token)
+        if not result.get("ok"):
+            raise HTTPException(status_code=result.get("status", 400),
+                                detail=result.get("message", "could not leave game"))
+        return result
+
+    @router.post("/games/{code}/control")
+    async def game_control(code: str, req: GameControlRequest) -> dict:
+        """Send a player's control to their side of a game. The game code + side token are
+        the credential — no login needed (open guest play)."""
+        if not manager.verify_game_token(code, req.side, req.token):
+            raise HTTPException(status_code=403, detail="Invalid game credentials.")
+        run = manager.game_run(code)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Game not found.")
+        msg: dict = {"side": req.side}
+        action = _clip_action(req.action)
+        if action is not None:
+            msg["action"] = action
+        if req.mode is not None:
+            msg["mode"] = req.mode
+        result = await manager.push_control(run, msg)
         if not result.get("ok"):
             raise HTTPException(status_code=409, detail=result.get("message", "control failed"))
         return result

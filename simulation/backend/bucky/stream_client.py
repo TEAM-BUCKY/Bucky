@@ -115,24 +115,39 @@ class StreamClient:
 
 
 class ControlClient:
-    """Receive-only WS client: subscribes to manual-control messages from the hub.
+    """Receive-only WS client: subscribes to per-side manual-control messages from the hub.
 
     The mirror image of :class:`StreamClient` — a background daemon thread owns an asyncio
     loop that connects (auto-reconnect with backoff) to the hub's ``/api/control_sink``
-    endpoint and consumes ``{"action": [...], "red_mode": "human"|"ai"}`` messages. The match
-    loop calls :meth:`latest` each tick (thread-safe, never blocks) to fetch the human's
-    current command for robot A. If no message has arrived within ``stale_after`` seconds the
-    action decays to zeros so a dropped browser can't leave the robot driving on its own.
+    endpoint and consumes ``{"side": "a"|"b", "action": [...], "mode": "human"|"ai"}`` messages
+    (the legacy ``{"action", "red_mode"}`` shape is accepted and treated as side "b"). Two
+    independent control streams — one per robot — ride this one socket, demultiplexed by ``side``,
+    so two browsers (one per side, online human-vs-human) feed the same match.
+
+    The match loop calls :meth:`latest` each tick (thread-safe, never blocks) to fetch both
+    sides' current commands as ``{"a": {"action", "mode"}, "b": {...}}``. Two staleness
+    safeguards per side: after ``stale_after`` seconds with no message the action decays to
+    zeros (a dropped browser can't leave a robot driving on its own); after
+    ``ai_fallback_after`` seconds the side reverts to ``"ai"`` so the policy takes back over
+    when a player disconnects and the match keeps going.
     """
 
-    def __init__(self, url: str, headers: dict | None = None, stale_after: float = 0.5) -> None:
+    _SIDES = ("a", "b")
+
+    def __init__(self, url: str, headers: dict | None = None, stale_after: float = 0.5,
+                 ai_fallback_after: float = 5.0, default_modes: dict | None = None) -> None:
         self._url = url
         self._headers = headers or None
         self._stale_after = stale_after
+        self._ai_fallback_after = ai_fallback_after
+        modes = default_modes or {}
         self._lock = threading.Lock()
-        self._action: list[float] = [0.0, 0.0, 0.0, 0.0]
-        self._red_mode = "human"   # manual match starts under human control by default
-        self._last_recv = 0.0
+        # Per-side command state. Default mode "ai" → an unclaimed side is played by its policy
+        # until a browser starts sending ``mode == "human"`` for it.
+        self._sides: dict[str, dict] = {
+            s: {"action": [0.0, 0.0, 0.0, 0.0], "mode": modes.get(s, "ai"), "last_recv": 0.0}
+            for s in self._SIDES
+        }
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -147,14 +162,21 @@ class ControlClient:
             self._loop.call_soon_threadsafe(lambda: None)
 
     def latest(self) -> dict:
-        """The current control command for robot A (``{"action", "red_mode"}``)."""
+        """Both sides' current commands: ``{"a": {"action", "mode"}, "b": {"action", "mode"}}``."""
+        now = time.monotonic()
         with self._lock:
-            action = list(self._action)
-            red_mode = self._red_mode
-            last = self._last_recv
-        if last > 0.0 and (time.monotonic() - last) > self._stale_after:
-            action = [0.0, 0.0, 0.0, 0.0]   # stale → stop driving (keep the last mode)
-        return {"action": action, "red_mode": red_mode}
+            snapshot = {s: (list(v["action"]), v["mode"], v["last_recv"])
+                        for s, v in self._sides.items()}
+        out: dict[str, dict] = {}
+        for s, (action, mode, last) in snapshot.items():
+            if last > 0.0:
+                age = now - last
+                if age > self._stale_after:
+                    action = [0.0, 0.0, 0.0, 0.0]   # stale → stop driving
+                if age > self._ai_fallback_after:
+                    mode = "ai"                      # player gone → hand back to the policy
+            out[s] = {"action": action, "mode": mode}
+        return out
 
     # ── background thread ────────────────────────────────────────────────────
     def _run(self) -> None:
@@ -204,11 +226,15 @@ class ControlClient:
                 msg = json.loads(raw)
             except (json.JSONDecodeError, TypeError):
                 continue
+            side = msg.get("side", "b")          # legacy messages carry no side → red (B)
+            if side not in self._SIDES:
+                continue
+            mode = msg.get("mode", msg.get("red_mode"))   # accept legacy ``red_mode``
             with self._lock:
+                slot = self._sides[side]
                 action = msg.get("action")
                 if isinstance(action, (list, tuple)) and len(action) >= 4:
-                    self._action = [float(x) for x in action[:4]]
-                red_mode = msg.get("red_mode")
-                if red_mode in ("human", "ai"):
-                    self._red_mode = red_mode
-                self._last_recv = time.monotonic()
+                    slot["action"] = [float(x) for x in action[:4]]
+                if mode in ("human", "ai"):
+                    slot["mode"] = mode
+                slot["last_recv"] = time.monotonic()
