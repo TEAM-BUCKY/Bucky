@@ -30,10 +30,15 @@ services:
       # 1 = the server also trains queued jobs locally (default); 0 = pure coordinator,
       # only registered guest devices (scripts/worker.py) consume the queue.
       - ENABLE_LOCAL_WORKER=${ENABLE_LOCAL_WORKER:-1}
+    # Runtime state lives in NAMED volumes (not bind mounts). Named volumes are
+    # managed by Docker and persist independently of this stack's working directory,
+    # so trained models survive container restarts, image rebuilds, and redeploys
+    # (e.g. Portainer git stacks that re-clone into a fresh dir). They are only
+    # removed by an explicit `docker compose down -v`.
     volumes:
-      - ./data/checkpoints:/app/checkpoints
-      - ./data/runs:/app/runs
-      - ./data/state:/app/state
+      - bucky_checkpoints:/app/checkpoints
+      - bucky_runs:/app/runs
+      - bucky_state:/app/state
     networks:
       - traefik_public
     labels:
@@ -69,3 +74,8 @@ services:
 networks:
   traefik_public:
     external: true
+
+volumes:
+  bucky_checkpoints:
+  bucky_runs:
+  bucky_state:

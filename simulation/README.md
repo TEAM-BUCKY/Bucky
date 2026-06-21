@@ -49,8 +49,16 @@ simulation/
    The shared Traefik fetches a certificate automatically. The site is then live at
    `https://${DOMAIN}`; log in with `APP_USERNAME`/`APP_PASSWORD` to start jobs.
 
-Checkpoints and run logs persist in `./data/` on the host. To update: `git pull`
-then `docker compose up -d --build`.
+Checkpoints, run logs, and queue state persist in named Docker volumes
+(`bucky_checkpoints`, `bucky_runs`, `bucky_state`) — managed by Docker and kept
+outside the stack directory, so they survive restarts, rebuilds, and redeploys.
+To update: `git pull` then `docker compose up -d --build`. They are only deleted by
+an explicit `docker compose down -v`.
+
+Inspect or back up a volume, e.g.:
+```bash
+docker run --rm -v bucky_checkpoints:/data -w /data alpine tar cz . > checkpoints-backup.tgz
+```
 
 > Note: training runs on the host CPU (no GPU assumed) — fine on a VPS, just slower
 > than a GPU machine.
