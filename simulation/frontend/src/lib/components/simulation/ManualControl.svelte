@@ -23,8 +23,12 @@
 	// playable sensitivity for the human.
 	const MAX_OMEGA = 58.18; // rad/s, physical max (mirrors backend)
 	const MAX_LINEAR = 5.236; // m/s, physical max (mirrors backend)
-	const AIM_KP = 6.0; // rad/s of turn per rad of heading error
-	const AIM_TURN_CAP = 8.0; // rad/s — comfortable human aiming cap (well below the physical max)
+	// Aim controller. Kept gentle on purpose: heading feedback arrives over the network a few
+	// frames stale, so a fast turn overshoots, over-corrects, and can wrap past 180° into a
+	// continuous spin. A low gain + low cap + a deadzone keep it stable and let it settle.
+	const AIM_KP = 4.0; // rad/s of turn per rad of heading error
+	const AIM_TURN_CAP = 2.5; // rad/s — gentle enough to stay stable over the control-loop latency
+	const AIM_DEADZONE = 0.05; // rad (~3°): within this of the cursor, stop turning
 	// Comfortable human drive speed; at full MAX_LINEAR the robot crosses the field in ~0.35 s.
 	const HUMAN_LINEAR_CAP = 1.5; // m/s
 	const DRIVE_SCALE = HUMAN_LINEAR_CAP / MAX_LINEAR; // normalized drive command ceiling
@@ -87,8 +91,11 @@
 		const f = simulation.frame;
 		if (target != null && f && f.robot2_heading != null) {
 			// P-controller on heading error → a comfortable turn rate, then normalize to the
-			// action's [-1, 1] range (physics multiplies it back up by MAX_OMEGA).
-			const desiredRad = clamp(wrapPi(target - f.robot2_heading) * AIM_KP, -AIM_TURN_CAP, AIM_TURN_CAP);
+			// action's [-1, 1] range (physics multiplies it back up by MAX_OMEGA). A deadzone
+			// near zero error stops it hunting/spinning once it's pointing at the cursor.
+			const err = wrapPi(target - f.robot2_heading);
+			const desiredRad =
+				Math.abs(err) < AIM_DEADZONE ? 0 : clamp(err * AIM_KP, -AIM_TURN_CAP, AIM_TURN_CAP);
 			omega = desiredRad / MAX_OMEGA;
 		} else {
 			// Fallback when not aiming: Q/E rotate left/right at the same comfortable rate.
@@ -170,7 +177,6 @@
 		<span class="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
 			<Crosshair class="size-3.5" />Manual red (test)
 		</span>
-		<!-- Kicker charge indicator -->
 		<span
 			class="flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider"
 			style="border-color: {kickReady ? '#34d399' : '#64748b'}; color: {kickReady ? '#34d399' : '#94a3b8'}"

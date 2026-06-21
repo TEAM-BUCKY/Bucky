@@ -77,11 +77,22 @@ def test_blocked_shot_on_own_goal():
 
 def test_risky_shot_threads_past_defender():
     t = PlayEventTracker()
-    # A kicks along +x toward the goal mouth; B sits right on the shot line, close.
+    # A kicks along +x toward the goal mouth; B sits near the shot line but far enough that the
+    # ball *clears* it (perp 0.2 m > BLOCK_RADIUS ≈ 0.131 m, < RISKY_RADIUS 0.30 m).
     out = t.update(_st([0.0, 0.0], 0.0, [0.1, 0.0]),
-                   _st([0.4, 0.1], np.pi, [0.1, 0.0]), {"kicked_a": True})
+                   _st([0.4, 0.2], np.pi, [0.1, 0.0]), {"kicked_a": True})
     assert out.get("risky_shot") is True
     assert 0.0 < out["risky_factor"] <= 1.0
+    assert "kick_at_opponent" not in out
+
+
+def test_kick_at_opponent_when_fired_into_defender():
+    t = PlayEventTracker()
+    # B sits right on the shot line and close (perp 0.05 m < BLOCK_RADIUS) → the ball hits it.
+    out = t.update(_st([0.0, 0.0], 0.0, [0.1, 0.0]),
+                   _st([0.4, 0.05], np.pi, [0.1, 0.0]), {"kicked_a": True})
+    assert out.get("kick_at_opponent") is True
+    assert "risky_shot" not in out          # a hit is not a thread
 
 
 def test_no_risky_shot_when_opponent_off_the_line():
@@ -89,6 +100,7 @@ def test_no_risky_shot_when_opponent_off_the_line():
     out = t.update(_st([0.0, 0.0], 0.0, [0.1, 0.0]),
                    _st([0.4, 0.5], np.pi, [0.1, 0.0]), {"kicked_a": True})
     assert "risky_shot" not in out
+    assert "kick_at_opponent" not in out
 
 
 def test_contact_dist_constant_is_sane():

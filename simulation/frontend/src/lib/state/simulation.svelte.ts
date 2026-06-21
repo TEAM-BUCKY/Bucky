@@ -143,8 +143,15 @@ export interface LaunchConfig {
 	target?: string;
 	/** Animate the live field while training (off by default — headless trains faster). */
 	viz?: boolean;
-	/** Split one run across devices via FedAvg. */
-	distributed?: { shards: number; sync_every: number };
+	/**
+	 * Split one run across devices via FedAvg — either even shards, or a per-device
+	 * map sizing each device's shard to its capacity (target = device id or 'server').
+	 */
+	distributed?: {
+		shards?: number;
+		sync_every: number;
+		devices?: { target: string; n_envs: number }[];
+	};
 }
 
 /** A queued run waiting to launch (back-to-back, optionally at a scheduled time). */

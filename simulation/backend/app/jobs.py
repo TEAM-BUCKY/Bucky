@@ -741,9 +741,12 @@ class JobManager:
             if kind == "steps" and value < 1:
                 return {"ok": False, "message": "Step count must be positive."}
 
-        # Distributed run: fan out into N shard items that train together via FedAvg.
+        # Distributed run: fan out into shard items that train together via FedAvg —
+        # either N even shards, or a per-device map ({devices: [{target, n_envs}]}).
         dist = cfg.get("distributed")
-        if mode == "train" and dist and int(dist.get("shards") or 1) > 1:
+        if mode == "train" and dist and (
+            len(dist.get("devices") or []) > 1 or int(dist.get("shards") or 1) > 1
+        ):
             return await self._enqueue_distributed(cfg, dist, start_at, actor=actor)
 
         item = self._make_queue_item(cfg, start_at)
@@ -769,13 +772,18 @@ class JobManager:
     async def _enqueue_distributed(
         self, cfg: dict, dist: dict, start_at: float | None, actor: str | None = None
     ) -> dict:
-        """Split one run into N FedAvg shards sharing a sync group.
+        """Split one run into FedAvg shards sharing a sync group.
+
+        Two shapes are supported. ``{shards: N}`` makes N even shards (any worker may
+        pick them up). ``{devices: [{target, n_envs}]}`` makes one shard per device,
+        pinned to that ``target`` (a device id or "server") and sized to its ``n_envs``
+        — so heterogeneous boxes each train at their own capacity and contribute to the
+        shared model proportionally (the weighted average in ``dist_push``).
 
         Each shard is an ordinary train job (its own run_name, checkpoints and a
         per-shard seed for sample diversity) carrying the group's sync parameters. They
         average policy weights through ``/api/dist`` every ``sync_every`` steps, so the
-        fleet trains one converging model with N× the experience."""
-        shards = max(2, int(dist.get("shards") or 2))
+        fleet trains one converging model with the combined experience."""
         sync_every = max(1, int(dist.get("sync_every") or 50_000))
         base = (cfg.get("name") or cfg.get("stage") or "dist").strip() or "dist"
         group = self._unique_run_name(f"{base}_dist")
@@ -783,13 +791,30 @@ class JobManager:
 
         base_seed = int(cfg.get("seed") or 0)
         base_name = (cfg.get("name") or "").strip()
+
+        # Per-device map (heterogeneous) or even N shards. Each entry below resolves to
+        # (target, n_envs); even shards keep the run's target/n_envs for every shard.
+        devices = [
+            d for d in (dist.get("devices") or [])
+            if int(d.get("n_envs") or 0) >= 1
+        ]
+        if len(devices) > 1:
+            assignments = [(d.get("target") or "any", int(d["n_envs"])) for d in devices]
+        else:
+            shards = max(2, int(dist.get("shards") or 2))
+            assignments = [(cfg.get("target") or "any", int(cfg.get("n_envs") or 16))
+                           for _ in range(shards)]
+        shards = len(assignments)
+
         items = []
-        for i in range(shards):
+        for i, (target, n_envs) in enumerate(assignments):
             shard_cfg = {k: v for k, v in cfg.items() if k != "distributed"}
             shard_cfg["dist_group"] = group
             shard_cfg["dist_sync_every"] = sync_every
             shard_cfg["dist_shards"] = shards
             shard_cfg["seed"] = base_seed + i  # diverse samples per shard
+            shard_cfg["target"] = target       # pin this shard to its device
+            shard_cfg["n_envs"] = n_envs        # size it for that device's capacity
             if base_name:
                 shard_cfg["name"] = f"{base_name}_shard{i}"
                 shard_cfg["version"] = cfg.get("version") or "1"
@@ -1099,8 +1124,13 @@ class JobManager:
     # dead shard can't wedge the group forever (the live shards just sync among themselves).
     DIST_ROUND_TIMEOUT = 120.0
 
-    async def dist_push(self, group: str, rnd: int, shard: str, shards: int, data: bytes) -> dict:
-        """Store one shard's weights for a round; average once the quorum has arrived."""
+    async def dist_push(
+        self, group: str, rnd: int, shard: str, shards: int, data: bytes, weight: float = 1.0
+    ) -> dict:
+        """Store one shard's weights for a round; average once the quorum has arrived.
+
+        Each push carries the shard's ``weight`` (its env count) so the average is
+        FedAvg-weighted — a 32-env shard pulls the shared model 4× as hard as an 8-env one."""
         from bucky import fedavg
 
         async with self._dist_lock:
@@ -1112,13 +1142,21 @@ class JobManager:
                 rnd, {"pushes": {}, "averaged": None, "first_at": time.time()}
             )
             if rs["averaged"] is None:
-                rs["pushes"][shard] = fedavg.from_npz_bytes(data)
+                # Store (arrays, weight) per shard so the mean can be env-weighted.
+                rs["pushes"][shard] = (fedavg.from_npz_bytes(data), float(weight))
                 if len(rs["pushes"]) >= max(1, shards):
-                    rs["averaged"] = fedavg.to_npz_bytes(
-                        fedavg.average_arrays(list(rs["pushes"].values()))
-                    )
+                    rs["averaged"] = fedavg.to_npz_bytes(self._average_round(rs["pushes"]))
                     rs["pushes"] = {}  # free the per-shard copies once averaged
         return {"ok": True}
+
+    @staticmethod
+    def _average_round(pushes: dict) -> dict:
+        """Weighted FedAvg over a round's collected shard pushes (arrays + weights)."""
+        from bucky import fedavg
+
+        states = [arrays for arrays, _w in pushes.values()]
+        weights = [w for _a, w in pushes.values()]
+        return fedavg.average_arrays(states, weights=weights)
 
     async def dist_pull(self, group: str, rnd: int) -> bytes | None:
         """Return the round's averaged weights, or None if not ready yet.
@@ -1137,9 +1175,7 @@ class JobManager:
             if rs["averaged"] is not None:
                 return rs["averaged"]
             if rs["pushes"] and time.time() - rs["first_at"] > self.DIST_ROUND_TIMEOUT:
-                rs["averaged"] = fedavg.to_npz_bytes(
-                    fedavg.average_arrays(list(rs["pushes"].values()))
-                )
+                rs["averaged"] = fedavg.to_npz_bytes(self._average_round(rs["pushes"]))
                 rs["pushes"] = {}
                 return rs["averaged"]
             return None

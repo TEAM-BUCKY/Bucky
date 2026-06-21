@@ -103,6 +103,12 @@ export class RunConfig {
 	distributed = $state(false);
 	distShards = $state(2);
 	distSyncEvery = $state(50000);
+	/**
+	 * Per-device assignment: each enabled device runs one shard at its own env count
+	 * (target = device id or 'server'). When ≥2 entries are set, it overrides even
+	 * shards so heterogeneous boxes each train at their capacity.
+	 */
+	distDevices = $state<{ target: string; n_envs: number }[]>([]);
 
 	// ── stop condition ───────────────────────────────────────────────────────────
 	stopKind = $state<StopKind>('steps');
@@ -208,11 +214,17 @@ export class RunConfig {
 			target: this.target,
 			viz: this.viz
 		};
-		if (this.distributed && this.distShards > 1) {
-			p.distributed = {
-				shards: Math.max(2, Math.floor(this.distShards)),
-				sync_every: Math.max(1, Math.floor(this.distSyncEvery))
-			};
+		if (this.distributed) {
+			const sync_every = Math.max(1, Math.floor(this.distSyncEvery));
+			const perDevice = this.distDevices.filter((d) => d.target && d.n_envs >= 1);
+			if (perDevice.length > 1) {
+				p.distributed = {
+					sync_every,
+					devices: perDevice.map((d) => ({ target: d.target, n_envs: Math.floor(d.n_envs) }))
+				};
+			} else if (this.distShards > 1) {
+				p.distributed = { shards: Math.max(2, Math.floor(this.distShards)), sync_every };
+			}
 		}
 		if (this.cont && this.srcRun && this.srcCkpt) {
 			p.resume_from = { run: this.srcRun, checkpoint: this.srcCkpt };
@@ -277,10 +289,24 @@ export class RunConfig {
 	get parallelismSummary(): string {
 		return `${this.n_envs} envs · seed ${this.seed}`;
 	}
+	/** Enabled per-device shard assignments (target set, ≥1 env). */
+	get distAssignments(): { target: string; n_envs: number }[] {
+		return this.distDevices.filter((d) => d.target && d.n_envs >= 1);
+	}
+	get distAssignmentsSummary(): string {
+		const a = this.distAssignments;
+		return `${a.length} devices · ${a.map((d) => d.n_envs).join('+')} envs`;
+	}
 	get optionsSummary(): string {
 		const bits = [`domain rand ${this.domain_rand ? 'on' : 'off'}`];
 		if (this.viz) bits.push('watch live');
-		if (this.distributed) bits.push(`${Math.max(2, this.distShards)} shards`);
+		if (this.distributed) {
+			bits.push(
+				this.distAssignments.length > 1
+					? this.distAssignmentsSummary
+					: `${Math.max(2, this.distShards)} shards`
+			);
+		}
 		if (this.caps.advanced && this.saveStepCheckpoints) bits.push('step ckpts');
 		return bits.join(' · ');
 	}

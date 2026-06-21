@@ -22,7 +22,9 @@ from bucky.rewards import CAPTURE_RADIUS
 SHOT_SPEED = 0.6          # m/s toward our goal to count as an incoming shot
 KICK_LOST_WINDOW = 40     # steps (~0.8 s) after A kicks within which an enemy capture is "kick lost"
 KICK_GOAL_WINDOW = 60     # steps (~1.2 s) after A kicks within which a goal counts as "kicked"
-RISKY_RADIUS = 0.30       # m: opponent within this of the shot line makes the shot "risky"
+RISKY_RADIUS = 0.30       # m: opponent within this of the shot line (but clearing it) → "risky" thread
+BLOCK_RADIUS = COLLISION_DIST   # m: kick line passing within this of the opponent will *hit* them
+KICK_AT_OPP_RANGE = 0.8   # m: only count a strike on the opponent within this forward distance
 CONTACT_DIST = COLLISION_DIST + 0.02   # ball "in contact" with a robot (blocks / dribble check)
 
 
@@ -94,11 +96,9 @@ class PlayEventTracker:
             self._kick_lost_timer = KICK_LOST_WINDOW
             self._kick_goal_timer = KICK_GOAL_WINDOW
             self._bounce_since_kick = False
-            # risky shot: the kick (along A's heading) threads toward the enemy goal past B
-            risky, factor = self._risky_shot(state_a, state_b)
-            if risky:
-                out["risky_shot"] = True
-                out["risky_factor"] = factor
+            # Classify the kick relative to B: a hit (ball fired into the opponent → give-away)
+            # or a thread (clears the opponent toward the goal mouth → skilful, risky).
+            out.update(self._kick_shot_eval(state_a, state_b))
 
         if self._kick_goal_timer > 0 and phys_info.get("ball_wall_bounce", False):
             self._bounce_since_kick = True
@@ -133,22 +133,37 @@ class PlayEventTracker:
 
         return out
 
-    def _risky_shot(self, state_a: PhysicsState, state_b: PhysicsState) -> tuple[bool, float]:
+    def _kick_shot_eval(self, state_a: PhysicsState, state_b: PhysicsState) -> dict:
+        """Classify A's kick relative to opponent B (called on the kick step).
+
+        - ``kick_at_opponent``: the kick line passes within ``BLOCK_RADIUS`` of B and B is in
+          front within ``KICK_AT_OPP_RANGE`` → the ball will strike B and be given away.
+        - ``risky_shot``: the kick is aimed at the goal mouth and passes B *clearing* it
+          (``BLOCK_RADIUS ≤ perp < RISKY_RADIUS``) → a skilful threaded shot; ``risky_factor``
+          rises as the pass gets closer to (but still clears) the defender.
+        """
         ball = state_a.ball_pos
         shot_dir = np.array([np.cos(state_a.robot_heading), np.sin(state_a.robot_heading)])
+        to_b = state_b.robot_pos - ball
+        proj = float(np.dot(to_b, shot_dir))               # opponent's distance along the kick ray
+        if proj <= 0:                                      # opponent is behind the kick — irrelevant
+            return {}
+        perp = float(np.linalg.norm(to_b - shot_dir * proj))
+
+        # Fired straight into the opponent → give-away.
+        if proj < KICK_AT_OPP_RANGE and perp < BLOCK_RADIUS:
+            return {"kick_at_opponent": True}
+
+        # Otherwise, a thread past the defender toward the goal mouth.
         if shot_dir[0] <= 1e-6:
-            return False, 0.0
+            return {}
         s_goal = (HALF_W - ball[0]) / shot_dir[0]          # distance along ray to the goal line
-        if s_goal <= 0:
-            return False, 0.0
+        if s_goal <= 0 or proj > s_goal:                   # goal behind us, or B beyond the goal line
+            return {}
         y_at = ball[1] + shot_dir[1] * s_goal
         if abs(y_at) >= GOAL_HALF_WIDTH:                   # not aimed at the goal mouth
-            return False, 0.0
-        to_b = state_b.robot_pos - ball
-        proj = float(np.dot(to_b, shot_dir))               # opponent's position along the ray
-        if proj <= 0 or proj > s_goal:                     # opponent not between ball and goal
-            return False, 0.0
-        perp = float(np.linalg.norm(to_b - shot_dir * proj))
-        if perp >= RISKY_RADIUS:
-            return False, 0.0
-        return True, float(np.clip(1.0 - perp / RISKY_RADIUS, 0.0, 1.0))
+            return {}
+        if BLOCK_RADIUS <= perp < RISKY_RADIUS:            # passes close but clears the defender
+            factor = float(np.clip((RISKY_RADIUS - perp) / (RISKY_RADIUS - BLOCK_RADIUS), 0.0, 1.0))
+            return {"risky_shot": True, "risky_factor": factor}
+        return {}

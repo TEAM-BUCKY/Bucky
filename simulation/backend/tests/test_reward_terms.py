@@ -172,6 +172,25 @@ def test_kick_attempt_zero_without_flag(physics, config):
     assert terms.kick_power_to_goal == 0.0
 
 
+def test_kick_at_opponent_penalized_and_suppresses_bonus(physics, config):
+    # A goal-ward kick that is flagged as fired into the opponent: it must be penalized AND
+    # earn none of the positive kick shaping (no feeding the enemy for the attempt bonus).
+    ball = np.array([0.0, 0.0])
+    s = _place(physics, ball - np.array([0.1, 0.0]), 0.0, ball)
+    terms = compute_rewards(s, s, config, info={"kicked": True, "kick_at_opponent": True})
+    assert abs(terms.kick_at_opponent - config.w_kick_at_opponent) < 1e-6
+    assert terms.kick_at_opponent < 0.0
+    assert terms.kick_attempt == 0.0
+    assert terms.kick_power_to_goal == 0.0
+
+
+def test_kick_lost_penalty_is_substantial(physics, config):
+    s = physics._make_state()
+    terms = compute_rewards(s, s, config, info={"kick_lost": True})
+    assert abs(terms.kick_lost - config.w_kick_lost) < 1e-6
+    assert terms.kick_lost <= -10.0   # giving the enemy the ball is a heavy penalty
+
+
 # ── shot_on_goal: reward a fast ball struck toward goal (not a dribble) ───────
 def _place_with_ball_vel(physics, robot_pos, ball_pos, ball_vel):
     physics._robot_pos = np.asarray(robot_pos, dtype=float)

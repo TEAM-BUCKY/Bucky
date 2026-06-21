@@ -43,9 +43,16 @@ def load_arrays_into_policy(model, arrays: dict[str, np.ndarray]) -> None:
     model.policy.load_state_dict(new_sd, strict=False)
 
 
-def average_arrays(states: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
-    """Elementwise mean of several weight dicts (FedAvg). All dicts share their keys."""
+def average_arrays(
+    states: list[dict[str, np.ndarray]], weights: list[float] | None = None
+) -> dict[str, np.ndarray]:
+    """Elementwise (weighted) mean of several weight dicts (FedAvg).
+
+    All dicts share their keys. ``weights`` (one per state, e.g. each shard's env
+    count) gives bigger shards proportionally more pull; ``None`` is a plain mean."""
     keys = states[0].keys()
+    if weights is not None and any(w > 0 for w in weights):
+        return {k: np.average([s[k] for s in states], axis=0, weights=weights) for k in keys}
     return {k: np.mean([s[k] for s in states], axis=0) for k in keys}
 
 
@@ -70,7 +77,7 @@ class FedSyncCallback(BaseCallback):
     """
 
     def __init__(self, api_base: str, token: str, group: str, shard: str,
-                 every: int, shards: int, verbose: int = 0) -> None:
+                 every: int, shards: int, weight: float = 1.0, verbose: int = 0) -> None:
         super().__init__(verbose)
         self._api = api_base.rstrip("/")
         self._headers = {"X-Fed-Token": token}
@@ -78,6 +85,8 @@ class FedSyncCallback(BaseCallback):
         self._shard = shard
         self._every = max(1, every)
         self._shards = max(1, shards)
+        # This shard's averaging weight (its env count) — bigger boxes pull harder.
+        self._weight = float(weight) if weight and weight > 0 else 1.0
         self._last_round = -1
 
     def _on_step(self) -> bool:
@@ -96,7 +105,8 @@ class FedSyncCallback(BaseCallback):
             requests.post(
                 f"{self._api}/dist/{self._group}/push",
                 headers=self._headers,
-                params={"round": rnd, "shard": self._shard, "shards": self._shards},
+                params={"round": rnd, "shard": self._shard, "shards": self._shards,
+                        "weight": self._weight},
                 files={"file": ("weights.npz", payload, "application/octet-stream")},
                 timeout=60,
             ).raise_for_status()

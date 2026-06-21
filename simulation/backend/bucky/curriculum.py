@@ -87,7 +87,7 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         active_reward_terms=[
             "approach", "ball_to_goal", "possession", "front_alignment", "goal", "goal_against",
             "steal", "blocked_shot", "kick_attempt", "kick_power_to_goal", "shot_on_goal",
-            "kick_goal", "bank_shot", "risky_shot", "kick_lost",
+            "kick_goal", "bank_shot", "risky_shot", "kick_lost", "kick_at_opponent",
             "out_of_bounds", "lack_of_progress", "defective", "spin", "time_penalty",
             "action_magnitude",
         ],

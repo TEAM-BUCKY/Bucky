@@ -333,7 +333,7 @@
 					<ManualControl {fieldEl} />
 				{:else}
 					<p class="font-mono text-[11px] text-muted-foreground">
-						Tick "Drive red yourself" in the match config to control red against the AI.
+						Tick "Drive yourself" in the match config to control red against the AI.
 					</p>
 				{/if}
 			</div>

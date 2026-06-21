@@ -87,7 +87,9 @@ class LaunchRequest(BaseModel):
     target: Optional[str] = None
     # Animate the live field in the UI (off by default — headless trains faster).
     viz: Optional[bool] = None
-    # Split one run across devices via FedAvg: {"shards": N, "sync_every": steps}.
+    # Split one run across devices via FedAvg. Either even shards
+    # {"shards": N, "sync_every": steps} or a per-device map
+    # {"devices": [{"target": id|"server", "n_envs": N}], "sync_every": steps}.
     distributed: Optional[dict] = None
     # Per-model config (optional — when omitted, legacy <stage>_seed<N> behaviour).
     name: Optional[str] = None
@@ -358,11 +360,12 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         round: int = Query(...),
         shard: str = Query(...),
         shards: int = Query(...),
+        weight: float = Query(1.0),  # shard's env count for weighted FedAvg
         file: UploadFile = File(...),
         _ok: bool = Depends(require_fed),
     ) -> dict:
         data = await file.read()
-        return await manager.dist_push(group, round, shard, shards, data)
+        return await manager.dist_push(group, round, shard, shards, data, weight)
 
     @router.get("/dist/{group}/pull")
     async def dist_pull(

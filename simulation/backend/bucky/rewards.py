@@ -46,13 +46,16 @@ class RewardConfig:
     w_blocked_shot: float = 5.0           # block an enemy shot on our goal
     w_kick_goal: float = 6.0              # bonus: goal scored from a kick (vs dribbling it in)
     w_bank_shot: float = 4.0              # bonus: goal scored off a wall bounce
-    w_risky_shot: float = 2.0             # kick threaded past the opponent toward goal, × risk factor
-    w_kick_lost: float = -6.0             # extra punishment: our kicked ball captured by enemy
+    w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
+    w_kick_lost: float = -12.0            # giving the enemy the ball: our kicked ball captured by enemy
+    w_kick_at_opponent: float = -4.0      # firing the ball straight into the opponent (a give-away)
 
     # Dense kick-shaping: reward *firing the kicker* toward the goal, not only kicks that
     # happen to score. Without this the agent learns to dribble (which earns the same goal
     # reward without the risk) and never explores the kicker — see the unused-kicker analysis.
-    w_kick_attempt: float = 0.5           # flat bonus for a legal kick aimed goal-ward
+    # Kept small so the agent doesn't *spam* the kicker for the flat bonus; suppressed entirely
+    # for a kick aimed into the opponent (see kick_at_opponent below).
+    w_kick_attempt: float = 0.1           # flat bonus for a legal kick aimed goal-ward (clear path)
     w_kick_power_to_goal: float = 1.5     # × cos(kick heading, ball→goal): reward aiming kicks at goal
 
     # Dense "quick shot" shaping: reward a fast ball in flight heading at the goal. Unlike
@@ -98,6 +101,7 @@ class RewardTerms:
     bank_shot: float = 0.0
     risky_shot: float = 0.0
     kick_lost: float = 0.0
+    kick_at_opponent: float = 0.0
     kick_attempt: float = 0.0
     kick_power_to_goal: float = 0.0
     shot_on_goal: float = 0.0
@@ -112,8 +116,8 @@ class RewardTerms:
                 self.out_of_bounds + self.lack_of_progress + self.defective +
                 self.spin + self.steal + self.blocked_shot + self.kick_goal +
                 self.bank_shot + self.risky_shot + self.kick_lost +
-                self.kick_attempt + self.kick_power_to_goal + self.shot_on_goal +
-                self.time_penalty + self.action_magnitude)
+                self.kick_at_opponent + self.kick_attempt + self.kick_power_to_goal +
+                self.shot_on_goal + self.time_penalty + self.action_magnitude)
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -133,6 +137,7 @@ class RewardTerms:
             "bank_shot": self.bank_shot,
             "risky_shot": self.risky_shot,
             "kick_lost": self.kick_lost,
+            "kick_at_opponent": self.kick_at_opponent,
             "kick_attempt": self.kick_attempt,
             "kick_power_to_goal": self.kick_power_to_goal,
             "shot_on_goal": self.shot_on_goal,
@@ -213,10 +218,17 @@ def compute_rewards(
     if info.get("kick_lost", False):
         terms.kick_lost = config.w_kick_lost
 
+    # Firing the ball straight into the opponent hands them possession — penalize it directly
+    # (the immediate counterpart to kick_lost, which only fires once they actually capture it).
+    kick_at_opponent = bool(info.get("kick_at_opponent", False))
+    if kick_at_opponent:
+        terms.kick_at_opponent = config.w_kick_at_opponent
+
     # Dense kicker shaping: a legal kick (``info["kicked"]``) earns a flat attempt bonus plus
     # a term scaled by how well the kick heading points at the opponent goal. Backward / sideways
-    # kicks (cos ≤ 0) earn nothing, so this rewards *useful* kicks without rewarding flailing.
-    if info.get("kicked", False):
+    # kicks (cos ≤ 0) earn nothing, and a kick aimed into the opponent earns nothing either — so
+    # this rewards *useful* kicks with a clear path, not flailing or feeding the enemy.
+    if info.get("kicked", False) and not kick_at_opponent:
         to_goal = OPP_GOAL - s1.ball_pos
         to_goal_norm = float(np.linalg.norm(to_goal))
         if to_goal_norm > 1e-6:

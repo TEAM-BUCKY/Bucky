@@ -73,6 +73,32 @@
 				? 'Server only'
 				: (devices.find((d) => d.id === config.target)?.name ?? 'pick a device')
 	);
+
+	// ── per-device FedAvg distribution ──────────────────────────────────────────
+	// Assignable shard hosts: the local server plus every registered device.
+	const distHosts = $derived([
+		{ id: 'server', name: 'Server (local)', online: true },
+		...devices.map((d) => ({ id: d.id, name: d.online ? d.name : `${d.name} (offline)`, online: d.online }))
+	]);
+	// Mode toggle: 'even' = N identical shards, 'device' = per-host env counts.
+	let distMode = $state<'even' | 'device'>('even');
+	$effect(() => {
+		// Per-device assignments only take effect in 'device' mode; clear them otherwise
+		// so trainPayload() falls back to even shards.
+		if (distMode === 'even' && config.distDevices.length > 0) config.distDevices = [];
+	});
+	const distEnvsOf = (target: string) =>
+		config.distDevices.find((d) => d.target === target)?.n_envs ?? 0;
+	function toggleDistHost(target: string, on: boolean) {
+		const rest = config.distDevices.filter((d) => d.target !== target);
+		config.distDevices = on ? [...rest, { target, n_envs: config.n_envs }] : rest;
+	}
+	function setDistEnvs(target: string, n: number) {
+		const envs = Math.max(1, Math.floor(n) || 1);
+		config.distDevices = config.distDevices.map((d) =>
+			d.target === target ? { ...d, n_envs: envs } : d
+		);
+	}
 </script>
 
 {#if config.caps.identity}
@@ -174,17 +200,71 @@
 					</Label>
 				</div>
 				{#if config.distributed}
-					<div class="ml-6 flex items-center gap-3">
-						<div class="flex items-center gap-1.5">
-							<Label for="dist-shards" class="font-mono text-[10px] text-muted-foreground">shards</Label>
-							<Input
-								id="dist-shards"
-								type="number"
-								min="2"
-								class="h-7 w-16 font-mono text-xs"
-								bind:value={config.distShards}
-							/>
+					<div class="ml-6 flex flex-col gap-2">
+						<!-- Even N shards vs. per-device env counts. -->
+						<div class="grid grid-cols-2 gap-1 rounded-md border border-border/70 bg-input/20 p-1">
+							<Button
+								variant={distMode === 'even' ? 'default' : 'ghost'}
+								size="sm"
+								class="h-7 font-mono text-[11px] uppercase tracking-wider"
+								onclick={() => (distMode = 'even')}>Even shards</Button
+							>
+							<Button
+								variant={distMode === 'device' ? 'default' : 'ghost'}
+								size="sm"
+								class="h-7 font-mono text-[11px] uppercase tracking-wider"
+								onclick={() => (distMode = 'device')}>Per-device</Button
+							>
 						</div>
+
+						{#if distMode === 'even'}
+							<div class="flex items-center gap-1.5">
+								<Label for="dist-shards" class="font-mono text-[10px] text-muted-foreground">shards</Label>
+								<Input
+									id="dist-shards"
+									type="number"
+									min="2"
+									class="h-7 w-16 font-mono text-xs"
+									bind:value={config.distShards}
+								/>
+							</div>
+						{:else}
+							<!-- One shard per enabled host, sized to its env count. -->
+							<div class="flex flex-col gap-1">
+								{#each distHosts as host (host.id)}
+									{@const enabled = config.distDevices.some((d) => d.target === host.id)}
+									<div class="flex items-center gap-2">
+										<Checkbox
+											id="dist-{host.id}"
+											checked={enabled}
+											onCheckedChange={(v) => toggleDistHost(host.id, !!v)}
+										/>
+										<Label
+											for="dist-{host.id}"
+											class="flex-1 cursor-pointer font-mono text-xs text-muted-foreground"
+										>
+											{host.name}
+										</Label>
+										<Input
+											type="number"
+											min="1"
+											max="32"
+											disabled={!enabled}
+											value={enabled ? distEnvsOf(host.id) : ''}
+											oninput={(e) => setDistEnvs(host.id, +e.currentTarget.value)}
+											placeholder="envs"
+											class="h-7 w-16 font-mono text-xs"
+										/>
+									</div>
+								{/each}
+								{#if config.distDevices.filter((d) => d.n_envs >= 1).length < 2}
+									<span class="font-mono text-[11px] text-muted-foreground">
+										Enable at least 2 hosts to distribute.
+									</span>
+								{/if}
+							</div>
+						{/if}
+
 						<div class="flex items-center gap-1.5">
 							<Label for="dist-every" class="font-mono text-[10px] text-muted-foreground">sync every</Label>
 							<Input
@@ -366,7 +446,7 @@
 			<div class="col-span-2 flex items-center gap-2 rounded-md border border-border/70 bg-input/20 px-2 py-1.5">
 				<Checkbox id="opt-manual-red" bind:checked={config.manualRed} />
 				<Label for="opt-manual-red" class="cursor-pointer font-mono text-xs text-muted-foreground">
-					Drive Bot B (red) yourself (test) — mouse aims, W/S/A/D move, Space/click kicks
+					Drive yourself
 				</Label>
 			</div>
 		</div>

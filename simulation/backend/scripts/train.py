@@ -291,7 +291,7 @@ def main() -> None:
         from bucky.fedavg import FedSyncCallback
         callbacks.append(FedSyncCallback(
             args.fed_server, args.fed_token or "", args.fed_group, run_name,
-            every=args.fed_every, shards=args.fed_shards, verbose=1,
+            every=args.fed_every, shards=args.fed_shards, weight=args.n_envs, verbose=1,
         ))
 
     # Optional wall-clock stop. --until wins over --duration; either one runs the
