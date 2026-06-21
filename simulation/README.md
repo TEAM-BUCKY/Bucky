@@ -47,11 +47,26 @@ simulation/
    docker compose up -d --build
    ```
    The shared Traefik fetches a certificate automatically. The site is then live at
-   `https://${DOMAIN}`; log in with `APP_USERNAME`/`APP_PASSWORD` to start jobs.
+   `https://${DOMAIN}`; log in to start jobs (see auth below).
 
-Checkpoints, run logs, and queue state persist in named Docker volumes
+### Control authentication
+
+Viewing is always public; launching/stopping jobs requires logging in. Two modes:
+
+- **GitHub-org OAuth (recommended).** Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
+  `GITHUB_ORG`, and `PUBLIC_URL=https://${DOMAIN}` in `.env`. Create an OAuth app at
+  <https://github.com/settings/developers> with callback URL
+  `https://${DOMAIN}/api/auth/callback`. Any member of `GITHUB_ORG` can then "Sign in
+  with GitHub"; the shared password is ignored. Each action is recorded per-user in the
+  audit log (`GET /api/activity`).
+- **Shared password (fallback).** When OAuth is not configured, the legacy
+  `APP_USERNAME`/`APP_PASSWORD` gate control — convenient for local dev.
+
+Checkpoints, run logs, and server state persist in named Docker volumes
 (`bucky_checkpoints`, `bucky_runs`, `bucky_state`) — managed by Docker and kept
 outside the stack directory, so they survive restarts, rebuilds, and redeploys.
+Devices, the job queue, users/sessions, and the audit log live in a SQLite database
+(`state/bucky.db`, inside the `bucky_state` volume).
 To update: `git pull` then `docker compose up -d --build`. They are only deleted by
 an explicit `docker compose down -v`.
 

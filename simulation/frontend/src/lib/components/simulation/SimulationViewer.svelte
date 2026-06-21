@@ -8,6 +8,7 @@
 	import Controls from './VisualizerControls.svelte';
 	import QueuePanel from './QueuePanel.svelte';
 	import ActiveRunsPanel from './ActiveRunsPanel.svelte';
+	import ManualControl from './ManualControl.svelte';
 	import LoginControl from './LoginControl.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import DialogsState from '$lib/state/dialog.svelte.js';
@@ -155,6 +156,10 @@
 	});
 
 	let mode = $state<'train' | 'match'>(simulation.status.run_type || 'train');
+	// Field DOM wrapper — ManualControl reads the rendered <svg> from it to map the cursor to
+	// the field and to capture pointer aiming/kicks.
+	let fieldEl = $state<HTMLElement | null>(null);
+	const manualRun = $derived(simulation.manualMatchRun);
 
 	$effect(() => {
 		if (simulation.status.phase && simulation.status.phase != "done" && simulation.status.run_type)
@@ -281,15 +286,20 @@
 						{/if}
 					</div>
 				{/if}
-				<SoccerField
-						fit
-						allies={fieldData.allies ?? []}
-						enemies={fieldData.enemies ?? []}
-						ball={fieldData.ball}
-						showBall={!!simulation.frame}
-						rotation={90}
-						class="border-0"
-				/>
+				<div
+					bind:this={fieldEl}
+					class="flex h-full w-full items-center justify-center {manualRun ? 'cursor-crosshair' : ''}"
+				>
+					<SoccerField
+							fit
+							allies={fieldData.allies ?? []}
+							enemies={fieldData.enemies ?? []}
+							ball={fieldData.ball}
+							showBall={!!simulation.frame}
+							rotation={90}
+							class="border-0"
+					/>
+				</div>
 			</Card.Root>
 
 
@@ -318,7 +328,15 @@
 				<ObservationInspector frame={simulation.frame} />
 			</div>
 		{:else if mode === 'match'}
-			<div></div>
+			<div class="flex flex-col gap-4 lg:min-h-0 w-full">
+				{#if manualRun}
+					<ManualControl {fieldEl} />
+				{:else}
+					<p class="font-mono text-[11px] text-muted-foreground">
+						Tick "Drive red yourself" in the match config to control red against the AI.
+					</p>
+				{/if}
+			</div>
 		{/if}
 	</div>
 </div>

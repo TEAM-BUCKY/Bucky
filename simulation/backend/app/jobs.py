@@ -17,12 +17,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 from bucky.curriculum import Stage
 
 from .broadcast import Broadcaster
 from .config import Settings
+from .db import Database
 from .devices import DeviceRegistry
 from .models import (
     ModelConfig,
@@ -51,11 +51,20 @@ class JobManager:
         broadcaster: Broadcaster,
         settings: Settings,
         base_dir: str | None = None,
+        db: Database | None = None,
     ) -> None:
         self._bc = broadcaster
         self._settings = settings
         # app/jobs.py -> parent is app/, parent.parent is the backend root (scripts/ + checkpoints/)
         self._base_dir = Path(base_dir) if base_dir else Path(__file__).resolve().parent.parent
+        # One SQLite DB backs the queue, devices and audit log. Resolve its path under
+        # base_dir when relative, so a test that passes a tmp base_dir gets its own DB.
+        if db is None:
+            db_path = Path(settings.db_path)
+            if not db_path.is_absolute():
+                db_path = self._base_dir / db_path
+            db = Database(db_path)
+        self._db = db
         self._launch_lock = asyncio.Lock()
         # Unified registry of in-flight runs, keyed by run_name. Covers both the server's
         # own local trainers (device == "server", entry carries a live ``proc``) and runs
@@ -67,19 +76,24 @@ class JobManager:
         self._ingest_conns = 0
         self._tasks: list[asyncio.Task] = []
 
-        # Persisted job queue: items run back-to-back when the manager is idle, each
-        # with an optional `start_at` (epoch) so runs can be scheduled while away.
-        self._state_dir = self._base_dir / "state"
-        self._queue_path = self._state_dir / "queue.json"
-        self._queue: list[dict] = []
-        self._queue_seq = 0
-        self._load_queue()
+        # Manual-match control: one live downstream socket per match run_name. The play.py
+        # subprocess connects to /api/control_sink and we forward the browser's control
+        # messages (human action / red mode toggle) to it. Best-effort; dropped if absent.
+        self._control_sinks: dict = {}
 
         # Distributed training: registered guest devices lease train jobs from the
         # same queue. A lock serialises lease/heartbeat/complete against the local
         # scheduler so two workers can't claim the same item.
-        self._devices = DeviceRegistry(self._state_dir)
+        self._state_dir = self._base_dir / "state"  # home of any legacy JSON to import
+        self._devices = DeviceRegistry(self._db)
+        self._devices.import_legacy_json(self._state_dir / "devices.json")
         self._lease_lock = asyncio.Lock()
+
+        # Persisted job queue: items run back-to-back when the manager is idle, each
+        # with an optional `start_at` (epoch) so runs can be scheduled while away.
+        self._queue: list[dict] = []
+        self._queue_seq = 0
+        self._load_queue()
 
         # Federated distributed training: per-group, per-round weight-averaging buffers.
         # group -> {"rounds": {round: {"pushes": {shard: arrays}, "averaged": bytes|None,
@@ -94,6 +108,38 @@ class JobManager:
     @property
     def devices(self) -> DeviceRegistry:
         return self._devices
+
+    @property
+    def db(self) -> Database:
+        return self._db
+
+    # ── audit / history ──────────────────────────────────────────────────────────
+    def _audit(
+        self,
+        action: str,
+        run: str | None = None,
+        actor: str | None = None,
+        source: str = "server",
+        detail: str | None = None,
+    ) -> None:
+        """Record a control event in the ``jobs`` table (best-effort, never raises)."""
+        try:
+            self._db.execute(
+                "INSERT INTO jobs (ts, action, run, actor, source, detail) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (time.time(), action, run, actor, source, detail),
+            )
+        except Exception:  # noqa: BLE001 — audit must never break a control action
+            log.warning("Could not write audit row for %s", action, exc_info=True)
+
+    def recent_activity(self, limit: int = 50) -> list[dict]:
+        """Most recent audit rows, newest first (for the activity panel)."""
+        rows = self._db.query(
+            "SELECT ts, action, run, actor, source, detail FROM jobs "
+            "ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        )
+        return [dict(r) for r in rows]
 
     # ── lifecycle ──────────────────────────────────────────────────────────────
     def start_background(self) -> None:
@@ -190,13 +236,35 @@ class JobManager:
                 await self._bc.broadcast(self.active_runs_msg())
         await self._bc.broadcast(msg)
 
+    # ── manual-match control (browser → hub → play.py) ───────────────────────────
+    def register_control_sink(self, run: str, ws) -> None:
+        """A play.py subprocess subscribed to receive manual control for ``run``."""
+        self._control_sinks[run] = ws
+        log.info("Control sink connected for %s", run)
+
+    def unregister_control_sink(self, run: str, ws) -> None:
+        if self._control_sinks.get(run) is ws:
+            del self._control_sinks[run]
+            log.info("Control sink disconnected for %s", run)
+
+    async def push_control(self, run: str, msg: dict) -> dict:
+        """Forward a browser control message to the match's play.py sink (best-effort)."""
+        ws = self._control_sinks.get(run)
+        if ws is None:
+            return {"ok": False, "message": "No manual match is accepting control."}
+        try:
+            await ws.send_text(json.dumps(msg))
+        except Exception:  # noqa: BLE001 — sink dropped; let the WS handler clean it up
+            return {"ok": False, "message": "Control channel is not connected."}
+        return {"ok": True}
+
     # ── control ──────────────────────────────────────────────────────────────────
-    async def launch(self, cfg: dict) -> dict:
+    async def launch(self, cfg: dict, actor: str | None = None) -> dict:
         # A distributed run isn't a single local job — fan it out into shard queue items
         # that workers (incl. the local one) pick up and train together via FedAvg.
         dist = cfg.get("distributed")
         if str(cfg.get("mode", "train")) == "train" and dist and int(dist.get("shards") or 1) > 1:
-            return await self._enqueue_distributed(cfg, dist, None)
+            return await self._enqueue_distributed(cfg, dist, None, actor=actor)
 
         async with self._launch_lock:
             # Concurrency cap: the in-process worker runs up to ``local_slots`` runs at
@@ -205,7 +273,7 @@ class JobManager:
                 return self._reject("All local training slots are busy.")
 
             if str(cfg.get("mode", "train")) == "play":
-                return await self._launch_play(cfg)
+                return await self._launch_play(cfg, actor=actor)
 
             stage = str(cfg.get("stage") or "APPROACH_STATIC_BALL")
             if stage not in VALID_STAGES:
@@ -316,11 +384,13 @@ class JobManager:
             entry["state"] = "running"
             self._active[run_name] = entry
             log.info("Launched %s (pid %d)", run_name, proc.pid)
+            self._audit("launch", run_name, actor, source="server",
+                        detail=f"stage={stage} seed={seed}")
             await self._bc.broadcast(self.status_msg())
             await self._bc.broadcast(self.active_runs_msg())
             return {"ok": True, "message": "launched", "status": self.status_msg()}
 
-    async def _launch_play(self, cfg: dict) -> dict:
+    async def _launch_play(self, cfg: dict, actor: str | None = None) -> dict:
         """Spawn a 1v1 match (scripts/play.py) between two checkpointed policies.
 
         Caller already holds the launch lock and verified no run is active.
@@ -351,6 +421,8 @@ class JobManager:
         while run_name in self._active:
             run_name, i = f"match{i}", i + 1
 
+        manual_red = bool(cfg.get("manual_red"))
+
         args = [
             sys.executable, "scripts/play.py",
             "--policy-a", str(resolved["policy_a"][0]),
@@ -360,12 +432,15 @@ class JobManager:
         ]
         if domain_rand:
             args.append("--domain-rand")
+        if manual_red:
+            # Human drives red; play.py subscribes to the control sink for this run.
+            args += ["--manual-red", "--control-url", self._control_url(run_name)]
 
         entry = {
             "run_name": run_name, "device": "server", "mode": "play",
             "run_type": "match", "state": "launching",
             "policy_a": resolved["policy_a"][1], "policy_b": resolved["policy_b"][1],
-            "seed": seed, "domain_rand": domain_rand,
+            "seed": seed, "domain_rand": domain_rand, "manual_red": manual_red,
             "phase": "launching", "num_timesteps": 0,
             "started_at": time.time(), "cancel_requested": False,
         }
@@ -377,11 +452,12 @@ class JobManager:
         self._active[run_name] = entry
         log.info("Launched %s (pid %d): %s vs %s", run_name, proc.pid,
                  resolved["policy_a"][1], resolved["policy_b"][1])
+        self._audit("launch", run_name, actor, source="server", detail="mode=play")
         await self._bc.broadcast(self.status_msg())
         await self._bc.broadcast(self.active_runs_msg())
         return {"ok": True, "message": "launched", "status": self.status_msg()}
 
-    async def kill(self, run_name: str | None = None) -> dict:
+    async def kill(self, run_name: str | None = None, actor: str | None = None) -> dict:
         """Stop a run by name. ``None`` stops the primary local run (legacy single-run UI).
 
         A local run is SIGINT-checkpointed and terminated in place. A run leased to a
@@ -403,6 +479,7 @@ class JobManager:
             if proc is None or proc.poll() is not None:
                 return {"ok": True, "message": "No active run."}
             entry["state"] = "stopping"
+            self._audit("stop", run_name, actor, source="server")
             await self._bc.broadcast(self.status_msg())
             await self._bc.broadcast(self.active_runs_msg())
             await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
@@ -411,6 +488,7 @@ class JobManager:
         # Remote run: request cancellation; keep the lease so the worker can save first.
         entry["cancel_requested"] = True
         entry["state"] = "stopping"
+        self._audit("stop", run_name, actor, source="device")
         async with self._lease_lock:
             for q in self._queue:
                 if q.get("run_name") == run_name:
@@ -423,6 +501,12 @@ class JobManager:
     def _ingest_url(self, run_name: str) -> str:
         return (
             f"ws://localhost:{self._settings.port}/api/ingest"
+            f"?token={self._settings.ingest_token}&run={run_name}"
+        )
+
+    def _control_url(self, run_name: str) -> str:
+        return (
+            f"ws://localhost:{self._settings.port}/api/control_sink"
             f"?token={self._settings.ingest_token}&run={run_name}"
         )
 
@@ -572,26 +656,63 @@ class JobManager:
     def queue_msg(self) -> dict:
         return {"type": "queue", "items": self._queue}
 
+    def _import_legacy_queue(self) -> None:
+        """One-time import of an old ``state/queue.json`` if the DB queue is empty."""
+        if self._db.query_one("SELECT COUNT(*) AS c FROM queue")["c"] > 0:
+            return
+        path = self._state_dir / "queue.json"
+        if not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+        self._queue = [q for q in data.get("items", []) if isinstance(q, dict)]
+        self._queue_seq = int(data.get("seq", 0))
+        if self._queue:
+            self._save_queue()
+            log.info("Imported %d queue item(s) from legacy %s", len(self._queue), path)
+
     def _load_queue(self) -> None:
         try:
-            if self._queue_path.is_file():
-                data = json.loads(self._queue_path.read_text())
-                self._queue = [q for q in data.get("items", []) if isinstance(q, dict)]
-                self._queue_seq = int(data.get("seq", 0))
+            self._import_legacy_queue()
+            rows = self._db.query("SELECT data, seq FROM queue ORDER BY position")
+            self._queue = []
+            self._queue_seq = 0
+            for r in rows:
+                try:
+                    item = json.loads(r["data"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
                 # Anything caught mid-launch when the server stopped goes back to pending.
-                for q in self._queue:
-                    if q.get("status") == "running":
-                        q["status"] = "pending"
-        except Exception:  # noqa: BLE001 — a corrupt queue file must not crash startup
-            log.warning("Could not read queue %s; starting with an empty queue", self._queue_path)
+                if item.get("status") == "running":
+                    item["status"] = "pending"
+                self._queue.append(item)
+                self._queue_seq = max(self._queue_seq, int(r["seq"] or 0))
+        except Exception:  # noqa: BLE001 — a corrupt queue must not crash startup
+            log.warning("Could not read queue from DB; starting with an empty queue")
             self._queue = []
 
     def _save_queue(self) -> None:
+        """Atomically replace the queue table with the current in-memory list.
+
+        A full rewrite preserves the simple list-of-dicts model the scheduler mutates,
+        while keeping persistence atomic (one transaction) and the rows queryable."""
         try:
-            self._state_dir.mkdir(parents=True, exist_ok=True)
-            self._queue_path.write_text(
-                json.dumps({"seq": self._queue_seq, "items": self._queue}, indent=2)
-            )
+            with self._db.transaction() as conn:
+                conn.execute("DELETE FROM queue")
+                conn.executemany(
+                    "INSERT INTO queue (id, position, seq, status, target, data) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            it["id"], pos, self._queue_seq,
+                            it.get("status", "pending"), it.get("target"),
+                            json.dumps(it),
+                        )
+                        for pos, it in enumerate(self._queue)
+                    ],
+                )
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not persist queue: %s", exc)
 
@@ -599,7 +720,7 @@ class JobManager:
         self._queue_seq += 1
         return f"q{self._queue_seq}"
 
-    async def enqueue(self, cfg: dict, start_at: float | None) -> dict:
+    async def enqueue(self, cfg: dict, start_at: float | None, actor: str | None = None) -> dict:
         mode = str(cfg.get("mode", "train"))
         if mode not in ("train", "play"):
             return {"ok": False, "message": f"Unknown mode: {mode}"}
@@ -623,11 +744,12 @@ class JobManager:
         # Distributed run: fan out into N shard items that train together via FedAvg.
         dist = cfg.get("distributed")
         if mode == "train" and dist and int(dist.get("shards") or 1) > 1:
-            return await self._enqueue_distributed(cfg, dist, start_at)
+            return await self._enqueue_distributed(cfg, dist, start_at, actor=actor)
 
         item = self._make_queue_item(cfg, start_at)
         self._queue.append(item)
         self._save_queue()
+        self._audit("enqueue", item["id"], actor, source="queue", detail=f"mode={mode}")
         await self._bc.broadcast(self.queue_msg())
         return {"ok": True, "item": item}
 
@@ -644,7 +766,9 @@ class JobManager:
             "target": cfg.get("target") or None,
         }
 
-    async def _enqueue_distributed(self, cfg: dict, dist: dict, start_at: float | None) -> dict:
+    async def _enqueue_distributed(
+        self, cfg: dict, dist: dict, start_at: float | None, actor: str | None = None
+    ) -> dict:
         """Split one run into N FedAvg shards sharing a sync group.
 
         Each shard is an ordinary train job (its own run_name, checkpoints and a
@@ -675,6 +799,8 @@ class JobManager:
 
         self._queue.extend(items)
         self._save_queue()
+        self._audit("enqueue", group, actor, source="queue",
+                    detail=f"distributed shards={shards}")
         await self._bc.broadcast(self.queue_msg())
         return {"ok": True, "group": group, "shards": shards, "items": items}
 
@@ -725,7 +851,7 @@ class JobManager:
                 item["status"] = "running"
                 self._save_queue()
                 await self._bc.broadcast(self.queue_msg())
-                result = await self.launch(item["config"])
+                result = await self.launch(item["config"], actor=f"queue:{item['id']}")
                 if result.get("ok"):
                     self._queue = [q for q in self._queue if q["id"] != item["id"]]
                 else:
@@ -823,6 +949,7 @@ class JobManager:
                     "started_at": now, "cancel_requested": False,
                     "dist_group": q["config"].get("dist_group"),
                 }
+                self._audit("launch", run_name, dev, source="device")
                 await self._bc.broadcast(self.queue_msg())
                 await self._bc.broadcast(self.devices_msg())
                 await self._bc.broadcast(self.models_msg())
@@ -900,6 +1027,7 @@ class JobManager:
         if gone is not None:
             self._drop_dist_group_if_idle(gone.get("dist_group"))
         self._devices.touch(device_id, remove_job=run_name)
+        self._audit("complete", run_name, device_id, source="device", detail=f"status={status}")
         await self._bc.broadcast(self.queue_msg())
         await self._bc.broadcast(self.devices_msg())
         await self._bc.broadcast(self.models_msg())
@@ -1044,7 +1172,7 @@ class JobManager:
             "models": list_models(self._base_dir / "checkpoints", self._base_dir / "runs"),
         }
 
-    async def delete_model(self, run: str) -> dict:
+    async def delete_model(self, run: str, actor: str | None = None) -> dict:
         """Delete a whole run directory (all checkpoints + sidecars)."""
         if not self._is_safe_name(run):
             return {"ok": False, "message": "Invalid run name."}
@@ -1055,6 +1183,7 @@ class JobManager:
         shutil.rmtree(run_dir, ignore_errors=True)
         # Drop the (now orphaned) TensorBoard logs too, best-effort.
         shutil.rmtree(self._base_dir / "runs" / run, ignore_errors=True)
+        self._audit("delete", run, actor, source="server")
         await self._bc.broadcast(self.models_msg())
         await self._bc.broadcast(self.runs_msg())
         return {"ok": True}

@@ -161,10 +161,24 @@ def predict_opponent_action(
     add_noise: bool = False,
     rng: np.random.Generator | None = None,
     kick_ready: float = 1.0,
+    deterministic: bool = False,
+    temperature: float = 1.0,
 ) -> np.ndarray:
-    """Run ``model`` for robot B via the mirror trick; returns a real-world body action."""
+    """Run ``model`` for robot B via the mirror trick; returns a real-world body action.
+
+    During training the opponent is sampled stochastically (``deterministic=False``) so the
+    learner faces a non-deterministic copy of itself rather than one fixed pattern it can
+    perfectly counter. ``temperature`` scales the opponent's exploration noise. The viz/eval
+    path passes ``deterministic=True`` for a crisp opponent.
+    """
     obs = build_opponent_obs(b_state, opp_a_pos, add_noise=add_noise, rng=rng, kick_ready=kick_ready)
-    raw, _ = model.predict(obs, deterministic=True)
+    if deterministic:
+        # Standard SB3-compatible signature (model may be a real PPO at match/eval time).
+        raw, _ = model.predict(obs, deterministic=True)
+    else:
+        # Stochastic sampling is a training-only device — only the NumpyOpponent path, which
+        # accepts the rng/temperature kwargs, is ever used here.
+        raw, _ = model.predict(obs, deterministic=False, rng=rng, temperature=temperature)
     return mirror_action(raw)
 
 
@@ -188,19 +202,35 @@ class NumpyOpponent:
     what :mod:`scripts.train` builds.
     """
 
-    def __init__(self, hidden, out_w: np.ndarray, out_b: np.ndarray) -> None:
+    def __init__(self, hidden, out_w: np.ndarray, out_b: np.ndarray,
+                 log_std: np.ndarray | None = None) -> None:
         self._hidden = hidden          # list of (W, b) tanh layers, applied in order
         self._out_w = out_w
         self._out_b = out_b
+        # Per-dim Gaussian log-std (SB3's state-independent ``policy.log_std``). ``None`` for
+        # legacy .npz snapshots without it → the opponent stays deterministic (mean action).
+        self._log_std = None if log_std is None else np.asarray(log_std, dtype=np.float32).reshape(-1)
 
-    def predict(self, obs, deterministic: bool = True):
+    def predict(self, obs, deterministic: bool = True, rng=None, temperature: float = 1.0):
         """Mirror of ``model.predict`` — returns ``(action, None)`` so it is a drop-in for
-        :func:`predict_opponent_action`. ``deterministic`` is accepted for API parity; the
-        frozen opponent is always evaluated at its mean action."""
+        :func:`predict_opponent_action`.
+
+        ``deterministic=True`` returns the policy mean (matching ``PPO.predict``). With
+        ``deterministic=False`` and a stored ``log_std`` the action is *sampled* from the
+        diagonal Gaussian — ``mean + temperature * exp(log_std) * N(0, 1)`` — so the frozen
+        opponent explores instead of replaying one memorizable pattern. Without a ``log_std``
+        (legacy snapshot) it falls back to the mean.
+        """
         x = np.asarray(obs, dtype=np.float32).reshape(-1)
         for w, b in self._hidden:
             x = np.tanh(w @ x + b)
-        a = np.clip(self._out_w @ x + self._out_b, -1.0, 1.0).astype(np.float32)
+        mean = self._out_w @ x + self._out_b
+        if not deterministic and self._log_std is not None:
+            if rng is None:
+                rng = np.random.default_rng()
+            noise = rng.standard_normal(mean.shape[0]).astype(np.float32)
+            mean = mean + temperature * np.exp(self._log_std) * noise
+        a = np.clip(mean, -1.0, 1.0).astype(np.float32)
         return a, None
 
 
@@ -211,7 +241,9 @@ def load_numpy_opponent(path: str) -> NumpyOpponent:
     n_hidden = int(data["n_hidden"])
     hidden = [(data[f"h{i}_W"].astype(np.float32), data[f"h{i}_b"].astype(np.float32))
               for i in range(n_hidden)]
-    return NumpyOpponent(hidden, data["out_W"].astype(np.float32), data["out_b"].astype(np.float32))
+    log_std = data["log_std"].astype(np.float32) if "log_std" in data.files else None
+    return NumpyOpponent(hidden, data["out_W"].astype(np.float32),
+                         data["out_b"].astype(np.float32), log_std=log_std)
 
 
 def export_policy_npz(model, path: str) -> None:
@@ -229,4 +261,8 @@ def export_policy_npz(model, path: str) -> None:
         arrays[f"h{i}_b"] = m.bias.detach().cpu().numpy()
     arrays["out_W"] = pol.action_net.weight.detach().cpu().numpy()
     arrays["out_b"] = pol.action_net.bias.detach().cpu().numpy()
+    # State-independent diagonal Gaussian log-std, so workers can sample a stochastic
+    # opponent (see NumpyOpponent.predict). Older snapshots without this stay deterministic.
+    if hasattr(pol, "log_std"):
+        arrays["log_std"] = pol.log_std.detach().cpu().numpy()
     np.savez(path, **arrays)

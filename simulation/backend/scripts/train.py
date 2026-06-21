@@ -42,7 +42,7 @@ class StopAtTime(BaseCallback):
     def _on_step(self) -> bool:
         return time.time() < self._deadline
 
-from bucky.curriculum import Stage
+from bucky.curriculum import Stage, get_stage_config
 from bucky.envs.bucky_single import BuckySingleEnv
 from bucky.envs.bucky_selfplay import BuckySelfPlayEnv
 
@@ -220,6 +220,10 @@ def main() -> None:
         def hp(key, default):
             return hyperparams.get(key, default)
 
+        # Entropy coefficient defaults to the stage's recommended value (kick/self-play stages
+        # want more exploration) unless the model config sets one explicitly.
+        stage_ent_coef = get_stage_config(args.stage).recommended_ent_coef
+
         model = PPO(
             policy="MlpPolicy",
             env=train_env,
@@ -233,7 +237,7 @@ def main() -> None:
             gamma=hp("gamma", 0.99),
             gae_lambda=hp("gae_lambda", 0.95),
             clip_range=hp("clip_range", 0.2),
-            ent_coef=hp("ent_coef", 0.01),
+            ent_coef=hp("ent_coef", stage_ent_coef),
             vf_coef=hp("vf_coef", 0.5),
             max_grad_norm=hp("max_grad_norm", 0.5),
             policy_kwargs={"net_arch": list(net_arch)},
@@ -245,12 +249,19 @@ def main() -> None:
     if self_play:
         from bucky.callbacks import SelfPlaySnapshotCallback
         from bucky.selfplay import export_policy_npz
+        pool_size = int(cfg.get("opponent_pool_size", 5))
         model.save(snapshot_base)
         export_policy_npz(model, snapshot_npz)
-        train_env.env_method("set_opponent", snapshot_npz)
-        eval_env.env_method("set_opponent", snapshot_npz)
+        # Seed the opponent pool with slot 0 so the very first episodes already have an
+        # opponent; SelfPlaySnapshotCallback then grows/refreshes the pool during training.
+        seed_npz = f"{snapshot_base}_0.npz"
+        export_policy_npz(model, seed_npz)
+        train_env.env_method("set_opponent_pool", [seed_npz])
+        eval_env.env_method("set_opponent_pool", [seed_npz])
         extra_callbacks.append(
-            SelfPlaySnapshotCallback(snapshot_base, every=max(50_000 // args.n_envs, 1))
+            SelfPlaySnapshotCallback(
+                snapshot_base, every=max(50_000 // args.n_envs, 1), pool_size=pool_size,
+            )
         )
 
     callbacks = [

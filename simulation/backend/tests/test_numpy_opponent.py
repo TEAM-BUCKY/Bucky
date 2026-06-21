@@ -59,6 +59,65 @@ def test_numpy_opponent_output_is_clipped(tmp_path):
     assert np.all(action >= -1.0) and np.all(action <= 1.0)
 
 
+def test_log_std_round_trips(tmp_path):
+    model = _make_model()
+    npz = str(tmp_path / "opponent_snapshot.npz")
+    export_policy_npz(model, npz)
+    data = np.load(npz)
+    assert "log_std" in data.files
+    opp = load_numpy_opponent(npz)
+    assert opp._log_std is not None
+    assert opp._log_std.shape == model.policy.log_std.detach().cpu().numpy().reshape(-1).shape
+
+
+def test_stochastic_opponent_samples_around_mean(tmp_path):
+    model = _make_model()
+    npz = str(tmp_path / "opponent_snapshot.npz")
+    export_policy_npz(model, npz)
+    opp = load_numpy_opponent(npz)
+    obs = np.zeros(SELF_PLAY_OBS_DIM, np.float32)
+
+    mean, _ = opp.predict(obs, deterministic=True)
+    rng = np.random.default_rng(0)
+    samples = np.stack([opp.predict(obs, deterministic=False, rng=rng)[0] for _ in range(64)])
+
+    # Sampling varies; the deterministic action does not.
+    assert np.std(samples, axis=0).max() > 1e-3
+    again, _ = opp.predict(obs, deterministic=True)
+    assert np.allclose(mean, again)
+    # Mean of many clipped samples sits near the deterministic action (loose, samples clip at ±1).
+    assert np.allclose(samples.mean(axis=0), mean, atol=0.5)
+    assert np.all(samples >= -1.0) and np.all(samples <= 1.0)
+
+
+def test_temperature_zero_is_deterministic(tmp_path):
+    model = _make_model()
+    npz = str(tmp_path / "opponent_snapshot.npz")
+    export_policy_npz(model, npz)
+    opp = load_numpy_opponent(npz)
+    obs = np.full(SELF_PLAY_OBS_DIM, 0.5, np.float32)
+    mean, _ = opp.predict(obs, deterministic=True)
+    got, _ = opp.predict(obs, deterministic=False, rng=np.random.default_rng(1), temperature=0.0)
+    assert np.allclose(mean, got)
+
+
+def test_legacy_npz_without_log_std_is_deterministic(tmp_path):
+    """A snapshot saved before log_std existed must still load and behave deterministically."""
+    model = _make_model()
+    npz = str(tmp_path / "legacy.npz")
+    export_policy_npz(model, npz)
+    data = {k: v for k, v in np.load(npz).items() if k != "log_std"}
+    np.savez(npz, **data)
+    assert "log_std" not in np.load(npz).files
+
+    opp = load_numpy_opponent(npz)
+    assert opp._log_std is None
+    obs = np.full(SELF_PLAY_OBS_DIM, 0.5, np.float32)
+    mean, _ = opp.predict(obs, deterministic=True)
+    got, _ = opp.predict(obs, deterministic=False, rng=np.random.default_rng(2))
+    assert np.allclose(mean, got)  # no log_std → falls back to the mean
+
+
 def test_worker_path_never_imports_torch(tmp_path):
     """The decisive guard: a worker that builds the self-play env and runs the opponent
     must never import torch — that is the entire point of the numpy opponent. Run it in a

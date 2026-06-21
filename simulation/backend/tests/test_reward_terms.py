@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 from bucky.physics.python_backend import PyPhysics, FIELD_W
-from bucky.rewards import RewardConfig, RewardTerms, compute_rewards, ALIGN_RADIUS, OPP_GOAL  # noqa: F401
+from bucky.rewards import (  # noqa: F401
+    RewardConfig, RewardTerms, compute_rewards, ALIGN_RADIUS, OPP_GOAL,
+    CAPTURE_RADIUS, SHOT_SPEED_THRESHOLD,
+)
 
 @pytest.fixture
 def config():
@@ -139,6 +142,78 @@ def test_risky_shot_scales_with_factor(physics, config):
 def test_kick_lost_is_extra_punishment(physics, config):
     s = physics._make_state()
     assert compute_rewards(s, s, config, info={"kick_lost": True}).kick_lost < 0.0
+
+
+def test_kick_attempt_rewards_goalward_kick(physics, config):
+    # Robot just behind the ball, facing +x (toward OPP_GOAL): a legal kick fires the
+    # ball goal-ward → both kick terms pay out, scaled by the goal alignment (cos≈1).
+    ball = np.array([0.0, 0.0])
+    s = _place(physics, ball - np.array([0.1, 0.0]), 0.0, ball)
+    terms = compute_rewards(s, s, config, info={"kicked": True})
+    assert abs(terms.kick_attempt - config.w_kick_attempt) < 1e-6
+    assert terms.kick_power_to_goal > 0.0
+    assert abs(terms.kick_power_to_goal - config.w_kick_power_to_goal) < 1e-3  # cos≈1
+
+
+def test_kick_attempt_zero_for_backward_kick(physics, config):
+    # Facing -x (away from the goal): a kick toward our own half earns nothing.
+    ball = np.array([0.0, 0.0])
+    s = _place(physics, ball + np.array([0.1, 0.0]), np.pi, ball)
+    terms = compute_rewards(s, s, config, info={"kicked": True})
+    assert terms.kick_attempt == 0.0
+    assert terms.kick_power_to_goal == 0.0
+
+
+def test_kick_attempt_zero_without_flag(physics, config):
+    ball = np.array([0.0, 0.0])
+    s = _place(physics, ball - np.array([0.1, 0.0]), 0.0, ball)
+    terms = compute_rewards(s, s, config, info={})
+    assert terms.kick_attempt == 0.0
+    assert terms.kick_power_to_goal == 0.0
+
+
+# ── shot_on_goal: reward a fast ball struck toward goal (not a dribble) ───────
+def _place_with_ball_vel(physics, robot_pos, ball_pos, ball_vel):
+    physics._robot_pos = np.asarray(robot_pos, dtype=float)
+    physics._robot_heading = 0.0
+    physics._ball_pos = np.asarray(ball_pos, dtype=float)
+    physics._ball_vel = np.asarray(ball_vel, dtype=float)
+    return physics._make_state()
+
+
+def test_shot_on_goal_rewards_fast_goalward_ball(physics, config):
+    # Fast ball heading at the +x goal, robot far away (ball in flight, not dribbled).
+    ball = np.array([0.0, 0.0])
+    speed = SHOT_SPEED_THRESHOLD + 1.0
+    s = _place_with_ball_vel(physics, [-2.0, 0.0], ball, [speed, 0.0])
+    terms = compute_rewards(s, s, config, info={})
+    goal_dir = OPP_GOAL - ball
+    goal_dir = goal_dir / np.linalg.norm(goal_dir)
+    expected = config.w_shot_on_goal * float(np.dot([speed, 0.0], goal_dir))
+    assert terms.shot_on_goal > 0.0
+    assert abs(terms.shot_on_goal - expected) < 1e-6
+
+
+def test_shot_on_goal_zero_for_slow_ball(physics, config):
+    # A slow (dribbled) ball toward the goal does not count as a shot.
+    ball = np.array([0.0, 0.0])
+    s = _place_with_ball_vel(physics, [-2.0, 0.0], ball, [SHOT_SPEED_THRESHOLD - 0.3, 0.0])
+    assert compute_rewards(s, s, config, info={}).shot_on_goal == 0.0
+
+
+def test_shot_on_goal_zero_for_ball_away_from_goal(physics, config):
+    # Fast ball, but moving away from the opponent goal → clamped to zero.
+    ball = np.array([0.0, 0.0])
+    s = _place_with_ball_vel(physics, [-2.0, 0.0], ball, [-(SHOT_SPEED_THRESHOLD + 1.0), 0.0])
+    assert compute_rewards(s, s, config, info={}).shot_on_goal == 0.0
+
+
+def test_shot_on_goal_zero_when_ball_in_capture(physics, config):
+    # Fast ball but still in the robot's capture radius → it's being dribbled, not a shot.
+    ball = np.array([0.0, 0.0])
+    robot = ball - np.array([CAPTURE_RADIUS * 0.5, 0.0])
+    s = _place_with_ball_vel(physics, robot, ball, [SHOT_SPEED_THRESHOLD + 1.0, 0.0])
+    assert compute_rewards(s, s, config, info={}).shot_on_goal == 0.0
 
 
 def test_action_magnitude_ignores_kick_dim(physics, config):

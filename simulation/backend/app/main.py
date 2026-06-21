@@ -14,7 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .broadcast import Broadcaster
 from .config import settings
 from .jobs import JobManager
+from .oauth import GitHubOAuth
 from .routes import build_router
+from .users import UserStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,13 +27,26 @@ log = logging.getLogger("bucky")
 
 broadcaster = Broadcaster()
 manager = JobManager(broadcaster, settings)
+# Users + sessions share the manager's SQLite database.
+user_store = UserStore(manager.db, settings.session_ttl_days)
+oauth = (
+    GitHubOAuth(settings.github_client_id, settings.github_client_secret, settings.github_org)
+    if settings.oauth_enabled
+    else None
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     manager.start_background()
-    if not settings.control_enabled:
-        log.warning("APP_PASSWORD not set — control endpoints are disabled until you set it.")
+    if settings.oauth_enabled:
+        log.info("GitHub OAuth enabled — control is gated by membership of org '%s'.",
+                 settings.github_org)
+    elif settings.control_enabled:
+        log.info("Password control auth enabled (set GITHUB_CLIENT_ID/SECRET/ORG for OAuth).")
+    else:
+        log.warning("Control disabled: set APP_PASSWORD or configure GitHub OAuth.")
+    user_store.purge_expired()
     try:
         yield
     finally:
@@ -39,9 +54,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Bucky", version="0.1.0", lifespan=lifespan)
+# Make the user store + OAuth client reachable from the auth dependency and routes.
+app.state.user_store = user_store
+app.state.oauth = oauth
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    # Cookies are only sent same-origin (behind Traefik); cross-origin dev uses Basic.
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

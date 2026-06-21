@@ -2,7 +2,6 @@
 	import Calendar from '$lib/components/ui/calendar/calendar.svelte';
 	import * as Popover from '$lib/components/ui/popover/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { X } from '@lucide/svelte';
 	import { getLocalTimeZone, type DateValue } from '@internationalized/date';
@@ -36,6 +35,25 @@
 	function clear() {
 		dateVal = undefined;
 		value = null;
+	}
+
+	// Native <input type="time"> renders as a 12h clock under some browser
+	// locales, which makes afternoon times unselectable. Drive a 24h editor off
+	// the same `HH:MM:SS` string instead so the format is locale-independent.
+	const pad = (n: number) => n.toString().padStart(2, '0');
+	const parts = $derived(timeVal.split(':').map((x) => parseInt(x, 10) || 0));
+
+	function setPart(part: 'h' | 'm' | 's', raw: string) {
+		const max = part === 'h' ? 23 : 59;
+		let n = parseInt(raw, 10);
+		if (isNaN(n)) n = 0;
+		n = Math.max(0, Math.min(max, n));
+		let [h, m, s] = timeVal.split(':').map((x) => parseInt(x, 10) || 0);
+		if (part === 'h') h = n;
+		else if (part === 'm') m = n;
+		else s = n;
+		timeVal = `${pad(h)}:${pad(m)}:${pad(s)}`;
+		commit();
 	}
 </script>
 
@@ -75,11 +93,37 @@
 		</Popover.Content>
 	</Popover.Root>
 
-	<Input
-		type="time"
-		step="1"
-		bind:value={timeVal}
-		onchange={commit}
-		class="w-24 bg-background font-mono text-[11px] appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
-	/>
+	<div
+		class="flex w-24 items-center rounded-md border border-input bg-background px-1 font-mono text-[11px]"
+	>
+		<input
+			type="number"
+			min="0"
+			max="23"
+			value={pad(parts[0])}
+			onchange={(e) => setPart('h', e.currentTarget.value)}
+			aria-label="Hours (24h)"
+			class="w-7 bg-transparent text-center outline-none appearance-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+		/>
+		<span class="opacity-60">:</span>
+		<input
+			type="number"
+			min="0"
+			max="59"
+			value={pad(parts[1])}
+			onchange={(e) => setPart('m', e.currentTarget.value)}
+			aria-label="Minutes"
+			class="w-7 bg-transparent text-center outline-none appearance-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+		/>
+		<span class="opacity-60">:</span>
+		<input
+			type="number"
+			min="0"
+			max="59"
+			value={pad(parts[2])}
+			onchange={(e) => setPart('s', e.currentTarget.value)}
+			aria-label="Seconds"
+			class="w-7 bg-transparent text-center outline-none appearance-none [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+		/>
+	</div>
 </div>

@@ -43,6 +43,10 @@ def main() -> None:
                         help="Enable sonar/sensor noise during the match")
     parser.add_argument("--stream-url", default=None,
                         help="ws:// URL of the viz hub ingest endpoint")
+    parser.add_argument("--control-url", default=None,
+                        help="ws:// URL of the hub control-sink endpoint (manual red control)")
+    parser.add_argument("--manual-red", action="store_true",
+                        help="Let a human drive robot A (red) via --control-url instead of its policy")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, signal.default_int_handler)
@@ -73,7 +77,17 @@ def main() -> None:
                  f"{SELF_PLAY_OBS_DIM}-dim (opponent-aware). Train it on SELF_PLAY_1V1 first.")
             sys.exit(1)
 
-    engine = MatchEngine(model_a, model_b, seed=args.seed, domain_rand=args.domain_rand)
+    # Manual control: subscribe to the hub's control-sink so a human can drive red (A).
+    control = None
+    control_source = None
+    if args.manual_red and args.control_url:
+        from bucky.stream_client import ControlClient
+        control = ControlClient(args.control_url)
+        control.start()
+        control_source = control.latest
+
+    engine = MatchEngine(model_a, model_b, seed=args.seed, domain_rand=args.domain_rand,
+                         control_source=control_source)
     if stream:
         stream.send({"type": "trainer_status", "phase": "started", "run_name": "match", "run_type": "match"})
 
@@ -96,6 +110,8 @@ def main() -> None:
         if stream:
             stream.send({"type": "trainer_status", "phase": "done", "run_name": "match", "run_type": "match"})
     finally:
+        if control:
+            control.stop()
         if stream:
             time.sleep(0.3)   # let the final frame flush
             stream.stop()

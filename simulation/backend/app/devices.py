@@ -4,10 +4,11 @@ A *device* is a trusted machine (e.g. the user's local PC) that leases training
 jobs from the server's shared queue, trains them locally, and uploads the resulting
 checkpoints back here. Each device registers once and receives its own token; the
 plaintext token is shown to the admin a single time and only its SHA-256 hash is
-persisted, so a leaked ``devices.json`` does not reveal usable credentials. Tokens
-are individually revocable.
+persisted, so a leaked registry does not reveal usable credentials. Tokens are
+individually revocable.
 
-Persisted to ``state/devices.json`` (same lightweight JSON pattern as the queue).
+Persisted to the ``devices`` table of the shared SQLite database (previously a
+flat ``state/devices.json`` — :meth:`import_legacy_json` migrates that file once).
 """
 from __future__ import annotations
 
@@ -17,6 +18,8 @@ import logging
 import secrets
 import time
 from pathlib import Path
+
+from .db import Database
 
 log = logging.getLogger(__name__)
 
@@ -29,35 +32,21 @@ def _hash(token: str) -> str:
 
 
 class DeviceRegistry:
-    def __init__(self, state_dir: Path) -> None:
-        self._path = state_dir / "devices.json"
-        self._state_dir = state_dir
-        self._devices: dict[str, dict] = {}
-        self._load()
+    def __init__(self, db: Database) -> None:
+        self._db = db
 
-    # ── persistence ──────────────────────────────────────────────────────────
-    def _load(self) -> None:
+    # ── persistence helpers ─────────────────────────────────────────────────────
+    def _row_to_dict(self, row) -> dict:
+        d = dict(row)
         try:
-            if self._path.is_file():
-                data = json.loads(self._path.read_text())
-                self._devices = {d["id"]: d for d in data.get("devices", []) if "id" in d}
-                # Migrate the old single ``current_job`` field to the ``current_jobs`` list.
-                for dev in self._devices.values():
-                    if "current_jobs" not in dev:
-                        old = dev.pop("current_job", None)
-                        dev["current_jobs"] = [old] if old else []
-        except Exception:  # noqa: BLE001 — a corrupt registry must not crash startup
-            log.warning("Could not read devices %s; starting empty", self._path)
-            self._devices = {}
+            d["current_jobs"] = json.loads(d.get("current_jobs") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            d["current_jobs"] = []
+        return d
 
-    def _save(self) -> None:
-        try:
-            self._state_dir.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(
-                json.dumps({"devices": list(self._devices.values())}, indent=2)
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Could not persist devices: %s", exc)
+    def _get(self, device_id: str) -> dict | None:
+        row = self._db.query_one("SELECT * FROM devices WHERE id=?", (device_id,))
+        return self._row_to_dict(row) if row else None
 
     # ── registration ─────────────────────────────────────────────────────────
     def register(self, name: str) -> tuple[dict, str]:
@@ -67,39 +56,31 @@ class DeviceRegistry:
         """
         device_id = secrets.token_urlsafe(8)
         token = secrets.token_urlsafe(24)
-        self._devices[device_id] = {
-            "id": device_id,
-            "name": (name or "device").strip() or "device",
-            "token_hash": _hash(token),
-            "created_at": time.time(),
-            "last_seen": None,
-            # A device may train several leased runs at once (its own --slots), so the
-            # current job is a list. Kept sorted for stable display.
-            "current_jobs": [],
-        }
-        self._save()
+        self._db.execute(
+            """
+            INSERT INTO devices (id, name, token_hash, created_at, last_seen, current_jobs)
+            VALUES (?, ?, ?, ?, NULL, '[]')
+            """,
+            (device_id, (name or "device").strip() or "device", _hash(token), time.time()),
+        )
         return self.public(device_id), token
 
     def revoke(self, device_id: str) -> bool:
-        if device_id in self._devices:
-            del self._devices[device_id]
-            self._save()
-            return True
-        return False
+        cur = self._db.execute("DELETE FROM devices WHERE id=?", (device_id,))
+        return cur.rowcount > 0
 
     def rotate(self, device_id: str) -> str | None:
         """Issue a fresh token for an existing device, returning the plaintext.
 
-        The previous token stops working immediately. Like ``register()``, the
-        plaintext is returned only here; only its hash is persisted. ``None`` if
-        the device is unknown.
+        The previous token stops working immediately. Like ``register()``, only the
+        hash is persisted. ``None`` if the device is unknown.
         """
-        dev = self._devices.get(device_id)
-        if not dev:
+        if not self._get(device_id):
             return None
         token = secrets.token_urlsafe(24)
-        dev["token_hash"] = _hash(token)
-        self._save()
+        self._db.execute(
+            "UPDATE devices SET token_hash=? WHERE id=?", (_hash(token), device_id)
+        )
         return token
 
     # ── auth ─────────────────────────────────────────────────────────────────
@@ -108,9 +89,10 @@ class DeviceRegistry:
         if not token:
             return None
         h = _hash(token)
-        for dev in self._devices.values():
-            if secrets.compare_digest(dev["token_hash"], h):
-                return dev["id"]
+        # Compare against every stored hash with a constant-time check (the set is tiny).
+        for row in self._db.query("SELECT id, token_hash FROM devices"):
+            if secrets.compare_digest(row["token_hash"], h):
+                return row["id"]
         return None
 
     # ── status ───────────────────────────────────────────────────────────────
@@ -121,25 +103,24 @@ class DeviceRegistry:
         add_job: str | None = None,
         remove_job: str | None = None,
     ) -> None:
-        """Record a check-in (``last_seen``) and optionally add/remove a current job.
-
-        A bare ``touch(id)`` is just a check-in — used on every lease poll and streamed
-        frame — so it never churns the job list. ``add_job``/``remove_job`` maintain the
-        set of runs a device is currently training (it may hold several at once)."""
-        dev = self._devices.get(device_id)
+        """Record a check-in (``last_seen``) and optionally add/remove a current job."""
+        dev = self._get(device_id)
         if not dev:
             return
-        dev["last_seen"] = time.time()
         jobs = set(dev.get("current_jobs") or [])
         if add_job:
             jobs.add(add_job)
         if remove_job:
             jobs.discard(remove_job)
-        dev["current_jobs"] = sorted(jobs)
-        self._save()
+        self._db.execute(
+            "UPDATE devices SET last_seen=?, current_jobs=? WHERE id=?",
+            (time.time(), json.dumps(sorted(jobs)), device_id),
+        )
 
     def public(self, device_id: str) -> dict:
-        dev = self._devices[device_id]
+        dev = self._get(device_id)
+        if not dev:
+            raise KeyError(device_id)
         last_seen = dev.get("last_seen")
         online = bool(last_seen and (time.time() - last_seen) < ONLINE_TTL)
         jobs = list(dev.get("current_jobs") or [])
@@ -155,4 +136,41 @@ class DeviceRegistry:
         }
 
     def list_public(self) -> list[dict]:
-        return [self.public(i) for i in self._devices]
+        return [
+            self.public(row["id"])
+            for row in self._db.query("SELECT id FROM devices ORDER BY created_at")
+        ]
+
+    # ── one-time migration ────────────────────────────────────────────────────
+    def import_legacy_json(self, path: Path) -> int:
+        """Import an old ``devices.json`` once, if the table is empty. Returns count."""
+        if self._db.query_one("SELECT COUNT(*) AS c FROM devices")["c"] > 0:
+            return 0
+        if not path.is_file():
+            return 0
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return 0
+        rows = []
+        for d in data.get("devices", []):
+            if "id" not in d or "token_hash" not in d:
+                continue
+            jobs = d.get("current_jobs")
+            if jobs is None:
+                old = d.get("current_job")
+                jobs = [old] if old else []
+            rows.append((
+                d["id"], d.get("name", "device"), d["token_hash"],
+                d.get("created_at") or time.time(), d.get("last_seen"),
+                json.dumps(jobs),
+            ))
+        if rows:
+            self._db.executemany(
+                "INSERT OR IGNORE INTO devices "
+                "(id, name, token_hash, created_at, last_seen, current_jobs) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            log.info("Imported %d device(s) from legacy %s", len(rows), path)
+        return len(rows)

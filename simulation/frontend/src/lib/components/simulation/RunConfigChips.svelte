@@ -361,6 +361,14 @@
 					<DateTimePicker bind:value={config.startEpoch} placeholder="ASAP" />
 				{/snippet}
 			</ConfigChip>
+
+			<!-- Test mode: drive Bot A (red) yourself against Bot B's AI (mouse aim + WASD + kick). -->
+			<div class="col-span-2 flex items-center gap-2 rounded-md border border-border/70 bg-input/20 px-2 py-1.5">
+				<Checkbox id="opt-manual-red" bind:checked={config.manualRed} />
+				<Label for="opt-manual-red" class="cursor-pointer font-mono text-xs text-muted-foreground">
+					Drive Bot B (red) yourself (test) — mouse aims, W/S/A/D move, Space/click kicks
+				</Label>
+			</div>
 		</div>
 	{:else}
 		<p class="font-mono text-[11px] text-muted-foreground">

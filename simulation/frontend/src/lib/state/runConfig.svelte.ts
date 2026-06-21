@@ -55,6 +55,7 @@ export const REWARD_FIELDS: { key: string; label: string }[] = [
 	{ key: 'w_bank_shot', label: 'bank shot' },
 	{ key: 'w_risky_shot', label: 'risky shot' },
 	{ key: 'w_kick_lost', label: 'kick lost' },
+	{ key: 'w_shot_on_goal', label: 'shot on goal' },
 	{ key: 'w_time', label: 'time' },
 	{ key: 'w_action_mag', label: 'action mag' }
 ];
@@ -126,6 +127,8 @@ export class RunConfig {
 	runB = $state('');
 	ckptB = $state('');
 	matchSeed = $state(0);
+	/** Human-controlled red robot (test mode): drive red yourself against blue's AI. */
+	manualRed = $state(false);
 
 	// ── identity (caps.identity) ──────────────────────────────────────────────────
 	name = $state('');
@@ -164,7 +167,8 @@ export class RunConfig {
 		w_bank_shot: 4,
 		w_risky_shot: 2,
 		w_kick_lost: -6,
-		w_time: -0.001,
+		w_shot_on_goal: 1.5,
+		w_time: -0.003,
 		w_action_mag: -0.005
 	});
 
@@ -230,7 +234,8 @@ export class RunConfig {
 		return {
 			policyA: { run: this.runA, checkpoint: this.ckptA },
 			policyB: { run: this.runB, checkpoint: this.ckptB },
-			seed: this.matchSeed
+			seed: this.matchSeed,
+			manualRed: this.manualRed
 		};
 	}
 

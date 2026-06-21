@@ -54,3 +54,45 @@ def test_runs_with_standstill_opponent(env):
     env.set_opponent(None)                       # no frozen model → opponent stays put
     obs, r, term, trunc, info = env.step(np.array([0.0, 0.0, 0.0, 0.0]))
     assert obs.shape == (SELF_PLAY_OBS_DIM,)
+
+
+def _fake_opponent_npz(path, seed):
+    """A minimal valid opponent .npz (torch-free) — random weights of the right shape."""
+    rng = np.random.default_rng(seed)
+    np.savez(
+        path,
+        n_hidden=np.array(1),
+        h0_W=rng.standard_normal((8, SELF_PLAY_OBS_DIM)).astype(np.float32),
+        h0_b=rng.standard_normal(8).astype(np.float32),
+        out_W=rng.standard_normal((4, 8)).astype(np.float32),
+        out_b=rng.standard_normal(4).astype(np.float32),
+        log_std=np.zeros(4, np.float32),
+    )
+
+
+def test_opponent_pool_samples_across_episodes(env, tmp_path):
+    paths = []
+    for i in range(4):
+        p = str(tmp_path / f"opp_{i}.npz")
+        _fake_opponent_npz(p, seed=i)
+        paths.append(p)
+    env.set_opponent_pool(paths)
+    assert len(env._opponent_pool) == 4
+
+    env.reset(seed=0)
+    chosen = {id(env._opponent)}
+    for _ in range(50):
+        env.reset()                               # no seed → rng advances, re-samples opponent
+        chosen.add(id(env._opponent))
+    pool_ids = {id(o) for o in env._opponent_pool}
+    assert chosen <= pool_ids                     # only ever picks from the pool
+    assert len(chosen) >= 2                        # and it actually varies across episodes
+
+
+def test_set_opponent_pool_skips_bad_paths(env, tmp_path):
+    good = str(tmp_path / "good.npz")
+    _fake_opponent_npz(good, seed=0)
+    env.set_opponent_pool([good, str(tmp_path / "missing.npz"), None])
+    assert len(env._opponent_pool) == 1           # bad/missing entries dropped, good kept
+    env.reset(seed=0)
+    assert env._opponent is not None

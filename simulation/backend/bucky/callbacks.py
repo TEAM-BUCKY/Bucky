@@ -4,6 +4,8 @@ Both run on the same thread as ``model.learn()``; they only ever push JSON onto 
 ``StreamClient``'s thread-safe queue (never block, never touch the network directly).
 """
 from __future__ import annotations
+from collections import deque
+
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import safe_mean
@@ -87,27 +89,40 @@ class LiveVizCallback(BaseCallback):
 
 
 class SelfPlaySnapshotCallback(BaseCallback):
-    """Periodically freeze the current policy as the self-play opponent.
+    """Periodically freeze the current policy into a rolling *pool* of self-play opponents.
 
-    Every ``every`` callbacks it saves the live model to a fixed snapshot file and tells
-    every training worker to reload its frozen opponent from it (via ``env_method``), so
-    the agent keeps facing an ever-improving copy of itself.
+    Every ``every`` callbacks it dumps the live policy to a versioned numpy snapshot and
+    hands every worker the current pool (via ``env_method("set_opponent_pool", ...)``), so
+    each episode the learner faces a *random* recent copy of itself rather than only the
+    latest one. Facing a mix of past snapshots breaks the symmetric "perfectly counter each
+    other" collapse and the cyclic counter-the-counter dynamic of single-snapshot self-play.
+    Snapshot files round-robin across ``pool_size`` slots so disk stays bounded.
     """
 
-    def __init__(self, snapshot_base: str, every: int = 200, verbose: int = 0) -> None:
+    def __init__(self, snapshot_base: str, every: int = 200, pool_size: int = 5,
+                 verbose: int = 0) -> None:
         super().__init__(verbose)
         self._base = snapshot_base
-        self._npz = snapshot_base + ".npz"
+        self._npz = snapshot_base + ".npz"        # canonical single-file snapshot (viz/back-compat)
         self._every = max(1, every)
+        self._pool_size = max(1, pool_size)
+        self._count = 0
+        self._paths: deque[str] = deque(maxlen=self._pool_size)
 
     def _on_step(self) -> bool:
         if self.n_calls % self._every == 0:
             from bucky.selfplay import export_policy_npz
             self.model.save(self._base)              # resumable .zip checkpoint
-            export_policy_npz(self.model, self._npz)  # numpy weights the workers reload
+            export_policy_npz(self.model, self._npz)  # canonical snapshot (used by the viz env)
+            # Versioned snapshot in a round-robin slot → numpy weights the workers reload.
+            path = f"{self._base}_{self._count % self._pool_size}.npz"
+            export_policy_npz(self.model, path)
+            if path not in self._paths:
+                self._paths.append(path)
+            self._count += 1
             try:
-                self.training_env.env_method("set_opponent", self._npz)
-            except Exception:  # noqa: BLE001 — best effort; workers keep the old opponent
+                self.training_env.env_method("set_opponent_pool", list(self._paths))
+            except Exception:  # noqa: BLE001 — best effort; workers keep the old pool
                 pass
         return True
 

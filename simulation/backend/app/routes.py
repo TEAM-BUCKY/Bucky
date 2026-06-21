@@ -6,6 +6,7 @@ Internal (token):   WS /api/ingest  (the trainer subprocess pushes frames here).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from typing import Literal, Optional
@@ -18,18 +19,43 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from .auth import require_control
+from .auth import OAUTH_STATE_COOKIE, SESSION_COOKIE, current_user, require_control
 from .broadcast import Broadcaster
+from .config import settings
 from .jobs import JobManager
+from .oauth import OAuthError
 
 log = logging.getLogger(__name__)
+
+
+def _base_url(request: Request) -> str:
+    """Public origin for building the OAuth redirect URI.
+
+    Prefer the explicitly-configured PUBLIC_URL (correct behind a TLS proxy where the
+    request's own scheme/host may be the internal one); fall back to the request origin
+    for local dev."""
+    if settings.public_url:
+        return settings.public_url
+    return str(request.base_url).rstrip("/")
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Only mark cookies Secure over HTTPS, so they still work on http://localhost."""
+    return _base_url(request).startswith("https://")
+
+
+def _public_user(user: dict | None) -> dict | None:
+    if not user:
+        return None
+    return {"login": user["login"], "name": user.get("name"), "avatar_url": user.get("avatar_url")}
 
 
 class PolicyRef(BaseModel):
@@ -54,6 +80,8 @@ class LaunchRequest(BaseModel):
     resume_from: Optional[PolicyRef] = None
     policy_a: Optional[PolicyRef] = None
     policy_b: Optional[PolicyRef] = None
+    # Play mode: let a human drive red (robot A) via the control sink instead of its policy.
+    manual_red: Optional[bool] = None
     # Where the run executes: None/"any" = any worker, "server" = local in-process
     # worker only, otherwise a specific device id.
     target: Optional[str] = None
@@ -73,6 +101,13 @@ class LaunchRequest(BaseModel):
 class QueueAddRequest(LaunchRequest):
     # Epoch seconds the run should start at/after (null = as soon as the queue reaches it).
     start_at: Optional[float] = None
+
+
+class ControlRequest(BaseModel):
+    # Manual control for a play match's red robot. ``run`` is the match run name.
+    run: str
+    action: Optional[list[float]] = None     # [vx, vy, omega, kick], each in [-1, 1]
+    red_mode: Optional[Literal["human", "ai"]] = None
 
 
 class DeviceRegisterRequest(BaseModel):
@@ -96,6 +131,88 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     @router.get("/health")
     async def health() -> dict:
         return {"ok": True}
+
+    # ── auth (GitHub-org OAuth, or password fallback) ────────────────────────────
+    @router.get("/auth/me")
+    async def auth_me(request: Request) -> dict:
+        """Login state for the SPA: which auth mode is active and the current user."""
+        if not settings.oauth_enabled:
+            return {"oauth": False, "user": None, "control_enabled": settings.control_enabled}
+        return {
+            "oauth": True,
+            "org": settings.github_org,
+            "user": _public_user(current_user(request)),
+            "control_enabled": True,
+        }
+
+    @router.get("/auth/login")
+    async def auth_login(request: Request) -> RedirectResponse:
+        """Begin the GitHub OAuth flow (redirect to GitHub with a CSRF ``state``)."""
+        oauth = getattr(request.app.state, "oauth", None)
+        if oauth is None:
+            raise HTTPException(status_code=404, detail="OAuth is not enabled.")
+        state = secrets.token_urlsafe(24)
+        redirect_uri = _base_url(request) + "/api/auth/callback"
+        resp = RedirectResponse(oauth.authorize_url(redirect_uri, state), status_code=307)
+        resp.set_cookie(
+            OAUTH_STATE_COOKIE, state, max_age=600, httponly=True,
+            secure=_cookie_secure(request), samesite="lax", path="/",
+        )
+        return resp
+
+    @router.get("/auth/callback")
+    async def auth_callback(
+        request: Request, code: str = Query(default=""), state: str = Query(default="")
+    ) -> RedirectResponse:
+        """Complete OAuth: verify state, check org membership, set a session cookie."""
+        oauth = getattr(request.app.state, "oauth", None)
+        if oauth is None:
+            raise HTTPException(status_code=404, detail="OAuth is not enabled.")
+        expected = request.cookies.get(OAUTH_STATE_COOKIE, "")
+        if not state or not expected or not secrets.compare_digest(state, expected):
+            raise HTTPException(status_code=400, detail="Invalid OAuth state.")
+        redirect_uri = _base_url(request) + "/api/auth/callback"
+        try:
+            token = await asyncio.to_thread(oauth.exchange_code, code, redirect_uri)
+            member = await asyncio.to_thread(oauth.is_org_member, token)
+            gh = await asyncio.to_thread(oauth.fetch_user, token)
+        except OAuthError as exc:
+            raise HTTPException(status_code=502, detail=f"GitHub login failed: {exc}")
+
+        home = _base_url(request) + "/"
+        if not member:
+            # Bounce back to the SPA with an error it can surface, rather than a raw 403.
+            resp = RedirectResponse(home + f"?auth_error=not_member&org={settings.github_org}",
+                                    status_code=307)
+            resp.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+            return resp
+
+        store = request.app.state.user_store
+        store.upsert_user(gh["id"], gh["login"], gh.get("name"), gh.get("avatar_url"))
+        session = store.create_session(gh["id"])
+        manager._audit("login", actor=gh["login"], source="oauth")
+        resp = RedirectResponse(home, status_code=307)
+        resp.set_cookie(
+            SESSION_COOKIE, session, max_age=int(settings.session_ttl_days * 86400),
+            httponly=True, secure=_cookie_secure(request), samesite="lax", path="/",
+        )
+        resp.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+        return resp
+
+    @router.post("/auth/logout")
+    async def auth_logout(request: Request) -> JSONResponse:
+        token = request.cookies.get(SESSION_COOKIE, "")
+        store = getattr(request.app.state, "user_store", None)
+        if store is not None:
+            store.delete_session(token)
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
+
+    @router.get("/activity")
+    async def activity(limit: int = Query(default=50, ge=1, le=500)) -> dict:
+        """Recent control events (who launched/stopped/deleted what) from the audit log."""
+        return {"type": "activity", "events": manager.recent_activity(limit)}
 
     @router.get("/status")
     async def status() -> dict:
@@ -131,7 +248,7 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
 
     @router.delete("/models/{run}")
     async def delete_model(run: str, _user: str = Depends(require_control)) -> dict:
-        result = await manager.delete_model(run)
+        result = await manager.delete_model(run, actor=_user)
         if not result.get("ok"):
             raise HTTPException(status_code=404, detail=result.get("message", "delete failed"))
         return result
@@ -258,19 +375,43 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
 
     @router.post("/jobs")
     async def create_job(req: LaunchRequest, _user: str = Depends(require_control)) -> dict:
-        result = await manager.launch(req.model_dump())
+        result = await manager.launch(req.model_dump(), actor=_user)
         if not result.get("ok"):
             raise HTTPException(status_code=400, detail=result.get("message", "launch failed"))
+        return result
+
+    @router.post("/control")
+    async def control_match(req: ControlRequest, _user: str = Depends(require_control)) -> dict:
+        """Send a manual control command (human action / red mode) to a running match.
+
+        Forwarded to the match's play.py subprocess over its control sink. The action is
+        validated to 4 floats clipped to [-1, 1] so a malformed payload can't drive the robot
+        out of range."""
+        msg: dict = {}
+        if req.action is not None:
+            if len(req.action) != 4:
+                raise HTTPException(status_code=400, detail="action must have 4 elements")
+            try:
+                msg["action"] = [max(-1.0, min(1.0, float(x))) for x in req.action]
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="action must be numeric")
+        if req.red_mode is not None:
+            msg["red_mode"] = req.red_mode
+        if not msg:
+            raise HTTPException(status_code=400, detail="nothing to send")
+        result = await manager.push_control(req.run, msg)
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("message", "control failed"))
         return result
 
     @router.post("/jobs/stop")
     async def stop_job(_user: str = Depends(require_control)) -> dict:
         # Legacy: stop the primary local run (single-run UI). Per-run stop below.
-        return await manager.kill()
+        return await manager.kill(actor=_user)
 
     @router.post("/jobs/{run_name}/stop")
     async def stop_run(run_name: str, _user: str = Depends(require_control)) -> dict:
-        result = await manager.kill(run_name)
+        result = await manager.kill(run_name, actor=_user)
         if not result.get("ok"):
             raise HTTPException(status_code=404, detail=result.get("message", "stop failed"))
         return result
@@ -279,7 +420,7 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     async def add_to_queue(req: QueueAddRequest, _user: str = Depends(require_control)) -> dict:
         data = req.model_dump()
         start_at = data.pop("start_at", None)
-        result = await manager.enqueue(data, start_at)
+        result = await manager.enqueue(data, start_at, actor=_user)
         if not result.get("ok"):
             raise HTTPException(status_code=400, detail=result.get("message", "enqueue failed"))
         return result
@@ -351,5 +492,34 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         finally:
             if is_local:
                 await manager.on_ingest_disconnect()
+
+    @router.websocket("/control_sink")
+    async def control_sink(
+        ws: WebSocket,
+        token: str = Query(default=""),
+        run: str = Query(default=""),
+    ) -> None:
+        """Hub → play.py manual-control stream.
+
+        The match subprocess connects here (local ingest token) to receive the browser's
+        control messages for its run. The hub pushes; the subprocess only reads. We keep the
+        socket registered for ``run`` and clean it up on disconnect."""
+        header_token = ws.headers.get("x-device-token", "")
+        effective = header_token or token
+        if not secrets.compare_digest(effective, manager.ingest_token):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        manager.register_control_sink(run, ws)
+        try:
+            # The subprocess doesn't send; reading just detects disconnect.
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            pass
+        except Exception:  # noqa: BLE001 — client dropped
+            pass
+        finally:
+            manager.unregister_control_sink(run, ws)
 
     return router

@@ -29,6 +29,14 @@ from bucky.selfplay import (
 MAX_LINEAR = 1.0
 MAX_OMEGA = 6.0
 
+# Stochastic-opponent exploration scale (training only). The frozen opponent samples its
+# action around the policy mean at this fraction of the policy's own std, so the learner
+# faces a non-deterministic copy of itself instead of one memorizable pattern.
+OPP_TEMPERATURE = 0.8
+# Wider lateral spawn jitter than the physics default (0.05 m) so self-play episodes start
+# spread across the field width — encouraging play out to the wings, not just down the middle.
+SELF_PLAY_SPAWN_JITTER = 0.25
+
 OBS_LOW = np.full(SELF_PLAY_OBS_DIM, -3.0, dtype=np.float32)
 OBS_HIGH = np.full(SELF_PLAY_OBS_DIM, 3.0, dtype=np.float32)
 
@@ -61,32 +69,50 @@ class BuckySelfPlayEnv(gym.Env):
         self._events = PlayEventTracker()
         self._step_count = 0
         self._heading_drift = 0.0
-        self._opponent = None
+        self._opponent = None              # opponent for the current episode (picked in reset)
+        self._opponent_pool: list = []     # rolling pool of frozen snapshots to sample from
         self._last_terms = RewardTerms()
         if opponent_path:
             self.set_opponent(opponent_path)
 
     # ── opponent management ───────────────────────────────────────────────────
     def set_opponent(self, path: str | None) -> None:
-        """Load (or clear) the frozen opponent policy. ``None`` → opponent stands still.
+        """Load (or clear) a single frozen opponent. ``None`` → opponent stands still.
 
-        ``path`` is a ``.npz`` of exported policy weights (see ``bucky.selfplay``); it is
-        evaluated in pure numpy so this stays torch-free inside SubprocVecEnv workers.
+        Back-compat shim around :meth:`set_opponent_pool` — sets a pool of one. ``path`` is a
+        ``.npz`` of exported policy weights (see ``bucky.selfplay``), evaluated in pure numpy
+        so this stays torch-free inside SubprocVecEnv workers.
         """
-        if not path:
-            self._opponent = None
-            return
-        try:
-            self._opponent = load_numpy_opponent(path)
-        except Exception:  # noqa: BLE001 — fall back to a passive opponent
-            self._opponent = None
+        self.set_opponent_pool([path] if path else [])
+
+    def set_opponent_pool(self, paths) -> None:
+        """Load a rolling pool of frozen opponents; each episode samples one (fictitious
+        self-play). Facing a *mix* of past snapshots rather than only the latest stops the
+        learner overfitting to one opponent and breaks the cyclic "counter the counter"
+        collapse. Bad/missing paths are skipped; an empty pool → a passive opponent.
+        """
+        pool = []
+        for p in paths or []:
+            if not p:
+                continue
+            try:
+                pool.append(load_numpy_opponent(p))
+            except Exception:  # noqa: BLE001 — skip a bad snapshot, keep the rest
+                pass
+        self._opponent_pool = pool
+        # Make a sane choice available immediately (before the next reset re-samples).
+        self._opponent = pool[0] if pool else None
 
     # ── gym API ───────────────────────────────────────────────────────────────
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         if seed is not None:
             self._rng = np.random.default_rng(seed)
-        self._phys.reset(seed=seed)
+        # Sample this episode's opponent from the pool (fictitious self-play) and widen the
+        # opening spread so episodes start across the field, not always down the middle.
+        if self._opponent_pool:
+            self._opponent = self._opponent_pool[self._rng.integers(len(self._opponent_pool))]
+        self._phys.reset(seed=seed, spawn_jitter=SELF_PLAY_SPAWN_JITTER)
         # Random opening kickoff each episode; the referee performs it.
         self._ref = Referee(match_mode=False,
                             first_kickoff="a" if self._rng.random() < 0.5 else "b")
@@ -129,6 +155,8 @@ class BuckySelfPlayEnv(gym.Env):
             "lack_of_progress": "lack_of_progress" in decision.events,
             "defective": any(e.startswith("defective_a") for e in decision.events),
             "ball_out": decision.ball_relocated,
+            # Learner is robot A; surface its legal-kick flag for the dense kick-shaping terms.
+            "kicked": bool(info.get("kicked_a", False)),
         }
         # Opponent-aware skilled-play events (steal, block, risky shot, kick lost, kicked/bank goal).
         reward_info.update(self._events.update(state1, state_b1, info))
@@ -172,6 +200,7 @@ class BuckySelfPlayEnv(gym.Env):
         return predict_opponent_action(
             self._opponent, self._phys.state_b(), self._phys.state_a().robot_pos,
             add_noise=self._rand_cfg.enabled, rng=self._rng, kick_ready=kick_ready,
+            deterministic=False, temperature=OPP_TEMPERATURE,
         )
 
     def _get_obs(self) -> np.ndarray:

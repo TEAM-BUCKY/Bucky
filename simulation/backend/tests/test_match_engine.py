@@ -64,3 +64,32 @@ def test_step_counter_advances_without_goal():
     f2 = eng.tick()
     assert f1["step"] == 1 and f2["step"] == 2
     assert f1["episode"] == 0 and f2["episode"] == 0
+
+
+def test_frame_reports_kicker_ready():
+    eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
+    f = eng.tick()
+    assert f["kick_ready_a"] == 1.0 and f["kick_ready_b"] == 1.0
+
+
+def test_human_control_overrides_policy_for_red():
+    # Red is robot B. Its policy would sit still; the human drives it forward (vx=1). B faces
+    # its own goal (heading≈π), so body-frame forward moves it in −x — it must displace.
+    control = {"red_mode": "human", "action": [1.0, 0.0, 0.0, 0.0]}
+    eng = MatchEngine(FixedModel(), FixedModel((0.0, 0.0, 0.0)), seed=0,
+                      control_source=lambda: control)
+    start = eng._phys.state_b().robot_pos.copy()
+    for _ in range(10):
+        eng.tick()
+    assert np.linalg.norm(eng._phys.state_b().robot_pos - start) > 0.01
+
+
+def test_ai_mode_uses_policy_not_human_action():
+    # Same control payload but red_mode='ai' → the human action is ignored, B's policy drives.
+    control = {"red_mode": "ai", "action": [1.0, 0.0, 0.0, 0.0]}
+    eng = MatchEngine(FixedModel(), FixedModel((0.0, 0.0, 0.0)), seed=0,
+                      control_source=lambda: control)
+    start = eng._phys.state_b().robot_pos.copy()
+    for _ in range(10):
+        eng.tick()
+    assert np.linalg.norm(eng._phys.state_b().robot_pos - start) < 0.01

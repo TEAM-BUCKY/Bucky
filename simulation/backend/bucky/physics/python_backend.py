@@ -338,19 +338,30 @@ class TwoRobotPhysics:
     def is_removed(self, which: str) -> bool:
         return self._a_removed if which == "a" else self._b_removed
 
-    def reset(self, seed: int | None = None, kickoff: str | None = None) -> None:
+    def reset(self, seed: int | None = None, kickoff: str | None = None,
+              spawn_jitter: float = 0.05) -> None:
         """Kick-off reset. ``kickoff`` ('a'|'b', else random) gets the ball; the other
         robot starts back in its own goal/black zone. After a goal, the conceding team
         is given the kickoff (RoboCup rule), driven by the caller passing ``kickoff``.
+
+        ``spawn_jitter`` is the lateral (y) spread of the ball and robot start positions; the
+        longitudinal (x) spread stays tight at 0.05 m so the kickoff geometry holds. The
+        default reproduces the original ±0.05 m jitter; self-play widens it for variety.
         """
         if seed is not None:
             self._rng = np.random.default_rng(seed)
         if kickoff not in ("a", "b"):
             kickoff = "a" if self._rng.random() < 0.5 else "b"
 
-        ball = self._rng.uniform(-0.05, 0.05, 2)
-        a_noise = self._rng.uniform(-0.05, 0.05, 2)
-        b_noise = self._rng.uniform(-0.05, 0.05, 2)
+        lon = 0.05  # longitudinal (x) jitter, kept tight to preserve kickoff geometry
+        lat = max(0.0, float(spawn_jitter))
+
+        def _jit() -> np.ndarray:
+            return np.array([self._rng.uniform(-lon, lon), self._rng.uniform(-lat, lat)])
+
+        ball = _jit()
+        a_noise = _jit()
+        b_noise = _jit()
         if kickoff == "a":
             self._a_pos = ball + np.array([-KICKOFF_BEHIND, 0.0]) + a_noise  # A on the ball
             self._b_pos = np.array([DEFEND_X, 0.0]) + b_noise                # B in its zone

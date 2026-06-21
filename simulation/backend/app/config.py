@@ -47,9 +47,29 @@ class Settings:
     # only as far as the host's CPU/RAM allows. Default 1 preserves single-machine behaviour.
     local_slots: int = max(1, int(os.getenv("LOCAL_SLOTS", "1") or "1"))
 
+    # ── GitHub-org OAuth (optional) ──────────────────────────────────────────────
+    # When all three are set, control auth switches to "sign in with GitHub" and any
+    # member of ``github_org`` may control the server; the shared password is ignored.
+    # When unset, the password (above) gates control — the local-dev fallback.
+    github_client_id: str = os.getenv("GITHUB_CLIENT_ID", "")
+    github_client_secret: str = os.getenv("GITHUB_CLIENT_SECRET", "")
+    github_org: str = os.getenv("GITHUB_ORG", "")
+    # Public base URL of this deployment (e.g. https://rcj.koen1711.nl), used to build
+    # the OAuth redirect URI. Falls back to request-derived origin when empty.
+    public_url: str = os.getenv("PUBLIC_URL", "").rstrip("/")
+    # How long a browser session cookie stays valid.
+    session_ttl_days: float = float(os.getenv("SESSION_TTL_DAYS", "14") or "14")
+    # Where the SQLite database lives, relative to the backend root unless absolute.
+    db_path: str = os.getenv("DB_PATH", "state/bucky.db")
+
+    @property
+    def oauth_enabled(self) -> bool:
+        return bool(self.github_client_id and self.github_client_secret and self.github_org)
+
     @property
     def control_enabled(self) -> bool:
-        return bool(self.password)
+        """Whether control endpoints accept *any* auth method."""
+        return self.oauth_enabled or bool(self.password)
 
 
 settings = Settings()

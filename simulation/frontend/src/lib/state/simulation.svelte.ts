@@ -53,6 +53,9 @@ export interface SimFrame {
 	/** Referee events fired this frame (e.g. 'out_of_bounds_a', 'lack_of_progress'). */
 	events?: string[];
 	ball_pos: [number, number];
+	/** Kicker charge state, 1 = ready / 0 = recharging (match frames only). */
+	kick_ready_a?: number;
+	kick_ready_b?: number;
 	reward_terms: RewardTerms;
 	reward_total?: number;
 	obs: number[];
@@ -60,6 +63,8 @@ export interface SimFrame {
 	step: number;
 	total_return?: number;
 	num_timesteps?: number;
+	/** Source run name, tagged by the backend on every streamed frame. */
+	run?: string;
 }
 
 export type TrainingState =
@@ -163,6 +168,8 @@ export interface MatchConfig {
 	policyA: PolicyRef;
 	policyB: PolicyRef;
 	seed: number;
+	/** Let a human drive red (robot A) via the control channel instead of its policy. */
+	manualRed?: boolean;
 }
 
 export interface RunInfo {
@@ -221,6 +228,8 @@ export interface ActiveRun {
 	state?: string;
 	phase?: string;
 	num_timesteps?: number;
+	/** Play match where a human drives red (robot A). */
+	manual_red?: boolean;
 	stage?: string;
 	model_name?: string;
 	model_version?: string;
@@ -288,10 +297,19 @@ class SimulationState {
 	/** Ticks roughly once a second so `live` re-evaluates without new traffic. */
 	now = $state(0);
 
-	/** Username for control actions (shown in the UI when logged in). */
+	/** Username for control actions (shown in the UI when logged in). In OAuth mode
+	 * this mirrors the signed-in GitHub login. */
 	username = $state('');
 	/** Last control auth/error message, surfaced near the login control. */
 	authError = $state<string | null>(null);
+	/** True when the server gates control with GitHub OAuth (vs the password fallback). */
+	oauthMode = $state(false);
+	/** The GitHub org whose members may control the server (OAuth mode only). */
+	oauthOrg = $state('');
+	/** The signed-in GitHub user (OAuth mode only), or null when not logged in. */
+	authUser = $state<{ login: string; name: string | null; avatar_url: string | null } | null>(null);
+	/** True once /auth/me has been read at least once (so the UI can avoid flicker). */
+	authReady = $state(false);
 
 	private _password = '';
 	private ws: WebSocket | null = null;
@@ -306,12 +324,71 @@ class SimulationState {
 		return this.connected && this.now - this.lastMessageAt < STALE_MS;
 	}
 
-	/** Whether credentials have been entered (not whether they're valid). */
+	/** Whether the user can issue control actions: a live OAuth session, or (in the
+	 * password fallback) entered credentials. */
 	get hasCredentials() {
+		if (this.oauthMode) return this.authUser !== null;
 		return this.username.length > 0 && this._password.length > 0;
 	}
 
 	// ── auth ───────────────────────────────────────────────────────────────────
+	/** Read the server's auth mode + current user. Safe to call repeatedly. */
+	async refreshAuth() {
+		const { httpBase } = apiBases();
+		// Surface a GitHub-org rejection bounced back to the SPA as ?auth_error=...
+		if (typeof window !== 'undefined') {
+			const params = new URLSearchParams(window.location.search);
+			if (params.get('auth_error') === 'not_member') {
+				this.authError = `That GitHub account is not a member of the ${
+					params.get('org') || 'required'
+				} organization.`;
+				params.delete('auth_error');
+				params.delete('org');
+				const qs = params.toString();
+				window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
+			}
+		}
+		try {
+			const res = await fetch(httpBase + '/auth/me', { credentials: 'include' });
+			if (!res.ok) return;
+			const j = await res.json();
+			this.oauthMode = !!j.oauth;
+			this.oauthOrg = j.org ?? '';
+			if (this.oauthMode) {
+				this.authUser = (j.user as typeof this.authUser) ?? null;
+				this.username = j.user?.login ?? '';
+			}
+			this.authReady = true;
+		} catch {
+			/* server unreachable — leave auth state as-is */
+		}
+	}
+
+	/** Begin the GitHub OAuth flow (full-page redirect to the backend). */
+	loginWithGitHub() {
+		const { httpBase } = apiBases();
+		window.location.href = httpBase + '/auth/login';
+	}
+
+	/** A 401 means different things per mode: re-auth with GitHub vs bad password. */
+	private _authErrorMessage(): string {
+		if (this.oauthMode) {
+			this.authUser = null; // session is gone/expired — reflect logged-out state
+			return 'Your session expired. Sign in with GitHub again.';
+		}
+		return 'Invalid username or password.';
+	}
+
+	/** Request init carrying the right credentials for the active auth mode. */
+	private _authInit(headers: Record<string, string> = {}): RequestInit {
+		if (this.oauthMode) {
+			return { headers, credentials: 'include' };
+		}
+		return {
+			headers: { ...headers, Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`) }
+		};
+	}
+
 	setCredentials(username: string, password: string) {
 		this.username = username.trim();
 		this._password = password;
@@ -325,7 +402,19 @@ class SimulationState {
 		}
 	}
 
-	logout() {
+	async logout() {
+		if (this.oauthMode) {
+			const { httpBase } = apiBases();
+			try {
+				await fetch(httpBase + '/auth/logout', { method: 'POST', credentials: 'include' });
+			} catch {
+				/* best-effort */
+			}
+			this.authUser = null;
+			this.username = '';
+			this.authError = null;
+			return;
+		}
 		this.username = '';
 		this._password = '';
 		this.authError = null;
@@ -356,6 +445,8 @@ class SimulationState {
 	// ── connection (public, read-only stream) ──────────────────────────────────
 	connect() {
 		this._loadCredentials();
+		// Determine auth mode (OAuth vs password) and current user, in the background.
+		void this.refreshAuth();
 		this._manualClose = false;
 		this._clearReconnect();
 		this._closeSocket();
@@ -423,8 +514,40 @@ class SimulationState {
 			mode: 'play',
 			policy_a: config.policyA,
 			policy_b: config.policyB,
-			seed: config.seed
+			seed: config.seed,
+			manual_red: config.manualRed ?? false
 		});
+	}
+
+	/** Run name of the currently-streaming manual (human-controlled) match, or null. */
+	get manualMatchRun(): string | null {
+		const run = this.frame?.run;
+		if (this.frame?.mode !== 'play' || !run) return null;
+		const active = this.activeRuns.find((r) => r.run_name === run);
+		return active?.manual_red ? run : null;
+	}
+
+	/** Send a manual control command (human action and/or red mode) to a running match.
+	 * Best-effort and quiet: this fires at ~25 Hz, so transient failures are ignored rather
+	 * than flashing error banners. */
+	async pushControl(
+		run: string,
+		payload: { action?: number[]; redMode?: 'human' | 'ai' }
+	): Promise<void> {
+		if (!this.hasCredentials || !run) return;
+		const body: Record<string, unknown> = { run };
+		if (payload.action) body.action = payload.action;
+		if (payload.redMode) body.red_mode = payload.redMode;
+		const { httpBase } = apiBases();
+		try {
+			await fetch(httpBase + '/control', {
+				method: 'POST',
+				...this._authInit({ 'Content-Type': 'application/json' }),
+				body: JSON.stringify(body)
+			});
+		} catch {
+			/* control is best-effort; ignore transient errors */
+		}
 	}
 
 	async kill() {
@@ -505,11 +628,9 @@ class SimulationState {
 		const { httpBase } = apiBases();
 		const path = `/models/${encodeURIComponent(run)}/${encodeURIComponent(checkpoint)}/download`;
 		try {
-			const res = await fetch(httpBase + path, {
-				headers: { Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`) }
-			});
+			const res = await fetch(httpBase + path, this._authInit());
 			if (res.status === 401) {
-				this.authError = 'Invalid username or password.';
+				this.authError = this._authErrorMessage();
 				return;
 			}
 			if (!res.ok) {
@@ -544,14 +665,11 @@ class SimulationState {
 		try {
 			const res = await fetch(httpBase + path, {
 				method,
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`)
-				},
+				...this._authInit({ 'Content-Type': 'application/json' }),
 				body: method === 'DELETE' ? undefined : JSON.stringify(body ?? {})
 			});
 			if (res.status === 401) {
-				this.authError = 'Invalid username or password.';
+				this.authError = this._authErrorMessage();
 				return false;
 			}
 			if (res.status === 503) {
@@ -588,14 +706,11 @@ class SimulationState {
 		try {
 			const res = await fetch(httpBase + '/devices', {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`)
-				},
+				...this._authInit({ 'Content-Type': 'application/json' }),
 				body: JSON.stringify({ name })
 			});
 			if (res.status === 401) {
-				this.authError = 'Invalid username or password.';
+				this.authError = this._authErrorMessage();
 				return null;
 			}
 			if (!res.ok) {
@@ -625,10 +740,10 @@ class SimulationState {
 		try {
 			const res = await fetch(httpBase + `/devices/${encodeURIComponent(id)}/token`, {
 				method: 'POST',
-				headers: { Authorization: 'Basic ' + btoa(`${this.username}:${this._password}`) }
+				...this._authInit()
 			});
 			if (res.status === 401) {
-				this.authError = 'Invalid username or password.';
+				this.authError = this._authErrorMessage();
 				return null;
 			}
 			if (!res.ok) {

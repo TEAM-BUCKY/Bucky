@@ -27,6 +27,14 @@ services:
       - APP_PASSWORD=${APP_PASSWORD:-}
       - INGEST_TOKEN=${INGEST_TOKEN:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      # GitHub-org OAuth (optional). When all three are set, control is gated by org
+      # membership and the shared password above is ignored. PUBLIC_URL must be the
+      # externally-reachable https origin so the OAuth redirect resolves behind Traefik.
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_ORG=${GITHUB_ORG:-}
+      - PUBLIC_URL=${PUBLIC_URL:-https://${DOMAIN}}
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-14}
       # 1 = the server also trains queued jobs locally (default); 0 = pure coordinator,
       # only registered guest devices (scripts/worker.py) consume the queue.
       - ENABLE_LOCAL_WORKER=${ENABLE_LOCAL_WORKER:-1}
