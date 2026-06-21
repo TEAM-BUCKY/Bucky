@@ -56,12 +56,38 @@ can keep training locally while all checkpoints land centrally on the server.
 uv run python scripts/worker.py --server https://your-bucky-host --token <device-token>
 ```
 
-The worker polls for jobs, runs `scripts/train.py` locally, streams live frames back (the
+The worker polls for jobs, runs `scripts/train.py` locally, streams metrics/status back (the
 browser's device selector lets you watch any device), and uploads the resulting checkpoints.
 A lease that stops heart-beating is reclaimed and the job returns to the queue.
 
 Set `ENABLE_LOCAL_WORKER=0` to make the server a pure coordinator/store that only guest
 devices train for (default `1` — the server also trains, preserving single-machine use).
+
+### Many runs at once, and stopping them
+
+Each node runs several jobs concurrently: the server's in-process worker runs up to
+`LOCAL_SLOTS` (default `1`), and a guest worker runs up to `--slots` (default `1`,
+or `BUCKY_SLOTS`). The live runs are listed by `GET /api/active` and in the UI's "Active
+runs" panel, each with a **Stop** button. `POST /api/jobs/<run>/stop` stops one run by name:
+a local run is checkpointed and terminated; a run leased to a device is asked to stop via
+its next heartbeat — the worker SIGINTs its trainer (which checkpoints), uploads, and frees
+the slot.
+
+### Distributing one run across devices (federated)
+
+A single run can be split into **N shards** that train their own environments and average
+their policy weights through the coordinator every `sync_every` steps (FedAvg). Enable it in
+the launch form ("Distribute across devices") or via the `distributed` field:
+
+```bash
+curl -u admin:pw -X POST https://your-bucky-host/api/jobs -H 'content-type: application/json' \
+  -d '{"mode":"train","stage":"SELF_PLAY_1V1","name":"team","version":"1",
+       "distributed":{"shards":3,"sync_every":50000}}'
+```
+
+The shards (`team_shard0…2`) are leased across whatever workers are free (raise `LOCAL_SLOTS`
+/ `--slots` to land several on one box). They stay in lock-step around a shared policy while
+collecting N× the experience; any shard's final checkpoint is the federated model.
 
 ## Train
 
@@ -79,9 +105,18 @@ uv run python scripts/train.py --stage PUSH_TO_EMPTY_GOAL --resume-from checkpoi
 uv run python scripts/train.py --stage APPROACH_STATIC_BALL --duration 3600          # train 1 hour
 uv run python scripts/train.py --stage APPROACH_STATIC_BALL --until 1781990000        # train until an epoch time
 
+# Watch the live field animate (off by default — headless trains faster)
+uv run python scripts/train.py --stage SELF_PLAY_1V1 --stream-url ws://localhost:8000/api/ingest --viz
+
 # TensorBoard
 tensorboard --logdir runs/
 ```
+
+Runs are **headless by default**: metrics/status still stream to the UI, but the animated
+field (an extra in-process "shadow" rollout) only runs with `--viz` — in the web UI, the
+launch form's **"Watch live"** toggle. The robot's omni-drive action also carries a 4th
+**kick** channel, so a trained policy can shoot; the skilled-play reward weights (kick goal,
+bank shot, steal, …) are editable in the reward-weights panel.
 
 From the web UI you can pick a stop condition (steps / duration / until a time) per run and
 **queue** several runs — each launches when the previous finishes, with an optional scheduled

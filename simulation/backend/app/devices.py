@@ -41,6 +41,11 @@ class DeviceRegistry:
             if self._path.is_file():
                 data = json.loads(self._path.read_text())
                 self._devices = {d["id"]: d for d in data.get("devices", []) if "id" in d}
+                # Migrate the old single ``current_job`` field to the ``current_jobs`` list.
+                for dev in self._devices.values():
+                    if "current_jobs" not in dev:
+                        old = dev.pop("current_job", None)
+                        dev["current_jobs"] = [old] if old else []
         except Exception:  # noqa: BLE001 — a corrupt registry must not crash startup
             log.warning("Could not read devices %s; starting empty", self._path)
             self._devices = {}
@@ -68,7 +73,9 @@ class DeviceRegistry:
             "token_hash": _hash(token),
             "created_at": time.time(),
             "last_seen": None,
-            "current_job": None,
+            # A device may train several leased runs at once (its own --slots), so the
+            # current job is a list. Kept sorted for stable display.
+            "current_jobs": [],
         }
         self._save()
         return self.public(device_id), token
@@ -107,25 +114,43 @@ class DeviceRegistry:
         return None
 
     # ── status ───────────────────────────────────────────────────────────────
-    def touch(self, device_id: str, current_job: str | None = "__keep__") -> None:
+    def touch(
+        self,
+        device_id: str,
+        *,
+        add_job: str | None = None,
+        remove_job: str | None = None,
+    ) -> None:
+        """Record a check-in (``last_seen``) and optionally add/remove a current job.
+
+        A bare ``touch(id)`` is just a check-in — used on every lease poll and streamed
+        frame — so it never churns the job list. ``add_job``/``remove_job`` maintain the
+        set of runs a device is currently training (it may hold several at once)."""
         dev = self._devices.get(device_id)
         if not dev:
             return
         dev["last_seen"] = time.time()
-        if current_job != "__keep__":
-            dev["current_job"] = current_job
+        jobs = set(dev.get("current_jobs") or [])
+        if add_job:
+            jobs.add(add_job)
+        if remove_job:
+            jobs.discard(remove_job)
+        dev["current_jobs"] = sorted(jobs)
         self._save()
 
     def public(self, device_id: str) -> dict:
         dev = self._devices[device_id]
         last_seen = dev.get("last_seen")
         online = bool(last_seen and (time.time() - last_seen) < ONLINE_TTL)
+        jobs = list(dev.get("current_jobs") or [])
         return {
             "id": dev["id"],
             "name": dev["name"],
             "created_at": dev["created_at"],
             "last_seen": last_seen,
-            "current_job": dev.get("current_job"),
+            "current_jobs": jobs,
+            # Back-compat single field: the first current job (or null when idle).
+            "current_job": jobs[0] if jobs else None,
             "online": online,
         }
 

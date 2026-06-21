@@ -17,8 +17,13 @@
 	});
 
 	const busy = $derived(['launching', 'running', 'stopping'].includes(simulation.status.state));
+	// Launch-now uses a local server slot; allow it whenever one is free (several runs can
+	// train at once). Remote-device targets always go through the queue/lease path instead.
 	const canLaunch = $derived(
-		simulation.connected && !busy && config.configValid && !config.targetIsRemote
+		simulation.connected &&
+			simulation.canLaunchLocal &&
+			config.configValid &&
+			!config.targetIsRemote
 	);
 	const canQueue = $derived(simulation.connected && config.configValid);
 	const canKill = $derived(

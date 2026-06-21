@@ -86,9 +86,22 @@ def main() -> None:
     parser.add_argument("--stream-token", default=None,
                         help="Auth token for the stream, sent as the X-Device-Token "
                              "handshake header (keeps it out of the URL/logs).")
+    parser.add_argument("--viz", action="store_true",
+                        help="Animate the live field in the UI. Off by default: it runs an "
+                             "extra in-process 'shadow' rollout on the training thread, so it "
+                             "costs throughput. Training metrics/status still stream without it.")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "auto"],
                         help="Torch device. CPU is fastest for this tiny MLP — the GPU's "
                              "per-step host<->device copies outweigh its compute here.")
+    # Federated distributed training: this run is one shard of a group that periodically
+    # averages policy weights through the coordinator (see bucky.fedavg).
+    parser.add_argument("--fed-server", default=None,
+                        help="Coordinator API base (…/api) for federated weight sync.")
+    parser.add_argument("--fed-token", default=None, help="Token for the fed sync endpoints.")
+    parser.add_argument("--fed-group", default=None, help="Distributed-run group id (sync key).")
+    parser.add_argument("--fed-every", type=int, default=50_000,
+                        help="Steps between federated weight-averaging syncs.")
+    parser.add_argument("--fed-shards", type=int, default=1, help="Number of shards in the group.")
     args = parser.parse_args()
 
     # The hub may launch us from a backgrounded process whose SIGINT is set to
@@ -130,23 +143,25 @@ def main() -> None:
     # the SubprocVecEnv workers, so pin it to 1 to eliminate that contention.
     torch.set_num_threads(1)
 
-    # Live visualization: stream frames + training scalars to the hub. The viz is fed
-    # by a dedicated in-process "shadow" rollout (LiveVizCallback), so it animates
-    # continuously and never has to be wired into the (unpicklable) SubprocVecEnv.
+    # Live streaming to the hub. Training metrics + status always stream (cheap, and the
+    # queue/UI needs the progress). The animated field is opt-in (--viz): it is fed by a
+    # dedicated in-process "shadow" rollout (LiveVizCallback) that runs on the training
+    # thread, so it costs throughput — headless by default keeps training fast.
     stream = None
     extra_callbacks = []
     if args.stream_url:
         from bucky.stream_client import StreamClient
-        from bucky.callbacks import (
-            LiveVizCallback, MetricsCallback, SelfPlayVizCallback,
-        )
+        from bucky.callbacks import MetricsCallback
         stream_headers = {"X-Device-Token": args.stream_token} if args.stream_token else None
         stream = StreamClient(args.stream_url, headers=stream_headers)
         stream.start()
-        viz = (SelfPlayVizCallback(stream, opponent_path=snapshot_npz)
-               if self_play else
-               LiveVizCallback(stream, stage=args.stage, domain_rand=False))
-        extra_callbacks = [viz, MetricsCallback(stream)]
+        extra_callbacks = [MetricsCallback(stream)]
+        if args.viz:
+            from bucky.callbacks import LiveVizCallback, SelfPlayVizCallback
+            viz = (SelfPlayVizCallback(stream, opponent_path=snapshot_npz)
+                   if self_play else
+                   LiveVizCallback(stream, stage=args.stage, domain_rand=False))
+            extra_callbacks.insert(0, viz)
 
     # Self-play envs are tiny pure-numpy steppers and the frozen opponent now runs in numpy
     # too (no torch in the env), so run them in-process with DummyVecEnv: torch is loaded
@@ -259,6 +274,14 @@ def main() -> None:
                 name_prefix="model",
             )
         )
+
+    # Federated distributed training: sync this shard's weights with its group.
+    if args.fed_server and args.fed_group:
+        from bucky.fedavg import FedSyncCallback
+        callbacks.append(FedSyncCallback(
+            args.fed_server, args.fed_token or "", args.fed_group, run_name,
+            every=args.fed_every, shards=args.fed_shards, verbose=1,
+        ))
 
     # Optional wall-clock stop. --until wins over --duration; either one runs the
     # step budget up to a very large number so time is the binding constraint.

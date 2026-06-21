@@ -42,6 +42,10 @@ class Settings:
     # trains them locally (today's single-machine behaviour). Disable to make the
     # server a pure coordinator/store that only registered guest devices train for.
     enable_local_worker: bool = os.getenv("ENABLE_LOCAL_WORKER", "1") not in ("0", "false", "False")
+    # How many training runs the server's in-process worker runs concurrently. Each run
+    # is a separate train.py subprocess (with its own SubprocVecEnv workers), so raise this
+    # only as far as the host's CPU/RAM allows. Default 1 preserves single-machine behaviour.
+    local_slots: int = max(1, int(os.getenv("LOCAL_SLOTS", "1") or "1"))
 
     @property
     def control_enabled(self) -> bool:

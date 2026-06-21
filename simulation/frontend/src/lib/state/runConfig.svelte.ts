@@ -48,6 +48,13 @@ export const REWARD_FIELDS: { key: string; label: string }[] = [
 	{ key: 'w_lack_of_progress', label: 'lack of progress' },
 	{ key: 'w_defective', label: 'defective' },
 	{ key: 'w_spin', label: 'spin' },
+	// Skilled play (kicker + opponent-aware) — let the policy learn to shoot, not just dribble.
+	{ key: 'w_steal', label: 'steal' },
+	{ key: 'w_blocked_shot', label: 'blocked shot' },
+	{ key: 'w_kick_goal', label: 'kick goal' },
+	{ key: 'w_bank_shot', label: 'bank shot' },
+	{ key: 'w_risky_shot', label: 'risky shot' },
+	{ key: 'w_kick_lost', label: 'kick lost' },
 	{ key: 'w_time', label: 'time' },
 	{ key: 'w_action_mag', label: 'action mag' }
 ];
@@ -87,6 +94,14 @@ export class RunConfig {
 	n_envs = $state(16);
 	seed = $state(0);
 	domain_rand = $state(true);
+	/** Animate the live field while training. Off by default — headless trains faster. */
+	viz = $state(false);
+
+	// ── distributed (FedAvg across devices) ──────────────────────────────────────
+	/** Split this run into shards that train together and average weights periodically. */
+	distributed = $state(false);
+	distShards = $state(2);
+	distSyncEvery = $state(50000);
 
 	// ── stop condition ───────────────────────────────────────────────────────────
 	stopKind = $state<StopKind>('steps');
@@ -142,6 +157,13 @@ export class RunConfig {
 		w_lack_of_progress: -2,
 		w_defective: -10,
 		w_spin: -0.2,
+		// Skilled play (kicker + opponent-aware) — defaults mirror the backend RewardConfig.
+		w_steal: 3,
+		w_blocked_shot: 5,
+		w_kick_goal: 6,
+		w_bank_shot: 4,
+		w_risky_shot: 2,
+		w_kick_lost: -6,
 		w_time: -0.001,
 		w_action_mag: -0.005
 	});
@@ -179,8 +201,15 @@ export class RunConfig {
 			seed: this.seed,
 			domain_rand: this.domain_rand,
 			stop: this.buildStop() ?? undefined,
-			target: this.target
+			target: this.target,
+			viz: this.viz
 		};
+		if (this.distributed && this.distShards > 1) {
+			p.distributed = {
+				shards: Math.max(2, Math.floor(this.distShards)),
+				sync_every: Math.max(1, Math.floor(this.distSyncEvery))
+			};
+		}
 		if (this.cont && this.srcRun && this.srcCkpt) {
 			p.resume_from = { run: this.srcRun, checkpoint: this.srcCkpt };
 		}
@@ -245,6 +274,8 @@ export class RunConfig {
 	}
 	get optionsSummary(): string {
 		const bits = [`domain rand ${this.domain_rand ? 'on' : 'off'}`];
+		if (this.viz) bits.push('watch live');
+		if (this.distributed) bits.push(`${Math.max(2, this.distShards)} shards`);
 		if (this.caps.advanced && this.saveStepCheckpoints) bits.push('step ckpts');
 		return bits.join(' · ');
 	}

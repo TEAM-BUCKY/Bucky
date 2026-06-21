@@ -161,9 +161,9 @@
 						title={d.online ? 'online' : 'offline'}
 					></span>
 					<span class="font-mono text-xs font-semibold">{d.name}</span>
-					{#if d.current_job}
-						<span class="font-mono text-[10px] text-amber-400">▶ {d.current_job}</span>
-					{/if}
+					{#each d.current_jobs ?? [] as job (job)}
+						<span class="font-mono text-[10px] text-amber-400">▶ {job}</span>
+					{/each}
 					<span class="ml-auto flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
 						<span>seen {fmtSeen(d.last_seen)}</span>
 						<Button

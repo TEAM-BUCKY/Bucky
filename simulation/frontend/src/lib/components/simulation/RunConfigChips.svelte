@@ -161,6 +161,43 @@
 						Domain randomization
 					</Label>
 				</div>
+				<div class="flex items-center gap-2">
+					<Checkbox id="opt-viz" bind:checked={config.viz} />
+					<Label for="opt-viz" class="cursor-pointer font-mono text-xs text-muted-foreground">
+						Watch live (slower)
+					</Label>
+				</div>
+				<div class="flex items-center gap-2">
+					<Checkbox id="opt-dist" bind:checked={config.distributed} />
+					<Label for="opt-dist" class="cursor-pointer font-mono text-xs text-muted-foreground">
+						Distribute across devices (FedAvg)
+					</Label>
+				</div>
+				{#if config.distributed}
+					<div class="ml-6 flex items-center gap-3">
+						<div class="flex items-center gap-1.5">
+							<Label for="dist-shards" class="font-mono text-[10px] text-muted-foreground">shards</Label>
+							<Input
+								id="dist-shards"
+								type="number"
+								min="2"
+								class="h-7 w-16 font-mono text-xs"
+								bind:value={config.distShards}
+							/>
+						</div>
+						<div class="flex items-center gap-1.5">
+							<Label for="dist-every" class="font-mono text-[10px] text-muted-foreground">sync every</Label>
+							<Input
+								id="dist-every"
+								type="number"
+								min="1000"
+								step="1000"
+								class="h-7 w-24 font-mono text-xs"
+								bind:value={config.distSyncEvery}
+							/>
+						</div>
+					</div>
+				{/if}
 				{#if config.caps.advanced}
 					<div class="flex items-center gap-2">
 						<Checkbox id="opt-steps" bind:checked={config.saveStepCheckpoints} />

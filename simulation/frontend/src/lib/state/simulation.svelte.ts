@@ -136,6 +136,10 @@ export interface LaunchConfig {
 	save_step_checkpoints?: boolean;
 	/** Where the run executes: 'any' (default), 'server', or a device id. */
 	target?: string;
+	/** Animate the live field while training (off by default — headless trains faster). */
+	viz?: boolean;
+	/** Split one run across devices via FedAvg. */
+	distributed?: { shards: number; sync_every: number };
 }
 
 /** A queued run waiting to launch (back-to-back, optionally at a scheduled time). */
@@ -201,8 +205,31 @@ export interface DeviceInfo {
 	name: string;
 	created_at: number;
 	last_seen: number | null;
+	/** Runs this device is currently training (a device may hold several at once). */
+	current_jobs: string[];
+	/** Back-compat: the first current job, or null when idle. */
 	current_job: string | null;
 	online: boolean;
+}
+
+/** One in-flight run (local or leased to a device), as listed by the `active_runs` frame. */
+export interface ActiveRun {
+	run_name: string;
+	/** 'server' = the in-process local trainer, otherwise a device id. */
+	device: string;
+	run_type?: string;
+	state?: string;
+	phase?: string;
+	num_timesteps?: number;
+	stage?: string;
+	model_name?: string;
+	model_version?: string;
+	started_at?: number;
+	cancel_requested?: boolean;
+	stop_kind?: StopKind;
+	deadline?: number;
+	/** Set when this run is one shard of a federated distributed group. */
+	dist_group?: string;
 }
 
 const RETURNS_CAP = 50;
@@ -250,6 +277,12 @@ class SimulationState {
 	selectedDevice = $state<string>('');
 	/** Scheduled/queued runs waiting to launch. */
 	queue = $state<QueueItem[]>([]);
+	/** All in-flight runs (local + leased to devices), for the multi-run panel. */
+	activeRuns = $state<ActiveRun[]>([]);
+	/** Concurrent-run capacity of the server's in-process worker. */
+	localSlots = $state(1);
+	/** How many of the server's local slots are currently busy. */
+	localActive = $state(0);
 	/** Epoch ms of the most recent message — used to show live vs stale. */
 	lastMessageAt = $state(0);
 	/** Ticks roughly once a second so `live` re-evaluates without new traffic. */
@@ -396,6 +429,17 @@ class SimulationState {
 
 	async kill() {
 		await this._control('/jobs/stop');
+	}
+
+	/** Stop one specific run by name (local run → terminated; remote run → cancel
+	 * requested, the worker checkpoints and stops). */
+	async stopRun(runName: string) {
+		await this._control(`/jobs/${encodeURIComponent(runName)}/stop`);
+	}
+
+	/** Whether the server's in-process worker has a free slot to launch into now. */
+	get canLaunchLocal(): boolean {
+		return this.localActive < this.localSlots;
 	}
 
 	/** Add a run to the schedule queue. `startAt` is epoch seconds, or null for ASAP. */
@@ -641,6 +685,14 @@ class SimulationState {
 			}
 			case 'queue':
 				if (Array.isArray(data.items)) this.queue = data.items as QueueItem[];
+				break;
+			case 'active_runs':
+				if (Array.isArray(data.runs)) this.activeRuns = data.runs as ActiveRun[];
+				if (typeof data.local_slots === 'number') this.localSlots = data.local_slots;
+				if (typeof data.local_active === 'number') this.localActive = data.local_active;
+				break;
+			case 'run_exited':
+				// Drop any lingering per-device frame for an ended run's source.
 				break;
 			case 'heartbeat':
 				if (typeof data.trainer_connected === 'boolean') {

@@ -56,11 +56,15 @@ class JobManager:
         self._settings = settings
         # app/jobs.py -> parent is app/, parent.parent is the backend root (scripts/ + checkpoints/)
         self._base_dir = Path(base_dir) if base_dir else Path(__file__).resolve().parent.parent
-        self._proc: subprocess.Popen | None = None
         self._launch_lock = asyncio.Lock()
-        self._state = "idle"  # idle | running | stopping | exited
-        self._run_meta: dict[str, Any] = {}
-        self._trainer_connected = False
+        # Unified registry of in-flight runs, keyed by run_name. Covers both the server's
+        # own local trainers (device == "server", entry carries a live ``proc``) and runs
+        # leased to remote guest devices (device == device_id, no ``proc``). Each entry is
+        # a plain dict broadcast to the UI (minus the unpicklable ``proc``). Replaces the
+        # old single-run ``_proc``/``_state``/``_run_meta`` so several runs coexist.
+        self._active: dict[str, dict] = {}
+        # Ref-count of connected local trainer ingest sockets → ``trainer_connected``.
+        self._ingest_conns = 0
         self._tasks: list[asyncio.Task] = []
 
         # Persisted job queue: items run back-to-back when the manager is idle, each
@@ -76,6 +80,12 @@ class JobManager:
         # scheduler so two workers can't claim the same item.
         self._devices = DeviceRegistry(self._state_dir)
         self._lease_lock = asyncio.Lock()
+
+        # Federated distributed training: per-group, per-round weight-averaging buffers.
+        # group -> {"rounds": {round: {"pushes": {shard: arrays}, "averaged": bytes|None,
+        # "first_at": epoch}}}. Kept in memory only (transient sync state, not a result).
+        self._dist: dict[str, dict] = {}
+        self._dist_lock = asyncio.Lock()
 
     @property
     def ingest_token(self) -> str:
@@ -97,67 +107,102 @@ class JobManager:
     async def shutdown(self) -> None:
         for t in self._tasks:
             t.cancel()
-        proc = self._proc
-        if proc is not None and proc.poll() is None:
-            await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
+        loop = asyncio.get_running_loop()
+        for entry in self._local_active():
+            proc = entry.get("proc")
+            if proc is not None and proc.poll() is None:
+                await loop.run_in_executor(None, self._terminate, proc)
+
+    # ── active-run registry helpers ──────────────────────────────────────────────
+    def _local_active(self) -> list[dict]:
+        """Runs executing in the server's own process (have a live ``proc``)."""
+        return [e for e in self._active.values() if e.get("device") == "server"]
+
+    @staticmethod
+    def _public_run(entry: dict) -> dict:
+        """A broadcast-safe copy of a run entry (drops the unpicklable ``proc``)."""
+        return {k: v for k, v in entry.items() if k != "proc"}
+
+    def active_runs_msg(self) -> dict:
+        return {
+            "type": "active_runs",
+            "runs": [self._public_run(e) for e in self._active.values()],
+            "local_slots": self._settings.local_slots,
+            "local_active": len(self._local_active()),
+        }
 
     # ── ingest (trainer → hub) ───────────────────────────────────────────────────
     async def on_ingest_connect(self) -> None:
-        self._trainer_connected = True
-        log.info("Trainer connected to /api/ingest")
+        self._ingest_conns += 1
+        log.info("Trainer connected to /api/ingest (%d open)", self._ingest_conns)
         await self._bc.broadcast(self.status_msg())
 
     async def on_ingest_disconnect(self) -> None:
-        self._trainer_connected = False
-        log.info("Trainer disconnected from /api/ingest")
+        self._ingest_conns = max(0, self._ingest_conns - 1)
+        log.info("Trainer disconnected from /api/ingest (%d open)", self._ingest_conns)
         await self._bc.broadcast(self.status_msg())
 
     async def handle_ingest_raw(self, raw: str, device: str = "server", run: str = "") -> None:
         """Relay a trainer frame to browsers, tagged with its source device/run.
 
-        ``device == "server"`` is the in-process local trainer (drives the single
-        ``status`` channel as before). Remote guest trainers tag every frame with
-        their device id + run name so the browser can pick which live run to watch."""
+        Every frame carries the source device (``"server"`` for the in-process local
+        trainer) and its run name, so the browser keys streams uniformly and the active
+        registry tracks each run's phase/steps regardless of where it runs."""
         try:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return
 
-        if device == "server":
-            if msg.get("type") == "trainer_status":
-                self._run_meta["phase"] = msg.get("phase")
+        entry = self._active.get(run)
+        if msg.get("type") == "trainer_status":
+            if entry is not None:
+                if msg.get("phase") is not None:
+                    entry["phase"] = msg.get("phase")
                 if "num_timesteps" in msg:
-                    self._run_meta["num_timesteps"] = msg["num_timesteps"]
+                    entry["num_timesteps"] = msg["num_timesteps"]
                 if "message" in msg:
-                    self._run_meta["message"] = msg["message"]
-                await self._bc.broadcast(self.status_msg())
-                return
-            # Tag local frames too, so the browser keys every stream uniformly.
-            msg["device"] = "server"
-            msg.setdefault("run", self._run_meta.get("run_name", ""))
-            await self._bc.broadcast(msg)
+                    entry["message"] = msg["message"]
+                if msg.get("run_type"):
+                    entry["run_type"] = msg["run_type"]
+            await self._bc.broadcast(self.status_msg())
+            await self._bc.broadcast(self.active_runs_msg())
+            if device != "server":
+                # Back-compat per-device status frame for any existing consumer.
+                await self._bc.broadcast({
+                    "type": "remote_status", "device": device, "run": run,
+                    "phase": msg.get("phase"), "num_timesteps": msg.get("num_timesteps"),
+                })
+                self._devices.touch(device)
             return
 
-        # ── remote guest trainer ────────────────────────────────────────────
-        self._devices.touch(device, current_job=run)
-        if msg.get("type") == "trainer_status":
-            await self._bc.broadcast({
-                "type": "remote_status",
-                "device": device,
-                "run": run,
-                "phase": msg.get("phase"),
-                "num_timesteps": msg.get("num_timesteps"),
-            })
-            return
+        # step / metrics frame: tag with source + run and fan out (a bare check-in for
+        # remote devices — no job-list churn, that's maintained by lease/heartbeat).
         msg["device"] = device
         msg["run"] = run
+        if device != "server":
+            self._devices.touch(device)
+        # Track step progress on the run entry. Metrics frames are infrequent (once per
+        # PPO update), so it's cheap to refresh the active list from them — this is the
+        # only step signal for headless runs (which emit no per-step viz frames).
+        if entry is not None and isinstance(msg.get("num_timesteps"), (int, float)):
+            entry["num_timesteps"] = int(msg["num_timesteps"])
+            if msg.get("type") == "metrics":
+                await self._bc.broadcast(self.active_runs_msg())
         await self._bc.broadcast(msg)
 
     # ── control ──────────────────────────────────────────────────────────────────
     async def launch(self, cfg: dict) -> dict:
+        # A distributed run isn't a single local job — fan it out into shard queue items
+        # that workers (incl. the local one) pick up and train together via FedAvg.
+        dist = cfg.get("distributed")
+        if str(cfg.get("mode", "train")) == "train" and dist and int(dist.get("shards") or 1) > 1:
+            return await self._enqueue_distributed(cfg, dist, None)
+
         async with self._launch_lock:
-            if self._proc is not None and self._proc.poll() is None:
-                return self._reject("A run is already active.")
+            # Concurrency cap: the in-process worker runs up to ``local_slots`` runs at
+            # once (each its own subprocess). Both training and match runs count.
+            if len(self._local_active()) >= self._settings.local_slots:
+                return self._reject("All local training slots are busy.")
 
             if str(cfg.get("mode", "train")) == "play":
                 return await self._launch_play(cfg)
@@ -231,30 +276,48 @@ class JobManager:
                 "--seed", str(seed),
                 "--run-name", run_name,
                 "--config", str(config_path),
-                "--stream-url", self._ingest_url(),
+                "--stream-url", self._ingest_url(run_name),
                 *stop_args,
             ]
             if not domain_rand:
                 args.append("--no-domain-rand")
+            # Headless by default: only animate the live field when the launch opted in.
+            viz = bool(cfg.get("viz"))
+            if viz:
+                args.append("--viz")
+            # Federated shard: sync weights with its group through the local coordinator.
+            dist_group = cfg.get("dist_group")
+            if dist_group:
+                args += [
+                    "--fed-server", f"http://localhost:{self._settings.port}/api",
+                    "--fed-token", self._settings.ingest_token,
+                    "--fed-group", str(dist_group),
+                    "--fed-every", str(int(cfg.get("dist_sync_every") or 50_000)),
+                    "--fed-shards", str(int(cfg.get("dist_shards") or 1)),
+                ]
             if resume_path:
                 args += ["--resume-from", str(resume_path)]
 
-            self._run_meta = {
-                "run_name": run_name, "stage": stage,
-                "run_type": "train",
+            entry = {
+                "run_name": run_name, "device": "server", "stage": stage,
+                "run_type": "train", "state": "launching",
                 "model_name": model_cfg.name, "model_version": version,
-                "n_envs": n_envs, "seed": seed, "domain_rand": domain_rand,
+                "n_envs": n_envs, "seed": seed, "domain_rand": domain_rand, "viz": viz,
                 "phase": "launching", "num_timesteps": 0,
-                "started_at": time.time(),
+                "started_at": time.time(), "cancel_requested": False,
+                "dist_group": cfg.get("dist_group"),
                 "resumed_from": f"{resume['run']}/{resume['checkpoint']}" if resume_path else None,
                 **stop_meta,
             }
-            spawn_err = self._spawn(args)
+            proc, spawn_err = self._spawn(args)
             if spawn_err is not None:
                 return self._reject(f"Launch failed: {spawn_err}")
-            self._state = "running"
-            log.info("Launched %s (pid %d)", run_name, self._proc.pid)
+            entry["proc"] = proc
+            entry["state"] = "running"
+            self._active[run_name] = entry
+            log.info("Launched %s (pid %d)", run_name, proc.pid)
             await self._bc.broadcast(self.status_msg())
+            await self._bc.broadcast(self.active_runs_msg())
             return {"ok": True, "message": "launched", "status": self.status_msg()}
 
     async def _launch_play(self, cfg: dict) -> dict:
@@ -282,62 +345,99 @@ class JobManager:
                 return self._reject(f"Checkpoint not found: {run}/{ckpt}")
             resolved[key] = (cand, f"{run}/{ckpt}")
 
+        # Several matches could run within the slot budget; key each uniquely.
+        run_name = "match"
+        i = 2
+        while run_name in self._active:
+            run_name, i = f"match{i}", i + 1
+
         args = [
             sys.executable, "scripts/play.py",
             "--policy-a", str(resolved["policy_a"][0]),
             "--policy-b", str(resolved["policy_b"][0]),
             "--seed", str(seed),
-            "--stream-url", self._ingest_url(),
+            "--stream-url", self._ingest_url(run_name),
         ]
         if domain_rand:
             args.append("--domain-rand")
 
-        self._run_meta = {
-            "run_name": "match", "mode": "play",
-            "run_type": "match",
+        entry = {
+            "run_name": run_name, "device": "server", "mode": "play",
+            "run_type": "match", "state": "launching",
             "policy_a": resolved["policy_a"][1], "policy_b": resolved["policy_b"][1],
             "seed": seed, "domain_rand": domain_rand,
             "phase": "launching", "num_timesteps": 0,
-            "started_at": time.time(),
+            "started_at": time.time(), "cancel_requested": False,
         }
-        spawn_err = self._spawn(args)
+        proc, spawn_err = self._spawn(args)
         if spawn_err is not None:
             return self._reject(f"Launch failed: {spawn_err}")
-        self._state = "running"
-        log.info("Launched match (pid %d): %s vs %s", self._proc.pid,
+        entry["proc"] = proc
+        entry["state"] = "running"
+        self._active[run_name] = entry
+        log.info("Launched %s (pid %d): %s vs %s", run_name, proc.pid,
                  resolved["policy_a"][1], resolved["policy_b"][1])
         await self._bc.broadcast(self.status_msg())
+        await self._bc.broadcast(self.active_runs_msg())
         return {"ok": True, "message": "launched", "status": self.status_msg()}
 
-    async def kill(self) -> dict:
-        proc = self._proc
-        if proc is None or proc.poll() is not None:
-            return {"ok": True, "message": "No active run."}
-        self._state = "stopping"
-        await self._bc.broadcast(self.status_msg())
-        await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
-        return {"ok": True, "message": "stopping", "status": self.status_msg()}
+    async def kill(self, run_name: str | None = None) -> dict:
+        """Stop a run by name. ``None`` stops the primary local run (legacy single-run UI).
+
+        A local run is SIGINT-checkpointed and terminated in place. A run leased to a
+        remote device can't be signalled directly, so we flag it for cancellation; the
+        worker sees the flag on its next heartbeat and SIGINTs its own trainer (which
+        checkpoints before exiting), then reports completion to free the slot."""
+        if run_name is None:
+            local = self._local_active()
+            if not local:
+                return {"ok": True, "message": "No active run."}
+            run_name = local[0]["run_name"]
+
+        entry = self._active.get(run_name)
+        if entry is None:
+            return {"ok": False, "message": "No such active run."}
+
+        if entry.get("device") == "server":
+            proc = entry.get("proc")
+            if proc is None or proc.poll() is not None:
+                return {"ok": True, "message": "No active run."}
+            entry["state"] = "stopping"
+            await self._bc.broadcast(self.status_msg())
+            await self._bc.broadcast(self.active_runs_msg())
+            await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
+            return {"ok": True, "message": "stopping"}
+
+        # Remote run: request cancellation; keep the lease so the worker can save first.
+        entry["cancel_requested"] = True
+        entry["state"] = "stopping"
+        async with self._lease_lock:
+            for q in self._queue:
+                if q.get("run_name") == run_name:
+                    q["cancel_requested"] = True
+            self._save_queue()
+        await self._bc.broadcast(self.active_runs_msg())
+        return {"ok": True, "message": "cancel requested"}
 
     # ── subprocess helpers ─────────────────────────────────────────────────────
-    def _ingest_url(self) -> str:
+    def _ingest_url(self, run_name: str) -> str:
         return (
             f"ws://localhost:{self._settings.port}/api/ingest"
-            f"?token={self._settings.ingest_token}"
+            f"?token={self._settings.ingest_token}&run={run_name}"
         )
 
-    def _spawn(self, args: list[str]) -> str | None:
-        """Start a job subprocess; return an error string on failure, else None."""
+    def _spawn(self, args: list[str]) -> tuple[subprocess.Popen | None, str | None]:
+        """Start a job subprocess; return ``(proc, None)`` or ``(None, error_string)``."""
         try:
             # start_new_session=True puts the trainer (and its SubprocVecEnv workers)
             # in their own process group, so kill can signal the whole group and a
             # terminal Ctrl-C on the server won't leak into the trainer.
-            self._proc = subprocess.Popen(
+            proc = subprocess.Popen(
                 args, cwd=str(self._base_dir), start_new_session=True
             )
         except OSError as exc:
-            self._state = "idle"
-            return str(exc)
-        return None
+            return None, str(exc)
+        return proc, None
 
     @staticmethod
     def _terminate(proc: subprocess.Popen) -> None:
@@ -381,16 +481,25 @@ class JobManager:
     async def _monitor_task(self) -> None:
         while True:
             await asyncio.sleep(0.5)
-            proc = self._proc
-            if proc is not None and proc.poll() is not None and self._state in (
-                "running", "stopping"
-            ):
-                self._run_meta["code"] = proc.returncode
-                self._run_meta["ended_at"] = time.time()
-                self._state = "exited"
-                self._proc = None
-                log.info("Job exited with code %s", self._run_meta["code"])
+            exited: list[tuple[str, int | None]] = []
+            for run_name, entry in list(self._active.items()):
+                if entry.get("device") != "server":
+                    continue
+                proc = entry.get("proc")
+                if proc is not None and proc.poll() is not None and entry.get("state") in (
+                    "launching", "running", "stopping"
+                ):
+                    code = proc.returncode
+                    entry["proc"] = None
+                    del self._active[run_name]
+                    self._drop_dist_group_if_idle(entry.get("dist_group"))
+                    exited.append((run_name, code))
+            if exited:
+                for run_name, code in exited:
+                    log.info("Job %s exited with code %s", run_name, code)
+                    await self._bc.broadcast({"type": "run_exited", "run": run_name, "code": code})
                 await self._bc.broadcast(self.status_msg())
+                await self._bc.broadcast(self.active_runs_msg())
                 await self._bc.broadcast(self.runs_msg())  # new checkpoints are now resumable
                 await self._bc.broadcast(self.models_msg())  # admin panel: refreshed metadata
 
@@ -401,7 +510,7 @@ class JobManager:
                 "type": "heartbeat",
                 "t": time.time(),
                 "clients": self._bc.count,
-                "trainer_connected": self._trainer_connected,
+                "trainer_connected": self._ingest_conns > 0,
             })
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -511,9 +620,21 @@ class JobManager:
             if kind == "steps" and value < 1:
                 return {"ok": False, "message": "Step count must be positive."}
 
-        item = {
+        # Distributed run: fan out into N shard items that train together via FedAvg.
+        dist = cfg.get("distributed")
+        if mode == "train" and dist and int(dist.get("shards") or 1) > 1:
+            return await self._enqueue_distributed(cfg, dist, start_at)
+
+        item = self._make_queue_item(cfg, start_at)
+        self._queue.append(item)
+        self._save_queue()
+        await self._bc.broadcast(self.queue_msg())
+        return {"ok": True, "item": item}
+
+    def _make_queue_item(self, cfg: dict, start_at: float | None) -> dict:
+        return {
             "id": self._next_queue_id(),
-            "mode": mode,
+            "mode": str(cfg.get("mode", "train")),
             "config": cfg,
             "start_at": float(start_at) if start_at else None,
             "status": "pending",
@@ -522,10 +643,40 @@ class JobManager:
             # in-process worker only, otherwise a specific device id.
             "target": cfg.get("target") or None,
         }
-        self._queue.append(item)
+
+    async def _enqueue_distributed(self, cfg: dict, dist: dict, start_at: float | None) -> dict:
+        """Split one run into N FedAvg shards sharing a sync group.
+
+        Each shard is an ordinary train job (its own run_name, checkpoints and a
+        per-shard seed for sample diversity) carrying the group's sync parameters. They
+        average policy weights through ``/api/dist`` every ``sync_every`` steps, so the
+        fleet trains one converging model with N× the experience."""
+        shards = max(2, int(dist.get("shards") or 2))
+        sync_every = max(1, int(dist.get("sync_every") or 50_000))
+        base = (cfg.get("name") or cfg.get("stage") or "dist").strip() or "dist"
+        group = self._unique_run_name(f"{base}_dist")
+        self._dist.setdefault(group, {"rounds": {}})
+
+        base_seed = int(cfg.get("seed") or 0)
+        base_name = (cfg.get("name") or "").strip()
+        items = []
+        for i in range(shards):
+            shard_cfg = {k: v for k, v in cfg.items() if k != "distributed"}
+            shard_cfg["dist_group"] = group
+            shard_cfg["dist_sync_every"] = sync_every
+            shard_cfg["dist_shards"] = shards
+            shard_cfg["seed"] = base_seed + i  # diverse samples per shard
+            if base_name:
+                shard_cfg["name"] = f"{base_name}_shard{i}"
+                shard_cfg["version"] = cfg.get("version") or "1"
+            else:
+                shard_cfg["name"] = f"{group}_shard{i}"
+            items.append(self._make_queue_item(shard_cfg, start_at))
+
+        self._queue.extend(items)
         self._save_queue()
         await self._bc.broadcast(self.queue_msg())
-        return {"ok": True, "item": item}
+        return {"ok": True, "group": group, "shards": shards, "items": items}
 
     async def remove_queue_item(self, item_id: str) -> dict:
         self._queue = [q for q in self._queue if q["id"] != item_id]
@@ -566,25 +717,26 @@ class JobManager:
             await asyncio.sleep(1.0)
             if not self._settings.enable_local_worker:
                 continue  # server is a pure coordinator; guests train the queue
-            if self._proc is not None and self._proc.poll() is None:
-                continue  # a run is live
-            if self._state in ("launching", "stopping"):
-                continue  # mid-transition
-            item = self._next_ready_item()
-            if item is None:
-                continue
-            item["status"] = "running"
-            self._save_queue()
-            await self._bc.broadcast(self.queue_msg())
-            result = await self.launch(item["config"])
-            if result.get("ok"):
-                self._queue = [q for q in self._queue if q["id"] != item["id"]]
-            else:
-                item["status"] = "failed"
-                item["message"] = result.get("message", "launch failed")
-                log.warning("Queued item %s failed to launch: %s", item["id"], item["message"])
-            self._save_queue()
-            await self._bc.broadcast(self.queue_msg())
+            # Fill every free local slot from the queue before sleeping again.
+            while len(self._local_active()) < self._settings.local_slots:
+                item = self._next_ready_item()
+                if item is None:
+                    break
+                item["status"] = "running"
+                self._save_queue()
+                await self._bc.broadcast(self.queue_msg())
+                result = await self.launch(item["config"])
+                if result.get("ok"):
+                    self._queue = [q for q in self._queue if q["id"] != item["id"]]
+                else:
+                    item["status"] = "failed"
+                    item["message"] = result.get("message", "launch failed")
+                    log.warning("Queued item %s failed to launch: %s", item["id"], item["message"])
+                    self._save_queue()
+                    await self._bc.broadcast(self.queue_msg())
+                    break  # don't spin retrying a failing item this tick
+                self._save_queue()
+                await self._bc.broadcast(self.queue_msg())
 
     # ── devices / distributed workers ────────────────────────────────────────
     def devices_msg(self) -> dict:
@@ -659,28 +811,56 @@ class JobManager:
                 q["lease_deadline"] = now + LEASE_TTL
                 q["run_name"] = run_name
                 self._save_queue()
-                self._devices.touch(device_id, current_job=run_name)
+                self._devices.touch(device_id, add_job=run_name)
+                # Track the leased run alongside local runs so the UI shows/manages it.
+                self._active[run_name] = {
+                    "run_name": run_name, "device": device_id, "run_type": "train",
+                    "state": "running", "phase": "leased", "num_timesteps": 0,
+                    "stage": model_cfg.stage, "model_name": model_cfg.name,
+                    "model_version": model_cfg.version, "n_envs": model_cfg.n_envs,
+                    "seed": model_cfg.seed, "domain_rand": model_cfg.domain_rand,
+                    "viz": bool(q["config"].get("viz")),
+                    "started_at": now, "cancel_requested": False,
+                    "dist_group": q["config"].get("dist_group"),
+                }
                 await self._bc.broadcast(self.queue_msg())
                 await self._bc.broadcast(self.devices_msg())
                 await self._bc.broadcast(self.models_msg())
-                return {
+                await self._bc.broadcast(self.active_runs_msg())
+                job = {
                     "run_name": run_name,
                     "config": model_cfg.model_dump(),
                     "stop_args": stop_args,
+                    # Headless by default; the launcher's opt-in rides along to the worker.
+                    "viz": bool(q["config"].get("viz")),
                 }
+                # Federated shard: tell the worker how to reach the sync group.
+                if q["config"].get("dist_group"):
+                    job["fed"] = {
+                        "group": q["config"]["dist_group"],
+                        "every": int(q["config"].get("dist_sync_every") or 50_000),
+                        "shards": int(q["config"].get("dist_shards") or 1),
+                    }
+                return job
             return None
 
     async def worker_heartbeat(self, device_id: str, run_name: str) -> dict:
+        """Renew a lease and tell the worker whether its run has been asked to stop."""
+        cancel = False
         async with self._lease_lock:
             for q in self._queue:
                 if (q.get("run_name") == run_name and q.get("leased_by") == device_id
                         and q.get("status") == "running"):
                     q["lease_deadline"] = time.time() + LEASE_TTL
+                    cancel = bool(q.get("cancel_requested"))
                     self._save_queue()
                     break
-        self._devices.touch(device_id, current_job=run_name)
+        self._devices.touch(device_id, add_job=run_name)
+        entry = self._active.get(run_name)
+        if entry is not None and cancel:
+            entry["state"] = "stopping"
         await self._bc.broadcast(self.devices_msg())
-        return {"ok": True}
+        return {"ok": True, "cancel": cancel}
 
     def _is_run_leased_by(self, run: str, device_id: str) -> bool:
         """True iff `run` is an active lease currently held by `device_id`.
@@ -716,11 +896,15 @@ class JobManager:
                 if not (q.get("run_name") == run_name and q.get("leased_by") == device_id)
             ]
             self._save_queue()
-        self._devices.touch(device_id, current_job=None)
+        gone = self._active.pop(run_name, None)
+        if gone is not None:
+            self._drop_dist_group_if_idle(gone.get("dist_group"))
+        self._devices.touch(device_id, remove_job=run_name)
         await self._bc.broadcast(self.queue_msg())
         await self._bc.broadcast(self.devices_msg())
         await self._bc.broadcast(self.models_msg())
         await self._bc.broadcast(self.runs_msg())
+        await self._bc.broadcast(self.active_runs_msg())
         return {"ok": True}
 
     async def save_uploaded_checkpoint(
@@ -762,12 +946,17 @@ class JobManager:
                         run_name = q.pop("run_name", None)
                         q.pop("leased_by", None)
                         q.pop("lease_deadline", None)
+                        q.pop("cancel_requested", None)
                         if q["attempts"] >= MAX_LEASE_ATTEMPTS:
                             q["status"] = "failed"
                             q["message"] = "Lease expired (worker went away)."
                         else:
                             q["status"] = "pending"
-                        self._devices.touch(leased_by, current_job=None)
+                        if run_name:
+                            gone = self._active.pop(run_name, None)
+                            if gone is not None:
+                                self._drop_dist_group_if_idle(gone.get("dist_group"))
+                        self._devices.touch(leased_by, remove_job=run_name)
                         log.info("Reclaimed lease for %s from device %s", run_name, leased_by)
                         changed = True
                 if changed:
@@ -775,6 +964,65 @@ class JobManager:
             if changed:
                 await self._bc.broadcast(self.queue_msg())
                 await self._bc.broadcast(self.devices_msg())
+                await self._bc.broadcast(self.active_runs_msg())
+
+    # ── federated distributed training (FedAvg coordinator) ──────────────────────
+    # How long a round waits for stragglers before averaging with whatever arrived, so a
+    # dead shard can't wedge the group forever (the live shards just sync among themselves).
+    DIST_ROUND_TIMEOUT = 120.0
+
+    async def dist_push(self, group: str, rnd: int, shard: str, shards: int, data: bytes) -> dict:
+        """Store one shard's weights for a round; average once the quorum has arrived."""
+        from bucky import fedavg
+
+        async with self._dist_lock:
+            g = self._dist.setdefault(group, {"rounds": {}})
+            # Forget rounds well behind the current one — sync state is transient.
+            for old in [r for r in g["rounds"] if r < rnd - 1]:
+                g["rounds"].pop(old, None)
+            rs = g["rounds"].setdefault(
+                rnd, {"pushes": {}, "averaged": None, "first_at": time.time()}
+            )
+            if rs["averaged"] is None:
+                rs["pushes"][shard] = fedavg.from_npz_bytes(data)
+                if len(rs["pushes"]) >= max(1, shards):
+                    rs["averaged"] = fedavg.to_npz_bytes(
+                        fedavg.average_arrays(list(rs["pushes"].values()))
+                    )
+                    rs["pushes"] = {}  # free the per-shard copies once averaged
+        return {"ok": True}
+
+    async def dist_pull(self, group: str, rnd: int) -> bytes | None:
+        """Return the round's averaged weights, or None if not ready yet.
+
+        Falls back to averaging whatever arrived once the round has waited past the
+        straggler timeout, so the live shards aren't blocked by a missing one."""
+        from bucky import fedavg
+
+        async with self._dist_lock:
+            g = self._dist.get(group)
+            if not g:
+                return None
+            rs = g["rounds"].get(rnd)
+            if not rs:
+                return None
+            if rs["averaged"] is not None:
+                return rs["averaged"]
+            if rs["pushes"] and time.time() - rs["first_at"] > self.DIST_ROUND_TIMEOUT:
+                rs["averaged"] = fedavg.to_npz_bytes(
+                    fedavg.average_arrays(list(rs["pushes"].values()))
+                )
+                rs["pushes"] = {}
+                return rs["averaged"]
+            return None
+
+    def _drop_dist_group_if_idle(self, group: str | None) -> None:
+        """Free a group's sync buffers once none of its shards are still active."""
+        if not group:
+            return
+        if any(e.get("dist_group") == group for e in self._active.values()):
+            return
+        self._dist.pop(group, None)
 
     def runs_msg(self) -> dict:
         """List existing runs and their .zip checkpoints (for the resume picker)."""
@@ -853,12 +1101,18 @@ class JobManager:
         return path if path.is_file() else None
 
     def status_msg(self, message: str | None = None) -> dict:
-        msg = {
-            "type": "status",
-            "state": self._state,
-            "trainer_connected": self._trainer_connected,
-            **self._run_meta,
-        }
+        """Legacy single-run status: surfaces a *primary* run (a local server run if any,
+        else the first active run) so the existing viewer/controls keep working while the
+        ``active_runs`` message drives the multi-run management UI."""
+        local = self._local_active()
+        primary = local[0] if local else next(iter(self._active.values()), None)
+        if primary is None:
+            msg = {"type": "status", "state": "idle",
+                   "trainer_connected": self._ingest_conns > 0}
+        else:
+            msg = {"type": "status", "trainer_connected": self._ingest_conns > 0,
+                   **self._public_run(primary)}
+            msg.setdefault("state", "running")
         if message is not None:
             msg["message"] = message
         return msg

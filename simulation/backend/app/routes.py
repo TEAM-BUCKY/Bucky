@@ -57,6 +57,10 @@ class LaunchRequest(BaseModel):
     # Where the run executes: None/"any" = any worker, "server" = local in-process
     # worker only, otherwise a specific device id.
     target: Optional[str] = None
+    # Animate the live field in the UI (off by default — headless trains faster).
+    viz: Optional[bool] = None
+    # Split one run across devices via FedAvg: {"shards": N, "sync_every": steps}.
+    distributed: Optional[dict] = None
     # Per-model config (optional — when omitted, legacy <stage>_seed<N> behaviour).
     name: Optional[str] = None
     version: Optional[str] = None
@@ -96,6 +100,10 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     @router.get("/status")
     async def status() -> dict:
         return manager.status_msg()
+
+    @router.get("/active")
+    async def active() -> dict:
+        return manager.active_runs_msg()
 
     @router.get("/runs")
     async def runs() -> dict:
@@ -218,6 +226,36 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
             raise HTTPException(status_code=400, detail=result.get("message", "upload failed"))
         return result
 
+    # ── federated distributed training (shard ⇆ coordinator) ────────────────────
+    def require_fed(x_fed_token: str = Header(default="")) -> bool:
+        """A fed shard authenticates with the local ingest token or a device token."""
+        if x_fed_token and secrets.compare_digest(x_fed_token, manager.ingest_token):
+            return True
+        if manager.devices.verify(x_fed_token):
+            return True
+        raise HTTPException(status_code=401, detail="Invalid fed token.")
+
+    @router.post("/dist/{group}/push")
+    async def dist_push(
+        group: str,
+        round: int = Query(...),
+        shard: str = Query(...),
+        shards: int = Query(...),
+        file: UploadFile = File(...),
+        _ok: bool = Depends(require_fed),
+    ) -> dict:
+        data = await file.read()
+        return await manager.dist_push(group, round, shard, shards, data)
+
+    @router.get("/dist/{group}/pull")
+    async def dist_pull(
+        group: str, round: int = Query(...), _ok: bool = Depends(require_fed)
+    ) -> Response:
+        data = await manager.dist_pull(group, round)
+        if data is None:
+            return Response(status_code=204)  # round not ready yet — shard retries
+        return Response(content=data, media_type="application/octet-stream")
+
     @router.post("/jobs")
     async def create_job(req: LaunchRequest, _user: str = Depends(require_control)) -> dict:
         result = await manager.launch(req.model_dump())
@@ -227,7 +265,15 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
 
     @router.post("/jobs/stop")
     async def stop_job(_user: str = Depends(require_control)) -> dict:
+        # Legacy: stop the primary local run (single-run UI). Per-run stop below.
         return await manager.kill()
+
+    @router.post("/jobs/{run_name}/stop")
+    async def stop_run(run_name: str, _user: str = Depends(require_control)) -> dict:
+        result = await manager.kill(run_name)
+        if not result.get("ok"):
+            raise HTTPException(status_code=404, detail=result.get("message", "stop failed"))
+        return result
 
     @router.post("/queue")
     async def add_to_queue(req: QueueAddRequest, _user: str = Depends(require_control)) -> dict:
@@ -252,6 +298,7 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         await broadcaster.register(ws)
         try:
             await broadcaster.send(ws, manager.status_msg())
+            await broadcaster.send(ws, manager.active_runs_msg())
             await broadcaster.send(ws, manager.runs_msg())
             await broadcaster.send(ws, manager.queue_msg())
             await broadcaster.send(ws, manager.models_msg())

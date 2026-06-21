@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -35,7 +36,9 @@ import requests
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
 POLL_INTERVAL = 5.0       # seconds between lease attempts when the queue is empty
-HEARTBEAT_INTERVAL = 15.0  # seconds between lease-renewing heartbeats while training
+# Heartbeats both renew the lease and carry the server's stop signal back, so keep them
+# brisk — this also bounds how quickly a remote "Stop" reaches the trainer.
+HEARTBEAT_INTERVAL = 5.0
 
 
 def _api_base(server: str) -> str:
@@ -53,10 +56,11 @@ def _ws_ingest(api_base: str, run: str) -> str:
 
 
 class Worker:
-    def __init__(self, server: str, token: str) -> None:
+    def __init__(self, server: str, token: str, slots: int = 1) -> None:
         self.api = _api_base(server)
         self.token = token
         self.headers = {"X-Device-Token": token}
+        self.slots = max(1, slots)
 
     # ── server calls ──────────────────────────────────────────────────────────
     def lease(self) -> dict | None:
@@ -66,12 +70,14 @@ class Worker:
         r.raise_for_status()
         return r.json()
 
-    def heartbeat(self, run_name: str) -> None:
+    def heartbeat(self, run_name: str) -> dict | None:
+        """Renew the lease; return the server's response ({'cancel': bool}) or None."""
         try:
-            requests.post(f"{self.api}/worker/heartbeat", headers=self.headers,
-                          json={"run_name": run_name}, timeout=15)
-        except requests.RequestException:
-            pass  # transient; the lease has slack before it expires
+            r = requests.post(f"{self.api}/worker/heartbeat", headers=self.headers,
+                              json={"run_name": run_name}, timeout=15)
+            return r.json() if r.ok else None
+        except (requests.RequestException, ValueError):
+            return None  # transient; the lease has slack before it expires
 
     def complete(self, run_name: str, status: str, steps, best_eval) -> None:
         requests.post(f"{self.api}/worker/complete", headers=self.headers, json={
@@ -111,14 +117,38 @@ class Worker:
             "--stream-token", self.token,
             *stop_args,
         ]
+        # Headless by default; animate the field only when the launch opted in.
+        if job.get("viz"):
+            args.append("--viz")
+        # Federated shard: sync weights with its group through the server coordinator.
+        fed = job.get("fed")
+        if fed:
+            args += [
+                "--fed-server", self.api,
+                "--fed-token", self.token,
+                "--fed-group", str(fed["group"]),
+                "--fed-every", str(fed.get("every", 50000)),
+                "--fed-shards", str(fed.get("shards", 1)),
+            ]
         proc = subprocess.Popen(args, cwd=str(BASE_DIR), start_new_session=True)
 
-        # Heartbeat in the background so the server keeps our lease while we train.
+        # Heartbeat in the background so the server keeps our lease while we train. The
+        # heartbeat response also carries the server's stop signal: on cancel we SIGINT the
+        # trainer (it checkpoints before exiting) and keep beating so the lease survives
+        # the save. train.py exits 0 after an interrupt, so its checkpoint still uploads.
         stop_hb = threading.Event()
+        cancelled = threading.Event()
 
         def _beat() -> None:
             while not stop_hb.wait(HEARTBEAT_INTERVAL):
-                self.heartbeat(run_name)
+                resp = self.heartbeat(run_name)
+                if resp and resp.get("cancel") and not cancelled.is_set():
+                    cancelled.set()
+                    print(f"[worker] stop requested for {run_name}; signalling trainer", flush=True)
+                    try:
+                        proc.send_signal(signal.SIGINT)
+                    except ProcessLookupError:
+                        pass
 
         hb = threading.Thread(target=_beat, daemon=True)
         hb.start()
@@ -127,8 +157,12 @@ class Worker:
         finally:
             stop_hb.set()
 
-        status = "done" if code == 0 else "failed"
+        if cancelled.is_set():
+            status = "stopped"
+        else:
+            status = "done" if code == 0 else "failed"
         steps, best = self._read_local_meta(run_dir)
+        # A clean exit (incl. an interrupt-and-save) leaves uploadable checkpoints.
         if code == 0:
             self._upload_checkpoints(run_name, run_dir)
         try:
@@ -152,10 +186,25 @@ class Worker:
             except requests.RequestException as exc:
                 print(f"[worker] upload failed for {zip_path.name}: {exc}", flush=True)
 
+    def _safe_run(self, job: dict) -> None:
+        try:
+            self.run_job(job)
+        except Exception as exc:  # noqa: BLE001 — never let one bad job kill the worker
+            print(f"[worker] job error: {exc}", flush=True)
+
     # ── main loop ─────────────────────────────────────────────────────────────
     def serve_forever(self) -> None:
-        print(f"[worker] polling {self.api} for jobs…", flush=True)
+        print(f"[worker] polling {self.api} for jobs… ({self.slots} slot(s))", flush=True)
+        active: dict[str, threading.Thread] = {}
         while True:
+            # Reap finished jobs so their slots free up.
+            for rn in [rn for rn, t in active.items() if not t.is_alive()]:
+                del active[rn]
+
+            if len(active) >= self.slots:
+                time.sleep(POLL_INTERVAL)
+                continue
+
             try:
                 job = self.lease()
             except requests.RequestException as exc:
@@ -165,11 +214,12 @@ class Worker:
             if job is None:
                 time.sleep(POLL_INTERVAL)
                 continue
-            try:
-                self.run_job(job)
-            except Exception as exc:  # noqa: BLE001 — never let one bad job kill the worker
-                print(f"[worker] job error: {exc}", flush=True)
-                time.sleep(POLL_INTERVAL)
+
+            run_name = job["run_name"]
+            t = threading.Thread(target=self._safe_run, args=(job,), daemon=True)
+            active[run_name] = t
+            t.start()
+            # Loop straight back to fill any remaining free slots before sleeping.
 
 
 def main() -> None:
@@ -178,12 +228,16 @@ def main() -> None:
                         help="Server base URL, e.g. https://bucky.example.com")
     parser.add_argument("--token", default=os.getenv("BUCKY_DEVICE_TOKEN", ""),
                         help="Device token from the admin panel (Devices tab)")
+    parser.add_argument("--slots", type=int, default=int(os.getenv("BUCKY_SLOTS", "1") or "1"),
+                        help="How many leased jobs to train concurrently (default 1). "
+                             "Each job is a separate trainer process — raise only as far "
+                             "as this machine's CPU/RAM allows.")
     args = parser.parse_args()
     if not args.server or not args.token:
         sys.exit("Set --server and --token (or BUCKY_SERVER / BUCKY_DEVICE_TOKEN).")
 
     try:
-        Worker(args.server, args.token).serve_forever()
+        Worker(args.server, args.token, slots=args.slots).serve_forever()
     except KeyboardInterrupt:
         print("\n[worker] stopped.", flush=True)
 

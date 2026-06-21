@@ -7,6 +7,7 @@
 	import TrainingMetrics from './panels/TrainingMetrics.svelte';
 	import Controls from './VisualizerControls.svelte';
 	import QueuePanel from './QueuePanel.svelte';
+	import ActiveRunsPanel from './ActiveRunsPanel.svelte';
 	import LoginControl from './LoginControl.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import DialogsState from '$lib/state/dialog.svelte.js';
@@ -247,6 +248,8 @@
 	<div class="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)_20rem]">
 		<div class="flex flex-col gap-2 lg:min-h-0 lg:overflow-y-auto">
 			<div class="shrink-0"><Controls bind:mode={mode} /></div>
+
+			<div class="shrink-0"><ActiveRunsPanel /></div>
 
 			<div class="shrink-0"><QueuePanel /></div>
 		</div>
