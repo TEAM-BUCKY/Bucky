@@ -67,6 +67,8 @@ class BuckySingleEnv(gym.Env):
         self._robot_penalty_steps = 0
         self._kick_goal_timer = 0
         self._bounce_since_kick = False
+        self._shot_in_flight = False
+        self._shot_departed = False
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -83,6 +85,8 @@ class BuckySingleEnv(gym.Env):
         self._robot_penalty_steps = 0
         self._kick_goal_timer = 0
         self._bounce_since_kick = False
+        self._shot_in_flight = False
+        self._shot_departed = False
         obs = self._get_obs()
         return obs, {}
 
@@ -143,6 +147,27 @@ class BuckySingleEnv(gym.Env):
             self._ball_out_steps = 0
 
         info["ball_out"] = ball_out_of_bounds
+
+        # Shot out of bounds: a kicked ball that left the robot and then had to be relocated
+        # for going out of play. Heavily penalized — UNLESS it scored, since a rebound into
+        # the goal fires goal_scored (and ends the episode) before any relocation, so it
+        # never reaches this branch. Recapturing the ball resolves the shot with no penalty.
+        d_robot_ball = float(np.linalg.norm(state1.ball_pos - state1.robot_pos))
+        if info["kicked"]:
+            self._shot_in_flight = True
+            self._shot_departed = False
+        shot_out_of_bounds = False
+        if self._shot_in_flight:
+            if not self._shot_departed and d_robot_ball > CONTACT_DIST:
+                self._shot_departed = True
+            if info["goal_scored"]:
+                self._shot_in_flight = False
+            elif self._shot_departed and ball_out_of_bounds:
+                shot_out_of_bounds = True
+                self._shot_in_flight = False
+            elif self._shot_departed and d_robot_ball < CONTACT_DIST:
+                self._shot_in_flight = False
+        info["shot_out_of_bounds"] = shot_out_of_bounds
 
         robot_just_out = info["robot_fully_out"] and self._robot_penalty_steps == 0
         if robot_just_out:

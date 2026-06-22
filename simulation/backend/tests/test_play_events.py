@@ -103,5 +103,51 @@ def test_no_risky_shot_when_opponent_off_the_line():
     assert "kick_at_opponent" not in out
 
 
+def test_shot_out_of_bounds_on_relocation_without_goal():
+    t = PlayEventTracker()
+    far_b = _st([0.8, 0.8], 0.0, [0.14, 0.0])
+    # A kicks the ball.
+    t.update(_st([0.0, 0.0], 0.0, [0.14, 0.0]), far_b, {"kicked_a": True})
+    # Ball travels well clear of A (departs), still in play — no penalty yet.
+    mid = t.update(_st([0.0, 0.0], 0.0, [0.6, 0.4]), far_b, {})
+    assert "shot_out_of_bounds" not in mid
+    # Referee relocates the ball for going out of play (out_of_reach) with no goal → penalty.
+    out = t.update(_st([0.0, 0.0], 0.0, [1.0, 0.7]), far_b, {"ball_oob_relocated": True})
+    assert out.get("shot_out_of_bounds") is True
+
+
+def test_shot_out_of_bounds_not_flagged_when_shot_scores():
+    t = PlayEventTracker()
+    far_b = _st([0.8, 0.8], 0.0, [0.14, 0.0])
+    t.update(_st([0.0, 0.0], 0.0, [0.14, 0.0]), far_b, {"kicked_a": True})
+    t.update(_st([0.0, 0.0], 0.0, [0.6, 0.0]), far_b, {})        # departs
+    # Bank/rebound scores → goal_a; even with a relocation flag present, never penalized.
+    out = t.update(_st([0.0, 0.0], 0.0, [0.95, 0.0]), far_b,
+                   {"goal_a": True, "ball_oob_relocated": True})
+    assert out.get("shot_out_of_bounds") is not True
+    # And a later out-of-bounds relocation is not retroactively blamed on the scored shot.
+    out2 = t.update(_st([0.0, 0.0], 0.0, [1.0, 0.7]), far_b, {"ball_oob_relocated": True})
+    assert out2.get("shot_out_of_bounds") is not True
+
+
+def test_shot_out_of_bounds_not_flagged_after_a_recovers_ball():
+    t = PlayEventTracker()
+    far_b = _st([0.8, 0.8], 0.0, [0.14, 0.0])
+    t.update(_st([0.0, 0.0], 0.0, [0.14, 0.0]), far_b, {"kicked_a": True})
+    t.update(_st([0.0, 0.0], 0.0, [0.6, 0.0]), far_b, {})        # departs
+    # A catches up to the ball (controls it again) → shot resolved, no penalty.
+    t.update(_st([0.95, 0.0], 0.0, [1.0, 0.0]), far_b, {})
+    out = t.update(_st([0.0, 0.0], 0.0, [1.0, 0.7]), far_b, {"ball_oob_relocated": True})
+    assert out.get("shot_out_of_bounds") is not True
+
+
+def test_shot_out_of_bounds_needs_a_kick():
+    # A ball relocated out of bounds with no preceding A kick is not A's shot-out-of-bounds.
+    t = PlayEventTracker()
+    far_b = _st([0.8, 0.8], 0.0, [0.14, 0.0])
+    out = t.update(_st([0.0, 0.0], 0.0, [1.0, 0.7]), far_b, {"ball_oob_relocated": True})
+    assert "shot_out_of_bounds" not in out
+
+
 def test_contact_dist_constant_is_sane():
     assert CONTACT_DIST > 0.0

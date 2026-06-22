@@ -160,7 +160,11 @@ class BuckySelfPlayEnv(gym.Env):
             # Learner is robot A; surface its legal-kick flag for the dense kick-shaping terms.
             "kicked": bool(info.get("kicked_a", False)),
         }
-        # Opponent-aware skilled-play events (steal, block, risky shot, kick lost, kicked/bank goal).
+        # Tell the play-event tracker *why* the ball was relocated, so it can tell an
+        # out-of-bounds shot ("out_of_reach") from a lack-of-progress / void-goal reset.
+        info["ball_oob_relocated"] = "out_of_reach" in decision.events
+        # Opponent-aware skilled-play events (steal, block, risky shot, kick lost, kicked/bank goal,
+        # shot out of bounds).
         reward_info.update(self._events.update(state1, state_b1, info))
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info,
                                        action=action, prev_action=self._prev_action)

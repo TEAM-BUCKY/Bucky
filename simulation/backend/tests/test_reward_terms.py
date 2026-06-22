@@ -191,6 +191,28 @@ def test_kick_lost_penalty_is_substantial(physics, config):
     assert terms.kick_lost <= -10.0   # giving the enemy the ball is a heavy penalty
 
 
+def test_shot_out_of_bounds_is_heavily_penalized(physics, config):
+    s = physics._make_state()
+    terms = compute_rewards(s, s, config, info={"shot_out_of_bounds": True})
+    assert abs(terms.shot_out_of_bounds - config.w_shot_out_of_bounds) < 1e-6
+    assert terms.shot_out_of_bounds < 0.0
+    assert terms.shot_out_of_bounds <= -20.0   # really punishing: a wasted shot out of play
+
+
+def test_shot_out_of_bounds_zero_without_flag(physics, config):
+    s = physics._make_state()
+    assert compute_rewards(s, s, config, info={}).shot_out_of_bounds == 0.0
+
+
+def test_shot_out_of_bounds_waived_when_it_scores(physics, config):
+    # A rebound/bank that goes out of bounds but banks into the goal must NOT be punished.
+    s = physics._make_state()
+    terms = compute_rewards(s, s, config,
+                            info={"shot_out_of_bounds": True, "goal_scored": True})
+    assert terms.shot_out_of_bounds == 0.0
+    assert terms.goal > 0.0
+
+
 # ── shot_on_goal: reward a fast ball struck toward goal (not a dribble) ───────
 def _place_with_ball_vel(physics, robot_pos, ball_pos, ball_vel):
     physics._robot_pos = np.asarray(robot_pos, dtype=float)

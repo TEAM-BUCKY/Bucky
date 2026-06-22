@@ -50,6 +50,9 @@ class RewardConfig:
     w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
     w_kick_lost: float = -20.0            # giving the enemy the ball: our kicked ball captured by enemy
     w_kick_at_opponent: float = -10.0      # firing the ball straight into the opponent (a give-away)
+    # Blasting our kicked ball out of play (relocated → possession wasted): heavily punished,
+    # UNLESS it banks in for a goal — that scores before any relocation, so it never fires this.
+    w_shot_out_of_bounds: float = -40.0
 
     w_kick_attempt: float = 0.5           # flat bonus for a legal kick aimed goal-ward (clear path)
     w_kick_power_to_goal: float = 2     # × cos(kick heading, ball→goal): reward aiming kicks at goal
@@ -98,6 +101,7 @@ class RewardTerms:
     risky_shot: float = 0.0
     kick_lost: float = 0.0
     kick_at_opponent: float = 0.0
+    shot_out_of_bounds: float = 0.0
     kick_attempt: float = 0.0
     kick_power_to_goal: float = 0.0
     shot_on_goal: float = 0.0
@@ -112,8 +116,9 @@ class RewardTerms:
                 self.out_of_bounds + self.lack_of_progress + self.defective +
                 self.spin + self.steal + self.blocked_shot + self.kick_goal +
                 self.bank_shot + self.risky_shot + self.kick_lost +
-                self.kick_at_opponent + self.kick_attempt + self.kick_power_to_goal +
-                self.shot_on_goal + self.time_penalty + self.action_smoothness)
+                self.kick_at_opponent + self.shot_out_of_bounds + self.kick_attempt +
+                self.kick_power_to_goal + self.shot_on_goal + self.time_penalty +
+                self.action_smoothness)
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -135,6 +140,7 @@ class RewardTerms:
             "risky_shot": self.risky_shot,
             "kick_lost": self.kick_lost,
             "kick_at_opponent": self.kick_at_opponent,
+            "shot_out_of_bounds": self.shot_out_of_bounds,
             "kick_attempt": self.kick_attempt,
             "kick_power_to_goal": self.kick_power_to_goal,
             "shot_on_goal": self.shot_on_goal,
@@ -227,6 +233,13 @@ def compute_rewards(
         terms.risky_shot = config.w_risky_shot * float(info.get("risky_factor", 1.0))
     if info.get("kick_lost", False):
         terms.kick_lost = config.w_kick_lost
+
+    # Shot blasted out of play: the env flags this when a *kicked* ball had to be relocated
+    # for going out of bounds. The goal exception is structural — a rebound that banks into
+    # the goal scores before any relocation, so it never sets this flag — but guard on
+    # goal_scored too so the two can never both fire on the same step.
+    if info.get("shot_out_of_bounds", False) and not info.get("goal_scored", False):
+        terms.shot_out_of_bounds = config.w_shot_out_of_bounds
 
     # Firing the ball straight into the opponent hands them possession — penalize it directly
     # (the immediate counterpart to kick_lost, which only fires once they actually capture it).

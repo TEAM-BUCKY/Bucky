@@ -64,6 +64,8 @@ class PlayEventTracker:
         self._bounce_since_kick = False
         self._shot_live = False
         self._shot_credited = False
+        self._shot_in_flight = False     # a kicked ball still travelling free
+        self._shot_departed = False      # …and it has since left A's contact
 
     def update(self, state_a: PhysicsState, state_b: PhysicsState, phys_info: dict) -> dict:
         ball_pos = state_a.ball_pos
@@ -96,6 +98,8 @@ class PlayEventTracker:
             self._kick_lost_timer = KICK_LOST_WINDOW
             self._kick_goal_timer = KICK_GOAL_WINDOW
             self._bounce_since_kick = False
+            self._shot_in_flight = True
+            self._shot_departed = False
             # Classify the kick relative to B: a hit (ball fired into the opponent → give-away)
             # or a thread (clears the opponent toward the goal mouth → skilful, risky).
             out.update(self._kick_shot_eval(state_a, state_b))
@@ -120,6 +124,22 @@ class PlayEventTracker:
                 out["bank_shot"] = True
         if self._kick_goal_timer > 0:
             self._kick_goal_timer -= 1
+
+        # ── shot out of bounds: a kicked ball that left A and then had to be relocated for
+        #    leaving the field of play ("out_of_reach"), without scoring. The env passes the
+        #    referee's relocation reason in ``ball_oob_relocated``. The goal case is excluded
+        #    structurally (a bank/rebound that scores fires ``goal_a`` and the referee never
+        #    relocates), and resolving on recovery / loss-to-B keeps it from misfiring later. ──
+        if self._shot_in_flight:
+            if not self._shot_departed and a_dist > CONTACT_DIST:
+                self._shot_departed = True
+            if goal_a:
+                self._shot_in_flight = False                       # scored — rewarded, not punished
+            elif self._shot_departed and phys_info.get("ball_oob_relocated", False):
+                out["shot_out_of_bounds"] = True
+                self._shot_in_flight = False
+            elif self._shot_departed and (a_owns or owner == "b"):
+                self._shot_in_flight = False   # A recovered it, or lost to B (see kick_lost)
 
         # ── blocked shot on our own goal ──
         live_now = _incoming_shot_on_own_goal(ball_pos, ball_vel)
