@@ -5,6 +5,7 @@ import type {
 	StopCondition,
 	StopKind
 } from './simulation.svelte.js';
+import { apiBases } from './simulation.svelte.js';
 
 /** Which feature groups a host form exposes (drives chips + payload contents). */
 export interface RunConfigCaps {
@@ -37,29 +38,76 @@ export const HP_FIELDS: { key: keyof Hyperparams; label: string; step: number }[
 	{ key: 'max_grad_norm', label: 'max grad norm', step: 0.05 }
 ];
 
-export const REWARD_FIELDS: { key: string; label: string }[] = [
-	{ key: 'w_approach', label: 'approach' },
-	{ key: 'w_speed', label: 'speed' },
-	{ key: 'w_ball_to_goal', label: 'ball→goal' },
-	{ key: 'w_possession', label: 'possession' },
-	{ key: 'w_front_align', label: 'front align' },
-	{ key: 'w_goal', label: 'goal' },
-	{ key: 'w_goal_against', label: 'goal against' },
-	{ key: 'w_out_of_bounds', label: 'out of bounds' },
-	{ key: 'w_lack_of_progress', label: 'lack of progress' },
-	{ key: 'w_defective', label: 'defective' },
-	{ key: 'w_spin', label: 'spin' },
+// Pretty labels for known reward weights. The set of weights and their default values comes
+// from the backend (the Python ``RewardConfig`` — single source of truth, see loadRewardDefaults).
+// Any weight the backend returns that isn't listed here still shows up, with a label derived
+// from its key, so adding a weight in rewards.py needs no frontend change.
+const REWARD_LABELS: Record<string, string> = {
+	w_approach: 'approach',
+	w_speed: 'speed',
+	w_ball_to_goal: 'ball→goal',
+	w_possession: 'possession',
+	w_front_align: 'front align',
+	w_goal: 'goal',
+	w_goal_against: 'goal against',
+	w_out_of_bounds: 'out of bounds',
+	w_lack_of_progress: 'lack of progress',
+	w_defective: 'defective',
+	w_spin: 'spin',
 	// Skilled play (kicker + opponent-aware) — let the policy learn to shoot, not just dribble.
-	{ key: 'w_steal', label: 'steal' },
-	{ key: 'w_blocked_shot', label: 'blocked shot' },
-	{ key: 'w_kick_goal', label: 'kick goal' },
-	{ key: 'w_bank_shot', label: 'bank shot' },
-	{ key: 'w_risky_shot', label: 'risky shot' },
-	{ key: 'w_kick_lost', label: 'kick lost' },
-	{ key: 'w_shot_on_goal', label: 'shot on goal' },
-	{ key: 'w_time', label: 'time' },
-	{ key: 'w_action_smooth', label: 'action smooth' }
-];
+	w_steal: 'steal',
+	w_blocked_shot: 'blocked shot',
+	w_kick_goal: 'kick goal',
+	w_bank_shot: 'bank shot',
+	w_risky_shot: 'risky shot',
+	w_kick_lost: 'kick lost',
+	w_kick_at_opponent: 'kick at opponent',
+	w_kick_attempt: 'kick attempt',
+	w_kick_power_to_goal: 'kick power→goal',
+	w_shot_on_goal: 'shot on goal',
+	w_time: 'time',
+	w_action_smooth: 'action smooth'
+};
+
+function rewardLabel(key: string): string {
+	return REWARD_LABELS[key] ?? key.replace(/^w_/, '').replace(/_/g, ' ');
+}
+
+/**
+ * Reward-weight defaults + ordered field list, loaded from the backend ``RewardConfig`` so the
+ * code is the single source of truth. Until {@link loadRewardDefaults} resolves, ``defaults`` is
+ * empty and ``fields`` falls back to the labelled keys above so the editor still renders.
+ */
+export const rewardState = $state<{
+	defaults: Record<string, number>;
+	fields: { key: string; label: string }[];
+}>({
+	defaults: {},
+	fields: Object.keys(REWARD_LABELS).map((key) => ({ key, label: rewardLabel(key) }))
+});
+
+let _rewardDefaultsLoaded = false;
+/**
+ * Fetch the reward-weight defaults from the backend once and refresh {@link rewardState}.
+ * Idempotent; failures keep the fallbacks. Returns the loaded defaults (or {} on failure).
+ */
+export async function loadRewardDefaults(): Promise<Record<string, number>> {
+	if (_rewardDefaultsLoaded) return rewardState.defaults;
+	try {
+		const { httpBase } = apiBases();
+		const res = await fetch(httpBase + '/reward-defaults');
+		if (!res.ok) return rewardState.defaults;
+		const data = await res.json();
+		const weights = (data?.weights ?? {}) as Record<string, number>;
+		if (Object.keys(weights).length === 0) return rewardState.defaults;
+		rewardState.defaults = weights;
+		rewardState.fields = Object.keys(weights).map((key) => ({ key, label: rewardLabel(key) }));
+		_rewardDefaultsLoaded = true;
+	} catch {
+		/* keep fallbacks */
+	}
+	return rewardState.defaults;
+}
 
 function fmtCount(n: number): string {
 	if (!Number.isFinite(n)) return '0';
@@ -156,32 +204,21 @@ export class RunConfig {
 		vf_coef: 0.5,
 		max_grad_norm: 0.5
 	});
-	rw = $state<Record<string, number>>({
-		w_approach: 0.5,
-		w_speed: 0.05,
-		w_ball_to_goal: 2.5,
-		w_possession: 1,
-		w_front_align: 0.3,
-		w_goal: 20,
-		w_goal_against: -20,
-		w_out_of_bounds: -10,
-		w_lack_of_progress: -2,
-		w_defective: -10,
-		w_spin: -0.2,
-		// Skilled play (kicker + opponent-aware) — defaults mirror the backend RewardConfig.
-		w_steal: 3,
-		w_blocked_shot: 5,
-		w_kick_goal: 6,
-		w_bank_shot: 4,
-		w_risky_shot: 2,
-		w_kick_lost: -6,
-		w_shot_on_goal: 1.5,
-		w_time: -0.003,
-		w_action_smooth: -0.01
-	});
+	/**
+	 * Reward weights, seeded from the backend defaults ({@link rewardState}). Empty until the
+	 * defaults load; call {@link syncRewardDefaults} (or rely on ModelCreateForm doing so on
+	 * mount) to fill it. An empty payload makes the backend fall back to the code defaults, so
+	 * the code stays the single source of truth even if the fetch hasn't completed.
+	 */
+	rw = $state<Record<string, number>>({ ...rewardState.defaults });
 
 	constructor(caps: RunConfigCaps = {}) {
 		this.caps = caps;
+	}
+
+	/** (Re)seed reward weights from the backend-loaded defaults — discards local edits. */
+	syncRewardDefaults() {
+		this.rw = { ...rewardState.defaults };
 	}
 
 	// ── builders ───────────────────────────────────────────────────────────────
@@ -323,7 +360,7 @@ export class RunConfig {
 		return `arch ${this.parseNetArch().join('·') || '—'} · PPO`;
 	}
 	get rewardsSummary(): string {
-		return `${REWARD_FIELDS.length} weights`;
+		return `${rewardState.fields.length} weights`;
 	}
 	get botASummary(): string {
 		return this.runA ? `${this.runA} / ${this.ckptA.replace(/\.zip$/, '')}` : 'pick a policy';

@@ -269,7 +269,7 @@ const CREDS_KEY = 'bucky.creds';
 const GAME_KEY = 'bucky.game';
 
 /** Resolve the HTTP + WS base URLs from VITE_API_BASE (default same-origin '/api'). */
-function apiBases() {
+export function apiBases() {
 	const raw = (((import.meta as any).env?.VITE_API_BASE as string | undefined) ?? '/api').replace(
 		/\/+$/,
 		''

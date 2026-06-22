@@ -5,7 +5,7 @@
 		STAGES,
 		STOP_TABS,
 		HP_FIELDS,
-		REWARD_FIELDS
+		rewardState
 	} from '$lib/state/runConfig.svelte.js';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -383,7 +383,7 @@
 			<ConfigChip label="Rewards" summary={config.rewardsSummary} title="Reward weights">
 				{#snippet body()}
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-						{#each REWARD_FIELDS as f (f.key)}
+						{#each rewardState.fields as f (f.key)}
 							<div class="flex flex-col gap-0.5">
 								<Label class="font-mono text-[10px] text-muted-foreground">{f.label}</Label>
 								<Input type="number" step={0.1} bind:value={config.rw[f.key]} class="h-8 font-mono text-xs" />

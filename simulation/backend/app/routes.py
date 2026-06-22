@@ -161,6 +161,22 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     async def health() -> dict:
         return {"ok": True}
 
+    @router.get("/reward-defaults")
+    async def reward_defaults() -> dict:
+        """The reward-weight defaults from the Python ``RewardConfig`` dataclass.
+
+        This is the single source of truth for reward weights: the web UI loads these to
+        seed its editor so editing ``bucky/rewards.py`` (and restarting the server) updates
+        the website's defaults — instead of the UI shipping a stale hardcoded copy that
+        would silently override the code values at launch. Field order follows the dataclass.
+        """
+        from dataclasses import fields as _fields
+
+        from bucky.rewards import RewardConfig
+
+        cfg = RewardConfig()
+        return {"weights": {f.name: getattr(cfg, f.name) for f in _fields(cfg)}}
+
     # ── auth (GitHub-org OAuth, or password fallback) ────────────────────────────
     @router.get("/auth/me")
     async def auth_me(request: Request) -> dict:

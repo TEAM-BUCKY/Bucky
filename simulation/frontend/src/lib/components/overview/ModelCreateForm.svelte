@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { simulation } from '$lib/state/simulation.svelte.js';
-	import { RunConfig } from '$lib/state/runConfig.svelte.js';
+	import { RunConfig, loadRewardDefaults } from '$lib/state/runConfig.svelte.js';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import RunConfigChips from '$lib/components/simulation/RunConfigChips.svelte';
@@ -9,6 +10,13 @@
 	let { onCreated = () => {} }: { onCreated?: () => void } = $props();
 
 	const config = new RunConfig({ advanced: true, identity: true });
+
+	// Seed the reward editor from the backend RewardConfig (single source of truth) so edits to
+	// bucky/rewards.py show up here and the form doesn't ship stale weights that override the code.
+	onMount(async () => {
+		await loadRewardDefaults();
+		config.syncRewardDefaults();
+	});
 
 	const busy = $derived(['launching', 'running', 'stopping'].includes(simulation.status.state));
 	const valid = $derived(config.configValid);
