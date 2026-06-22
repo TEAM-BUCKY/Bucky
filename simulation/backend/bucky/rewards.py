@@ -31,48 +31,34 @@ class RewardConfig:
     w_approach: float = 1.0
     w_ball_to_goal: float = 2.5
 
-    w_possession: float = 1
-    w_front_align: float = 3
+    w_possession: float = 1.0
+    w_front_align: float = 3.0
 
     w_goal: float = 20.0
     w_goal_against: float = -40.0
 
-    w_out_of_bounds: float = -15.0        # robot fully out → 30 s suspension (rules §4.9)
+    w_out_of_bounds: float = -20.0        # robot fully out → 30 s suspension (rules §4.9)
     w_lack_of_progress: float = -2.0      # ball stuck between robots (rules §4.6)
     w_defective: float = -10.0            # removed as defective (rules §4.7)
     w_spin: float = -0.2
 
     # Skilled-play terms (kicker + opponent-aware; see bucky.play_events).
     w_steal: float = 3.0                  # capture ball from enemy, × field-position gradient
-    w_blocked_shot: float = 5.0           # block an enemy shot on our goal
-    w_kick_goal: float = 6.0              # bonus: goal scored from a kick (vs dribbling it in)
-    w_bank_shot: float = 4.0              # bonus: goal scored off a wall bounce
-    w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
-    w_kick_lost: float = -12.0            # giving the enemy the ball: our kicked ball captured by enemy
-    w_kick_at_opponent: float = -4.0      # firing the ball straight into the opponent (a give-away)
+    w_blocked_shot: float = 10           # block an enemy shot on our goal
+    w_kick_goal: float = 4.0              # bonus: goal scored from a kick (vs dribbling it in)
+    w_bank_shot: float = 5.0              # bonus: goal scored off a wall bounce
+    w_risky_shot: float = 1.0             # kick threaded *past* (clearing) the opponent toward goal
+    w_kick_lost: float = -14.0            # giving the enemy the ball: our kicked ball captured by enemy
+    w_kick_at_opponent: float = -6.0      # firing the ball straight into the opponent (a give-away)
 
-    # Dense kick-shaping: reward *firing the kicker* toward the goal, not only kicks that
-    # happen to score. Without this the agent learns to dribble (which earns the same goal
-    # reward without the risk) and never explores the kicker — see the unused-kicker analysis.
-    # Kept small so the agent doesn't *spam* the kicker for the flat bonus; suppressed entirely
-    # for a kick aimed into the opponent (see kick_at_opponent below).
     w_kick_attempt: float = 0.1           # flat bonus for a legal kick aimed goal-ward (clear path)
     w_kick_power_to_goal: float = 1.5     # × cos(kick heading, ball→goal): reward aiming kicks at goal
 
-    # Dense "quick shot" shaping: reward a fast ball in flight heading at the goal. Unlike
-    # ``ball_to_goal`` (which a slow dribble also earns) this only pays for a *struck* shot,
-    # nudging the agent toward decisive shots-on-goal over passive ball-shepherding.
     w_shot_on_goal: float = 1.5           # × (ball velocity component toward goal), when ball is fast & free
 
-    # Reward committing to fast, purposeful motion (counters dithering/rocking in place). Only
-    # the robot's *productive* speed is paid — its velocity component toward the ball (chasing) or
-    # toward the opponent goal (once it has the ball) — so it can't farm reward by zooming around.
     w_speed: float = 0.05
 
-    w_time: float = -0.003                # heavier than before so stalemates/dithering cost more
-    # Smoothness penalty on the change in the drive command between steps. Steady fast driving
-    # costs ≈0; rocking back-and-forth (flipping the command each step) is penalized hard. This
-    # replaces the old action-*magnitude* penalty, which taxed speed and encouraged creeping.
+    w_time: float = -0.01
     w_action_smooth: float = -0.01
 
     @classmethod
