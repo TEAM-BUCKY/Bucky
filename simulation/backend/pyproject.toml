@@ -31,6 +31,16 @@ target-version = "py311"
 select = ["E", "F", "I"]
 
 # Pull the CPU-only torch build (the VPS has no GPU); avoids the multi-GB CUDA wheels.
+# To train on a GPU box instead, swap this index for a CUDA one and re-lock, e.g.:
+#   [[tool.uv.index]]
+#   name = "pytorch-cu124"
+#   url = "https://download.pytorch.org/whl/cu124"
+#   explicit = true
+#   [tool.uv.sources]
+#   torch = { index = "pytorch-cu124" }
+# then `uv lock --refresh && uv sync`, and launch train.py with --device auto (or cuda).
+# Note: for the tiny [64,64] MLP, CPU is usually faster — GPU is only worth it for
+# much larger nets. Keep the CPU index as the committed default for the VPS.
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"

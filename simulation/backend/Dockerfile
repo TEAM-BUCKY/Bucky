@@ -10,6 +10,11 @@ ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
+# tcmalloc: faster allocator for the allocation-heavy multi-process rollout collection.
+# The backend auto-detects and LD_PRELOADs it into trainer subprocesses (see app/jobs.py).
+RUN apt-get update && apt-get install -y --no-install-recommends libtcmalloc-minimal4 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependency layer — cached until pyproject.toml or uv.lock changes.
 # --no-install-project installs only external deps, not the project itself.
 # This keeps this heavy layer (torch, sb3, tensorboard) intact on source-only changes.

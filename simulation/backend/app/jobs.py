@@ -47,6 +47,37 @@ MAX_ROOMS = 20          # safety cap on concurrent games
 
 log = logging.getLogger(__name__)
 
+
+def _detect_preload_allocator() -> str | None:
+    """Locate a faster malloc (tcmalloc/jemalloc) to LD_PRELOAD into trainer
+    subprocesses. Multi-process NumPy rollout collection is allocation-heavy, and
+    these allocators reuse memory better than glibc malloc under that load. Returns
+    the .so path, or None when none is installed (then LD_PRELOAD is left untouched
+    so dev boxes without it are unaffected).
+    """
+    import ctypes.util
+
+    # Explicit distro paths first (these runtime-only libs aren't always resolvable
+    # via the linker name search), then fall back to ctypes' own lookup.
+    for path in (
+        "/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4",
+        "/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4",
+        "/usr/lib/x86_64-linux-gnu/libjemalloc.so.2",
+        "/usr/lib/libtcmalloc_minimal.so.4",
+        "/usr/lib/libjemalloc.so.2",
+    ):
+        if os.path.exists(path):
+            return path
+    for name in ("tcmalloc_minimal", "tcmalloc", "jemalloc"):
+        found = ctypes.util.find_library(name)
+        if found:
+            return found
+    return None
+
+
+# Detected once at import: faster allocator to preload into trainer subprocesses.
+_PRELOAD_ALLOCATOR = _detect_preload_allocator()
+
 VALID_STAGES = {s.value for s in Stage}
 
 
@@ -694,12 +725,19 @@ class JobManager:
 
     def _spawn(self, args: list[str]) -> tuple[subprocess.Popen | None, str | None]:
         """Start a job subprocess; return ``(proc, None)`` or ``(None, error_string)``."""
+        # Preload a faster allocator for the trainer when one is installed; respect an
+        # operator-set LD_PRELOAD. Must be set before exec (can't be done from Python
+        # inside the child), so we inject it into the child's environment here.
+        env = os.environ.copy()
+        if _PRELOAD_ALLOCATOR and "LD_PRELOAD" not in env:
+            env["LD_PRELOAD"] = _PRELOAD_ALLOCATOR
+            log.info("LD_PRELOAD=%s for %s", _PRELOAD_ALLOCATOR, args[:2])
         try:
             # start_new_session=True puts the trainer (and its SubprocVecEnv workers)
             # in their own process group, so kill can signal the whole group and a
             # terminal Ctrl-C on the server won't leak into the trainer.
             proc = subprocess.Popen(
-                args, cwd=str(self._base_dir), start_new_session=True
+                args, cwd=str(self._base_dir), start_new_session=True, env=env
             )
         except OSError as exc:
             return None, str(exc)

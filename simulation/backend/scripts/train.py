@@ -20,6 +20,19 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# Pin numerical libraries to a single thread *before* importing numpy/torch. Each
+# SubprocVecEnv worker steps a NumPy physics env, and NumPy's BLAS (OpenBLAS/MKL)
+# is multithreaded by default — N workers each spawning a core's worth of BLAS
+# threads massively oversubscribes the CPU and tanks rollout throughput. These are
+# read at library load, so they must be set here (and they propagate to the forked
+# workers). torch.set_num_threads(1) below only governs torch in the main process,
+# not NumPy in the workers, so it does not cover this. setdefault() lets an operator
+# still override from the environment.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
@@ -70,7 +83,10 @@ def main() -> None:
     parser.add_argument("--until", type=float, default=None,
                         help="Absolute epoch time to train until, then stop and save. "
                              "Overrides --timesteps and --duration.")
-    parser.add_argument("--n-envs", type=int, default=16)
+    parser.add_argument("--n-envs", type=int, default=None,
+                        help="Parallel rollout envs. Defaults to the CPU core count "
+                             "(clamped to 4..32) when unset, so rollout parallelism "
+                             "matches the machine instead of a fixed 16.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--no-domain-rand", action="store_true")
@@ -92,7 +108,12 @@ def main() -> None:
                              "costs throughput. Training metrics/status still stream without it.")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda", "auto"],
                         help="Torch device. CPU is fastest for this tiny MLP — the GPU's "
-                             "per-step host<->device copies outweigh its compute here.")
+                             "per-step host<->device copies outweigh its compute here. "
+                             "'auto' selects cuda when available (opt-in, not the default).")
+    parser.add_argument("--compile", action="store_true",
+                        help="EXPERIMENTAL: torch.compile the policy. Marginal for this tiny "
+                             "MLP and adds warmup; mainly useful on GPU. Verify checkpoint "
+                             "save/load and ONNX export still work before relying on it.")
     # Federated distributed training: this run is one shard of a group that periodically
     # averages policy weights through the coordinator (see bucky.fedavg).
     parser.add_argument("--fed-server", default=None,
@@ -117,13 +138,22 @@ def main() -> None:
         with open(args.config) as f:
             cfg = json.load(f)
         args.stage = cfg.get("stage", args.stage)
-        args.n_envs = int(cfg.get("n_envs", args.n_envs))
+        if "n_envs" in cfg:
+            args.n_envs = int(cfg["n_envs"])
         args.seed = int(cfg.get("seed", args.seed))
         if "domain_rand" in cfg:
             args.no_domain_rand = not bool(cfg["domain_rand"])
     hyperparams = cfg.get("hyperparams", {})
     net_arch = cfg.get("net_arch", [64, 64])
     reward_config = RewardConfig.from_dict(cfg.get("reward_weights"))
+
+    # Resolve n_envs only if neither the flag nor the config set it: match rollout
+    # parallelism to the host's core count (clamped so a 2-core VPS or a 64-core box
+    # both land somewhere sane). Beyond ~32 the SubprocVecEnv IPC overhead outweighs
+    # extra parallelism for these tiny envs.
+    if args.n_envs is None:
+        args.n_envs = max(4, min(32, os.cpu_count() or 16))
+        print(f"n_envs auto-set to {args.n_envs} (CPU cores={os.cpu_count()})")
 
     run_name = args.run_name or f"{args.stage}_seed{args.seed}"
     log_dir = f"runs/{run_name}"
@@ -142,6 +172,23 @@ def main() -> None:
     # parallelism spawns more threads than the kernel can usefully schedule alongside
     # the SubprocVecEnv workers, so pin it to 1 to eliminate that contention.
     torch.set_num_threads(1)
+
+    # Anomaly detection is a debug-only autograd hook (slow); keep it explicitly off
+    # for training runs (this is the default, but make the intent clear).
+    torch.autograd.set_detect_anomaly(False)
+
+    # Resolve the device up front (SB3's "auto" picks cuda when available). The CPU-only
+    # torch wheel reports no cuda, so this stays cpu unless a CUDA build is installed.
+    from stable_baselines3.common.utils import get_device
+    device = get_device(args.device)
+    if device.type == "cuda":
+        # GPU-only tuning-guide items: let matmuls use TF32 tensor cores, and let cuDNN
+        # autotune (harmless here — no conv layers). Note: for this [64,64] MLP the GPU
+        # is usually *slower* than CPU because per-rollout host<->device copies dominate,
+        # so cuda is opt-in via --device, never the default.
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cudnn.benchmark = True
+        print("CUDA device active: TF32 matmul + cudnn.benchmark enabled.")
 
     # Live streaming to the hub. Training metrics + status always stream (cheap, and the
     # queue/UI needs the progress). The animated field is opt-in (--viz): it is fed by a
@@ -202,7 +249,7 @@ def main() -> None:
                 args.resume_from,
                 env=train_env,
                 tensorboard_log=log_dir,
-                device=args.device,
+                device=device,
             )
         except ValueError as e:
             if "spaces do not match" not in str(e):
@@ -241,8 +288,17 @@ def main() -> None:
             vf_coef=hp("vf_coef", 0.5),
             max_grad_norm=hp("max_grad_norm", 0.5),
             policy_kwargs={"net_arch": list(net_arch)},
-            device=args.device,
+            device=device,
         )
+
+    # EXPERIMENTAL opt-in: torch.compile the policy. On GPU "reduce-overhead" uses CUDA
+    # graphs to cut kernel-launch cost; on CPU the upside for a [64,64] MLP is marginal.
+    # SB3 save/load and ONNX export read policy.state_dict(), which torch.compile prefixes
+    # with "_orig_mod." — verify both still round-trip before using this for real runs.
+    if args.compile:
+        mode = "reduce-overhead" if device.type == "cuda" else "default"
+        model.policy = torch.compile(model.policy, mode=mode)
+        print(f"Policy compiled with torch.compile (mode={mode}).")
 
     # Self-play bootstrap: freeze the freshly-built policy as the initial opponent and
     # hand it to every worker before training starts, then refresh it periodically.
