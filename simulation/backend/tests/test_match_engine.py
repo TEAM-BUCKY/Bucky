@@ -30,8 +30,8 @@ def test_tick_frame_has_required_keys():
 
 def test_goal_for_a_increments_score_and_resets():
     eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
-    eng._phys._ball_pos = np.array([FIELD_W / 2 + 0.05, 0.0])
-    eng._phys._ball_vel = np.zeros(2)
+    eng._phys._ball_pos = np.array([FIELD_W / 2 - 0.05, 0.0])   # just in front of the +x mouth
+    eng._phys._ball_vel = np.array([3.0, 0.0])                  # driven across the goal line
     f = eng.tick()
     assert f["score"] == {"a": 1, "b": 0}
     assert f["episode"] == 1                          # episode advanced on reset
@@ -40,8 +40,8 @@ def test_goal_for_a_increments_score_and_resets():
 
 def test_goal_for_b_increments_score():
     eng = MatchEngine(FixedModel(), FixedModel(), seed=0)
-    eng._phys._ball_pos = np.array([-(FIELD_W / 2 + 0.05), 0.0])
-    eng._phys._ball_vel = np.zeros(2)
+    eng._phys._ball_pos = np.array([-(FIELD_W / 2 - 0.05), 0.0])  # just in front of the −x mouth
+    eng._phys._ball_vel = np.array([-3.0, 0.0])                   # driven across the goal line
     f = eng.tick()
     assert f["score"] == {"a": 0, "b": 1}
 
@@ -123,8 +123,8 @@ def test_both_sides_human_simultaneously():
 def test_casual_mode_never_ends_and_scores():
     # Casual mode has no clock; a goal still increments the score and re-centres the ball.
     eng = MatchEngine(FixedModel(), FixedModel(), seed=0, mode="casual")
-    eng._phys._ball_pos = np.array([FIELD_W / 2 + 0.05, 0.0])
-    eng._phys._ball_vel = np.zeros(2)
+    eng._phys._ball_pos = np.array([FIELD_W / 2 - 0.05, 0.0])   # just in front of the +x mouth
+    eng._phys._ball_vel = np.array([3.0, 0.0])                  # driven across the goal line
     f = eng.tick()
     assert f["score"] == {"a": 1, "b": 0}
     assert f["match_over"] is False

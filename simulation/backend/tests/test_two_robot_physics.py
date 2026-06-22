@@ -56,19 +56,19 @@ def test_step_returns_goal_flags(phys):
     assert "goal_a" in info and "goal_b" in info and "ball_out" in info
 
 
-def test_goal_a_when_ball_in_plus_x_goal(phys):
+def test_goal_a_when_ball_crosses_plus_x_line(phys):
     phys.reset(seed=0)
-    phys._ball_pos = np.array([FIELD_W / 2 + 0.05, 0.0])
-    phys._ball_vel = np.zeros(2)
+    phys._ball_pos = np.array([FIELD_W / 2 - 0.05, 0.0])   # just in front of the +x mouth
+    phys._ball_vel = np.array([3.0, 0.0])                  # driven across the goal line
     info = phys.step(ZERO, ZERO)
     assert info["goal_a"] is True
     assert info["goal_b"] is False
 
 
-def test_goal_b_when_ball_in_minus_x_goal(phys):
+def test_goal_b_when_ball_crosses_minus_x_line(phys):
     phys.reset(seed=0)
-    phys._ball_pos = np.array([-(FIELD_W / 2 + 0.05), 0.0])
-    phys._ball_vel = np.zeros(2)
+    phys._ball_pos = np.array([-(FIELD_W / 2 - 0.05), 0.0])  # just in front of the −x mouth
+    phys._ball_vel = np.array([-3.0, 0.0])                   # driven across the goal line
     info = phys.step(ZERO, ZERO)
     assert info["goal_b"] is True
     assert info["goal_a"] is False
@@ -94,6 +94,26 @@ def test_ball_cannot_enter_goal_from_the_side(phys, goal_sign, y_sign):
         bx, by = phys.state_a().ball_pos
         if abs(bx) > FIELD_W / 2:           # while behind a goal line it must stay
             assert abs(by) >= GOAL_HALF - 1e-6  # out of the goal strip (blocked by side wall)
+
+
+@pytest.mark.parametrize("goal_sign", [+1, -1])
+@pytest.mark.parametrize("y_sign", [+1, -1])
+def test_fast_ball_cannot_tunnel_into_goal_from_the_side(phys, goal_sign, y_sign):
+    """Regression: a *fast* ball loose behind the goal line, outside the mouth, must never
+    be scored even when its lateral speed lets it jump clean past the ~21 mm side-wall band
+    in one 20 ms step. A goal is only for a ball that came through the mouth at the goal
+    line — a ball that slipped into the strip from the side has not scored."""
+    phys.reset(seed=0)
+    phys._a_pos = np.array([0.0, 0.0])      # robots parked at centre, clear of the goal
+    phys._b_pos = np.array([0.0, 0.3])
+    # Behind the goal line (|x| > HALF_W), outside the mouth, moving laterally fast enough
+    # that one step (0.30 → 0.20 m) overshoots the side-wall band entirely.
+    phys._ball_pos = np.array([goal_sign * 1.0, y_sign * 0.30])
+    phys._ball_vel = np.array([0.0, -y_sign * 5.0])
+    for _ in range(40):
+        info = phys.step(ZERO, ZERO)
+        assert info["goal_a"] is False, "fast ball scored in +x goal from the side"
+        assert info["goal_b"] is False, "fast ball scored in -x goal from the side"
 
 
 def test_ball_still_scores_through_the_mouth(phys):

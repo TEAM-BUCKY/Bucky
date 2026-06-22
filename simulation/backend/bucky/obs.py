@@ -36,6 +36,13 @@ _MAX_VEL = 5.236
 
 OBS_DIM: int = 23
 
+# The last block of the observation — indices [18:23]: ball_line_dist, ball_vel_toward_line,
+# respawn_rel (x, y), ball_out_flag — was appended later (ball-vs-boundary awareness). Policies
+# trained before it saw an 18-dim base. Kept as a named constant so the self-play layer can
+# project the current obs back to that older layout for backward-compatible match play.
+N_BALL_BOUNDARY_FEATURES: int = 5
+LEGACY_OBS_DIM: int = OBS_DIM - N_BALL_BOUNDARY_FEATURES   # 18 — base width before that block
+
 _NOISE_BEARING_STD = np.deg2rad(3.0)
 _NOISE_DIST_FRAC_STD = 0.15
 

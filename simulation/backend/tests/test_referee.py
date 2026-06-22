@@ -197,7 +197,7 @@ def test_goal_scored_awards_and_conceding_team_kicks_off(setup):
 def test_own_goal_counts_for_opponent(setup):
     ref, phys = setup
     # Ball driven into A's OWN (−x) goal → credited to B (§4.5.3); physics reports goal_b.
-    phys.place_ball([-(field.HALF_W + 0.05), 0.0])
+    phys.place_ball([-(field.HALF_W - 0.05), 0.0], vel=(-3.0, 0.0))  # driven across the −x line
     info = phys.step((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
     assert info["goal_b"] is True
     dec = ref.update(phys, info)

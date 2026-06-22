@@ -143,6 +143,10 @@ class PyPhysics(PhysicsBackend):
 
     def step(self, vx_body: float, vy_body: float, omega: float,
              kick: float = 0.0) -> tuple[PhysicsState, dict]:
+        # Ball x at the start of the step — lets _check_goal require a *crossing* of the goal
+        # line through the mouth and so reject a "goal from the side" (a ball that slipped into
+        # the strip past a side wall rather than through the mouth; see _check_goal).
+        prev_bx = float(self._ball_pos[0])
         mag = np.sqrt(vx_body**2 + vy_body**2)
         if mag > 1.0:
             vx_body /= mag
@@ -184,7 +188,7 @@ class PyPhysics(PhysicsBackend):
             [ARENA_HALF_X - ROBOT_RADIUS, ARENA_HALF_Y - ROBOT_RADIUS],
         )
 
-        goal = self._check_goal()
+        goal = self._check_goal(prev_bx)
         info = {
             "goal_scored": goal,
             "ball_out": self._check_ball_out(goal),
@@ -255,9 +259,16 @@ class PyPhysics(PhysicsBackend):
                 bounced = True
         return bounced
 
-    def _check_goal(self) -> bool:
-        return (abs(self._ball_pos[0]) > FIELD_W / 2 and
-                abs(self._ball_pos[1]) < GOAL_WIDTH / 2)
+    def _check_goal(self, prev_x: float) -> bool:
+        # Goal = the ball *crossing* a goal line through the mouth this step: it started on the
+        # field side of the line and ended past it, within the mouth in y. Testing the crossing
+        # (not just "is the ball in the strip") rejects a goal from the side — a ball that
+        # slipped laterally past a side wall into the strip (a fast ball can tunnel the thin
+        # side-wall band) never crossed the line from the field, so it never scores.
+        bx, by = self._ball_pos[0], self._ball_pos[1]
+        if abs(by) >= GOAL_WIDTH / 2:
+            return False
+        return bool(prev_x <= FIELD_W / 2 < bx or prev_x >= -FIELD_W / 2 > bx)
 
     def _check_ball_out(self, goal: bool) -> bool:
         """Ball has left the white-line field into the outer band (and isn't a goal)."""
@@ -393,6 +404,10 @@ class TwoRobotPhysics:
         self._b_removed = False
 
     def step(self, action_a, action_b) -> dict:
+        # Ball x at the start of the step, so the goal check can require the ball to *cross* a
+        # goal line through the mouth this step rather than merely sit in the strip — which is
+        # what rejects "goals from the side" (see the goal check below).
+        prev_bx = float(self._ball_pos[0])
         if not self._a_removed:
             self._a_pos, self._a_vel, self._a_heading, self._a_omega = self._drive(
                 self._a_pos, self._a_vel, self._a_heading, self._a_omega, action_a
@@ -434,8 +449,17 @@ class TwoRobotPhysics:
         if not self._b_removed:
             self._b_pos = self._clamp_robot(self._b_pos)
 
-        goal_a = bool(self._ball_pos[0] > FIELD_W / 2 and abs(self._ball_pos[1]) < GOAL_WIDTH / 2)
-        goal_b = bool(self._ball_pos[0] < -FIELD_W / 2 and abs(self._ball_pos[1]) < GOAL_WIDTH / 2)
+        # A goal is the ball *crossing* a goal line through the mouth this step: it started on
+        # the field side of the line (|x| <= HALF_W) and ended past it, within the mouth in y.
+        # Testing the crossing (not just "is the ball in the strip") is what rejects a goal
+        # from the side — a ball that slipped laterally past a side wall into the strip (e.g. a
+        # fast ball tunnelling the thin side-wall band) never crossed the line from the field,
+        # so it never scores however long it then lingers behind the line.
+        ghw = GOAL_WIDTH / 2
+        bx, by = self._ball_pos[0], self._ball_pos[1]
+        in_mouth = abs(by) < ghw
+        goal_a = bool(prev_bx <= FIELD_W / 2 < bx and in_mouth)
+        goal_b = bool(prev_bx >= -FIELD_W / 2 > bx and in_mouth)
         past_line = bool(abs(self._ball_pos[0]) > FIELD_W / 2 or abs(self._ball_pos[1]) > FIELD_H / 2)
         return {
             "goal_a": goal_a,

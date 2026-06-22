@@ -9,7 +9,7 @@ to the 23-dim single-agent observation → a 27-dim opponent-aware observation.
 from __future__ import annotations
 import numpy as np
 
-from bucky.obs import OBS_DIM, build_observation
+from bucky.obs import LEGACY_OBS_DIM, OBS_DIM, build_observation
 from bucky.physics.backend import PhysicsState
 from bucky.physics.python_backend import ARENA_HALF_X, ARENA_HALF_Y, ROBOT_RADIUS
 
@@ -21,6 +21,55 @@ _SONAR_NOISE_STD = 0.02             # metres, when domain randomization is on
 _SONAR_DROPOUT_P = 0.05             # chance a beam misses (reads clear)
 
 SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 23 base + 4 sonar = 27
+
+# ── backward compatibility: drive older, narrower policies in a current match ─────────────
+# The current opponent-aware obs is laid out [base (OBS_DIM) | sonar (4)], and the base itself
+# is [pre-boundary base (LEGACY_OBS_DIM) | ball-boundary block (N_BALL_BOUNDARY_FEATURES)].
+# A policy trained before the ball-boundary block was added saw [pre-boundary base | sonar] —
+# i.e. the boundary block was inserted *between* the old base and the sonar tail. So to feed an
+# older policy we keep the pre-boundary base and the sonar tail and drop the boundary block.
+# Map each supported legacy width → the current-obs indices that reconstruct its observation.
+_LEGACY_OBS_INDICES: dict[int, np.ndarray] = {
+    LEGACY_OBS_DIM + 4: np.concatenate([          # 22-dim: [base18 | sonar4]
+        np.arange(LEGACY_OBS_DIM),
+        np.arange(OBS_DIM, SELF_PLAY_OBS_DIM),
+    ]),
+}
+# Observation widths a match can run: the native one plus any we can project down to.
+MATCH_COMPATIBLE_OBS_DIMS = frozenset({SELF_PLAY_OBS_DIM, *_LEGACY_OBS_INDICES})
+
+
+def adapt_obs_to_policy(obs, policy_obs_dim: int) -> np.ndarray:
+    """Project the current opponent-aware obs onto the layout a ``policy_obs_dim``-input policy
+    was trained on, so older checkpoints can still play. A policy that already matches the
+    current width gets the obs unchanged; an unknown width raises (caller should reject it)."""
+    obs = np.asarray(obs, dtype=np.float32).reshape(-1)
+    if policy_obs_dim == SELF_PLAY_OBS_DIM:
+        return obs
+    idx = _LEGACY_OBS_INDICES.get(policy_obs_dim)
+    if idx is None:
+        raise ValueError(
+            f"cannot adapt the {SELF_PLAY_OBS_DIM}-dim match observation to a "
+            f"{policy_obs_dim}-dim policy (supported: {sorted(MATCH_COMPATIBLE_OBS_DIMS)})")
+    return obs[idx]
+
+
+class CompatPolicy:
+    """Wraps a policy whose observation is narrower than the current match obs, projecting each
+    observation down to that policy's layout before predicting. A drop-in for the wrapped model
+    (forwards ``predict`` and exposes ``observation_space``) so the match engine and the mirror
+    path use it unchanged."""
+
+    def __init__(self, model, policy_obs_dim: int) -> None:
+        self._model = model
+        self._dim = policy_obs_dim
+
+    @property
+    def observation_space(self):
+        return self._model.observation_space
+
+    def predict(self, obs, **kwargs):
+        return self._model.predict(adapt_obs_to_policy(obs, self._dim), **kwargs)
 
 
 def _wrap(a: float) -> float:

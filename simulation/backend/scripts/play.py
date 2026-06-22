@@ -11,8 +11,10 @@ The hub (scripts/serve.py) normally launches this for you when you pick two netw
 the "Match" panel and click Launch. Each tick steps the shared 1v1 physics in real time
 and streams a frame (both robot poses + ball + score) back to the hub.
 
-Match policies must be opponent-aware (21-dim observation, trained on SELF_PLAY_1V1).
-Loading a legacy 17-dim single-agent checkpoint here is rejected with a clear message.
+Match policies are opponent-aware (SELF_PLAY_OBS_DIM observation, trained on SELF_PLAY_1V1).
+An older, narrower self-play checkpoint is still accepted: its observation is projected down
+to the layout it was trained on (see bucky.selfplay.CompatPolicy) so old and new networks can
+play each other. A width we can't map to is rejected with a clear message.
 """
 from __future__ import annotations
 import argparse
@@ -27,7 +29,11 @@ from stable_baselines3 import PPO
 
 from bucky.match import MatchEngine
 from bucky.physics.python_backend import DT
-from bucky.selfplay import SELF_PLAY_OBS_DIM
+from bucky.selfplay import (
+    MATCH_COMPATIBLE_OBS_DIMS,
+    SELF_PLAY_OBS_DIM,
+    CompatPolicy,
+)
 
 
 def _obs_dim(model) -> int:
@@ -75,11 +81,25 @@ def main() -> None:
         fail(f"could not load a checkpoint: {exc}")
         sys.exit(1)
 
-    for name, model in (("A", model_a), ("B", model_b)):
-        if _obs_dim(model) != SELF_PLAY_OBS_DIM:
-            fail(f"policy {name} has a {_obs_dim(model)}-dim observation but match mode needs "
-                 f"{SELF_PLAY_OBS_DIM}-dim (opponent-aware). Train it on SELF_PLAY_1V1 first.")
-            sys.exit(1)
+    # Match mode runs the current opponent-aware observation (SELF_PLAY_OBS_DIM). A policy of a
+    # different width is either an older, narrower checkpoint we can project the obs down to
+    # (wrapped in CompatPolicy so old and new networks can play each other) or one we can't —
+    # only the latter is rejected.
+    def adapt(name: str, model):
+        dim = _obs_dim(model)
+        if dim == SELF_PLAY_OBS_DIM:
+            return model
+        if dim in MATCH_COMPATIBLE_OBS_DIMS:
+            print(f"play.py: policy {name} is a legacy {dim}-dim checkpoint; adapting its "
+                  f"observation to the {SELF_PLAY_OBS_DIM}-dim opponent-aware match obs.",
+                  file=sys.stderr)
+            return CompatPolicy(model, dim)
+        fail(f"policy {name} has a {dim}-dim observation that match mode can't adapt to "
+             f"{SELF_PLAY_OBS_DIM}-dim (opponent-aware). Train it on SELF_PLAY_1V1 first.")
+        sys.exit(1)
+
+    model_a = adapt("A", model_a)
+    model_b = adapt("B", model_b)
 
     # Manual control: subscribe to the hub's control-sink so humans can drive either side.
     # The legacy single-human feature (--manual-red) starts red (B) under human control; an
