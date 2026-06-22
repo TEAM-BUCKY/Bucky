@@ -1,8 +1,4 @@
 <script lang="ts">
-	// "Play a friend by game code" lobby + live play view.
-	//   • No game yet → Create (casual/full-match) or Join (enter a code).
-	//   • In a game   → the live field + a "You are BLUE/RED" banner + the control overlay.
-	// Open guest play: no login. The per-side token (held in state) authorises control.
 	import { onMount } from 'svelte';
 	import { simulation } from '$lib/state/simulation.svelte.js';
 	import SoccerField from '../SoccerField.svelte';
@@ -149,7 +145,7 @@
 					class="flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-wider"
 					style="border-color: {youColor}; color: {youColor}"
 				>
-					You are {youLabel} — attack the {attackGoal} goal
+					You are {youLabel}
 				</span>
 			{:else}
 				<span class="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">

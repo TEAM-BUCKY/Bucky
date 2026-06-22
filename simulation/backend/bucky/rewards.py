@@ -35,7 +35,7 @@ class RewardConfig:
     w_front_align: float = 3
 
     w_goal: float = 20.0
-    w_goal_against: float = -20.0
+    w_goal_against: float = -40.0
 
     w_out_of_bounds: float = -15.0        # robot fully out → 30 s suspension (rules §4.9)
     w_lack_of_progress: float = -2.0      # ball stuck between robots (rules §4.6)
