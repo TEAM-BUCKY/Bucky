@@ -25,7 +25,7 @@ from dataclasses import field as dc_field
 
 import numpy as np
 
-from bucky import field
+from bucky.game import field
 from bucky.physics.python_backend import DT, ROBOT_COLLISION_DIST, TwoRobotPhysics
 
 # ── Rule timings (seconds) ───────────────────────────────────────────────────

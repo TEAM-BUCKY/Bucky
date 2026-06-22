@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-from bucky import field
+from bucky.game import field
 from bucky.physics.python_backend import DT, TwoRobotPhysics
-from bucky.referee import (
+from bucky.game.referee import (
     GOAL_AREA_SECONDS,
     LACK_OF_PROGRESS_SECONDS,
     OUT_OF_REACH_SECONDS,
@@ -206,7 +206,7 @@ def test_own_goal_counts_for_opponent(setup):
 
 # ── match clock / halves (§4.2, §4.3) ────────────────────────────────────────
 def test_match_clock_halves_and_full_time(monkeypatch):
-    import bucky.referee as R
+    import bucky.game.referee as R
     monkeypatch.setattr(R, "HALF_SECONDS", 1.0)
     phys = TwoRobotPhysics()
     ref = Referee(match_mode=True, first_kickoff="a")

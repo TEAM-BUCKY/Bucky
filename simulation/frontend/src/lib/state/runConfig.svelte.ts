@@ -39,6 +39,7 @@ export const HP_FIELDS: { key: keyof Hyperparams; label: string; step: number }[
 
 export const REWARD_FIELDS: { key: string; label: string }[] = [
 	{ key: 'w_approach', label: 'approach' },
+	{ key: 'w_speed', label: 'speed' },
 	{ key: 'w_ball_to_goal', label: 'ball→goal' },
 	{ key: 'w_possession', label: 'possession' },
 	{ key: 'w_front_align', label: 'front align' },
@@ -57,7 +58,7 @@ export const REWARD_FIELDS: { key: string; label: string }[] = [
 	{ key: 'w_kick_lost', label: 'kick lost' },
 	{ key: 'w_shot_on_goal', label: 'shot on goal' },
 	{ key: 'w_time', label: 'time' },
-	{ key: 'w_action_mag', label: 'action mag' }
+	{ key: 'w_action_smooth', label: 'action smooth' }
 ];
 
 function fmtCount(n: number): string {
@@ -157,6 +158,7 @@ export class RunConfig {
 	});
 	rw = $state<Record<string, number>>({
 		w_approach: 0.5,
+		w_speed: 0.05,
 		w_ball_to_goal: 2.5,
 		w_possession: 1,
 		w_front_align: 0.3,
@@ -175,7 +177,7 @@ export class RunConfig {
 		w_kick_lost: -6,
 		w_shot_on_goal: 1.5,
 		w_time: -0.003,
-		w_action_mag: -0.005
+		w_action_smooth: -0.01
 	});
 
 	constructor(caps: RunConfigCaps = {}) {

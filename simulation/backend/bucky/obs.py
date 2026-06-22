@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from bucky.field import FIELD_H as _FIELD_H
-from bucky.field import FIELD_W as _FIELD_W
-from bucky.field import PENALTY_DEPTH, PENALTY_HALF_WIDTH
+from bucky.game.field import FIELD_H as _FIELD_H
+from bucky.game.field import FIELD_W as _FIELD_W
+from bucky.game.field import PENALTY_DEPTH, PENALTY_HALF_WIDTH
 from bucky.physics.backend import PhysicsState
 
 _FIELD_DIAG = (_FIELD_W**2 + _FIELD_H**2) ** 0.5

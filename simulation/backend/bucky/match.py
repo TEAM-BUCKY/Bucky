@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 
 from bucky.physics.python_backend import TwoRobotPhysics
-from bucky.referee import Referee
+from bucky.game.referee import Referee
 from bucky.selfplay import build_robot_obs, predict_opponent_action
 
 
@@ -63,7 +63,6 @@ class MatchEngine:
         """Accept either the per-side shape or the legacy single-side (red/B) shape."""
         if "a" in control or "b" in control:
             return control
-        # Legacy ``{"action", "red_mode"}`` drove the red robot (B).
         return {"b": {"action": control.get("action"),
                       "mode": control.get("red_mode", "human")}}
 
@@ -116,7 +115,6 @@ class MatchEngine:
             "robot2_pos": sb.robot_pos.tolist(),
             "robot2_heading": float(sb.robot_heading),
             "ball_pos": sa.ball_pos.tolist(),
-            # Kicker charge state (1 = ready, 0 = recharging) so the UI can show an indicator.
             "kick_ready_a": a_ready,
             "kick_ready_b": b_ready,
             "score": dict(decision.score),

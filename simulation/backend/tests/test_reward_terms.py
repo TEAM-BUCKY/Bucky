@@ -235,9 +235,31 @@ def test_shot_on_goal_zero_when_ball_in_capture(physics, config):
     assert compute_rewards(s, s, config, info={}).shot_on_goal == 0.0
 
 
-def test_action_magnitude_ignores_kick_dim(physics, config):
+def test_action_smoothness_ignores_kick_dim(physics, config):
     s = physics._make_state()
+    prev = np.array([0.0, 0.0, 0.0, 0.0])
     action = np.array([0.5, 0.5, 0.0, 1.0])   # big kick dim must not be penalized
+    terms = compute_rewards(s, s, config, info={}, action=action, prev_action=prev)
+    expected = config.w_action_smooth * (0.5**2 + 0.5**2)
+    assert abs(terms.action_smoothness - expected) < 1e-6
+
+
+def test_action_smoothness_zero_without_prev_action(physics, config):
+    # Without a previous action there's nothing to compare against → no penalty.
+    s = physics._make_state()
+    action = np.array([1.0, 1.0, 1.0, 0.0])
     terms = compute_rewards(s, s, config, info={}, action=action)
-    expected = config.w_action_mag * (0.5**2 + 0.5**2)
-    assert abs(terms.action_magnitude - expected) < 1e-6
+    assert terms.action_smoothness == 0.0
+
+
+def test_action_smoothness_penalizes_reversal(physics, config):
+    # Flipping the command back-and-forth (rocking) must cost more than holding it steady.
+    s = physics._make_state()
+    steady = compute_rewards(s, s, config, info={},
+                             action=np.array([1.0, 0.0, 0.0, 0.0]),
+                             prev_action=np.array([1.0, 0.0, 0.0, 0.0]))
+    rocking = compute_rewards(s, s, config, info={},
+                              action=np.array([-1.0, 0.0, 0.0, 0.0]),
+                              prev_action=np.array([1.0, 0.0, 0.0, 0.0]))
+    assert steady.action_smoothness == 0.0
+    assert rocking.action_smoothness < steady.action_smoothness

@@ -10,8 +10,9 @@ from dataclasses import fields as dataclass_fields
 
 import numpy as np
 
-from bucky.field import OPP_GOAL
+from bucky.game.field import OPP_GOAL
 from bucky.physics.backend import PhysicsState
+from bucky.physics.python_backend import MAX_LINEAR
 
 CAPTURE_RADIUS = 0.14
 # Spin penalty only kicks in above this turn rate. Kept at ~50% of the drivetrain's real
@@ -27,16 +28,16 @@ SHOT_SPEED_THRESHOLD = 1.2  # m/s; above this a free ball counts as a struck sho
 
 @dataclass
 class RewardConfig:
-    w_approach: float = 0.5
+    w_approach: float = 1.0
     w_ball_to_goal: float = 2.5
 
     w_possession: float = 1
-    w_front_align: float = 0.3
+    w_front_align: float = 3
 
     w_goal: float = 20.0
     w_goal_against: float = -20.0
 
-    w_out_of_bounds: float = -10.0        # robot fully out → 30 s suspension (rules §4.9)
+    w_out_of_bounds: float = -15.0        # robot fully out → 30 s suspension (rules §4.9)
     w_lack_of_progress: float = -2.0      # ball stuck between robots (rules §4.6)
     w_defective: float = -10.0            # removed as defective (rules §4.7)
     w_spin: float = -0.2
@@ -63,8 +64,16 @@ class RewardConfig:
     # nudging the agent toward decisive shots-on-goal over passive ball-shepherding.
     w_shot_on_goal: float = 1.5           # × (ball velocity component toward goal), when ball is fast & free
 
+    # Reward committing to fast, purposeful motion (counters dithering/rocking in place). Only
+    # the robot's *productive* speed is paid — its velocity component toward the ball (chasing) or
+    # toward the opponent goal (once it has the ball) — so it can't farm reward by zooming around.
+    w_speed: float = 0.05
+
     w_time: float = -0.003                # heavier than before so stalemates/dithering cost more
-    w_action_mag: float = -0.005
+    # Smoothness penalty on the change in the drive command between steps. Steady fast driving
+    # costs ≈0; rocking back-and-forth (flipping the command each step) is penalized hard. This
+    # replaces the old action-*magnitude* penalty, which taxed speed and encouraged creeping.
+    w_action_smooth: float = -0.01
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "RewardConfig":
@@ -82,6 +91,7 @@ class RewardConfig:
 @dataclass
 class RewardTerms:
     approach: float = 0.0
+    speed: float = 0.0
     ball_to_goal: float = 0.0
 
     possession: float = 0.0
@@ -107,21 +117,22 @@ class RewardTerms:
     shot_on_goal: float = 0.0
 
     time_penalty: float = 0.0
-    action_magnitude: float = 0.0
+    action_smoothness: float = 0.0
 
     @property
     def total(self) -> float:
-        return (self.approach + self.ball_to_goal + self.possession +
+        return (self.approach + self.speed + self.ball_to_goal + self.possession +
                 self.front_alignment + self.goal + self.goal_against +
                 self.out_of_bounds + self.lack_of_progress + self.defective +
                 self.spin + self.steal + self.blocked_shot + self.kick_goal +
                 self.bank_shot + self.risky_shot + self.kick_lost +
                 self.kick_at_opponent + self.kick_attempt + self.kick_power_to_goal +
-                self.shot_on_goal + self.time_penalty + self.action_magnitude)
+                self.shot_on_goal + self.time_penalty + self.action_smoothness)
 
     def as_dict(self) -> dict[str, float]:
         return {
             "approach": self.approach,
+            "speed": self.speed,
             "ball_to_goal": self.ball_to_goal,
             "possession": self.possession,
             "front_alignment": self.front_alignment,
@@ -142,7 +153,7 @@ class RewardTerms:
             "kick_power_to_goal": self.kick_power_to_goal,
             "shot_on_goal": self.shot_on_goal,
             "time_penalty": self.time_penalty,
-            "action_magnitude": self.action_magnitude,
+            "action_smoothness": self.action_smoothness,
         }
 
 
@@ -152,12 +163,25 @@ def compute_rewards(
     config: RewardConfig,
     info: dict,
     action: np.ndarray | None = None,
+    prev_action: np.ndarray | None = None,
 ) -> RewardTerms:
     terms = RewardTerms()
 
     d_robot_ball_0 = float(np.linalg.norm(s0.ball_pos - s0.robot_pos))
     d_robot_ball_1 = float(np.linalg.norm(s1.ball_pos - s1.robot_pos))
     terms.approach = config.w_approach * (d_robot_ball_0 - d_robot_ball_1)
+
+    # Speed reward: pay the robot's *actual* velocity component toward its current objective —
+    # the ball while chasing, the opponent goal once it has the ball. Normalized by top speed so
+    # it sits on the same scale as ``approach``; backward/sideways motion earns nothing (clamped).
+    robot_speed = float(np.linalg.norm(s1.robot_vel))
+    if robot_speed > 1e-6:
+        obj = (OPP_GOAL - s1.robot_pos) if d_robot_ball_1 < CAPTURE_RADIUS \
+            else (s1.ball_pos - s1.robot_pos)
+        obj_norm = float(np.linalg.norm(obj))
+        if obj_norm > 1e-6:
+            v_to_obj = float(np.dot(s1.robot_vel, obj / obj_norm))
+            terms.speed = config.w_speed * max(0.0, v_to_obj) / MAX_LINEAR
 
     d_ball_goal_0 = float(np.linalg.norm(s0.ball_pos - OPP_GOAL))
     d_ball_goal_1 = float(np.linalg.norm(s1.ball_pos - OPP_GOAL))
@@ -257,9 +281,11 @@ def compute_rewards(
 
     terms.time_penalty = config.w_time
 
-    if action is not None:
-        # Drive dims only — the kick dim has its own cooldown gating and dedicated
-        # rewards, so it shouldn't be doubly penalized by the action-magnitude term.
-        terms.action_magnitude = config.w_action_mag * float(np.sum(np.asarray(action[:3])**2))
+    if action is not None and prev_action is not None:
+        # Anti-rocking: penalize the change in the drive command between steps (kick dim excluded —
+        # it has its own cooldown gating and dedicated rewards). Steady driving → ~0; flipping the
+        # command back-and-forth each step → large penalty.
+        da = np.asarray(action[:3]) - np.asarray(prev_action[:3])
+        terms.action_smoothness = config.w_action_smooth * float(np.sum(da ** 2))
 
     return terms

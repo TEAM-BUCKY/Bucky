@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from bucky.field import COLLISION_DIST, GOAL_HALF_WIDTH, HALF_W
+from bucky.game.field import COLLISION_DIST, GOAL_HALF_WIDTH, HALF_W
 from bucky.physics.backend import PhysicsState
 from bucky.rewards import CAPTURE_RADIUS
 

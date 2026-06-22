@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from bucky.field import (
+from bucky.game.field import (
     ARENA_HALF_X,
     ARENA_HALF_Y,
     BALL_RADIUS,

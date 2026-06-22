@@ -10,6 +10,7 @@
 
 export interface RewardTerms {
 	approach: number;
+	speed: number;
 	ball_to_goal: number;
 	possession: number;
 	front_alignment: number;
@@ -20,7 +21,7 @@ export interface RewardTerms {
 	defective: number;
 	spin: number;
 	time_penalty: number;
-	action_magnitude: number;
+	action_smoothness: number;
 	[key: string]: number;
 }
 

@@ -5,7 +5,7 @@ import pytest
 from bucky.physics.python_backend import (
     TwoRobotPhysics, FIELD_W, GOAL_WIDTH, ROBOT_RADIUS,
 )
-from bucky.field import in_penalty_area
+from bucky.game.field import in_penalty_area
 
 ZERO = (0.0, 0.0, 0.0)
 GOAL_HALF = GOAL_WIDTH / 2

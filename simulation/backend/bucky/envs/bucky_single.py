@@ -11,7 +11,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from bucky import field
+from bucky.game import field
 from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.obs import OBS_DIM, build_observation
 from bucky.physics.python_backend import PyPhysics
@@ -60,6 +60,7 @@ class BuckySingleEnv(gym.Env):
         self._rng = np.random.default_rng()
         self._ep_rand: EpisodeRandomization = EpisodeRandomization()
         self._action_buffer: deque[np.ndarray] = deque()
+        self._prev_action = np.zeros(4, dtype=np.float32)
         self._step_count = 0
         self._heading_drift = 0.0
         self._ball_out_steps = 0
@@ -75,6 +76,7 @@ class BuckySingleEnv(gym.Env):
         self._ep_rand = sample_episode_randomization(self._rand_cfg, self._rng)
         self._spawn_ball()
         self._action_buffer.clear()
+        self._prev_action = np.zeros(4, dtype=np.float32)
         self._step_count = 0
         self._heading_drift = 0.0
         self._ball_out_steps = 0
@@ -148,8 +150,10 @@ class BuckySingleEnv(gym.Env):
 
         info["out_of_bounds"] = robot_just_out
 
-        reward_terms = compute_rewards(state0, state1, self._reward_cfg, info, action=action)
+        reward_terms = compute_rewards(state0, state1, self._reward_cfg, info,
+                                       action=action, prev_action=self._prev_action)
         reward = self._filter_reward(reward_terms)
+        self._prev_action = action.copy()
 
         terminated = bool(info["goal_scored"] or info["robot_fully_out"])
         self._step_count += 1

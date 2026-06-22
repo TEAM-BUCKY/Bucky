@@ -20,7 +20,7 @@ from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.physics.python_backend import TwoRobotPhysics
 from bucky.play_events import PlayEventTracker
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
-from bucky.referee import Referee
+from bucky.game.referee import Referee
 from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
 from bucky.selfplay import (
     SELF_PLAY_OBS_DIM, build_robot_obs, load_numpy_opponent, predict_opponent_action,
@@ -66,6 +66,7 @@ class BuckySelfPlayEnv(gym.Env):
         self._rng = np.random.default_rng()
         self._ep_rand: EpisodeRandomization = EpisodeRandomization()
         self._action_buffer: deque[np.ndarray] = deque()
+        self._prev_action = np.zeros(4, dtype=np.float32)
         self._events = PlayEventTracker()
         self._step_count = 0
         self._heading_drift = 0.0
@@ -119,6 +120,7 @@ class BuckySelfPlayEnv(gym.Env):
         self._ref.reset(self._phys)
         self._ep_rand = sample_episode_randomization(self._rand_cfg, self._rng)
         self._action_buffer.clear()
+        self._prev_action = np.zeros(4, dtype=np.float32)
         self._events.reset()
         self._step_count = 0
         self._heading_drift = 0.0
@@ -160,9 +162,11 @@ class BuckySelfPlayEnv(gym.Env):
         }
         # Opponent-aware skilled-play events (steal, block, risky shot, kick lost, kicked/bank goal).
         reward_info.update(self._events.update(state1, state_b1, info))
-        reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info, action=action)
+        reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info,
+                                       action=action, prev_action=self._prev_action)
         self._last_terms = reward_terms
         reward = self._filter_reward(reward_terms)
+        self._prev_action = action.copy()
 
         # Play continues through goals (the referee kicks off); the episode ends only
         # when the learner (A) is sent off, or on the step budget.

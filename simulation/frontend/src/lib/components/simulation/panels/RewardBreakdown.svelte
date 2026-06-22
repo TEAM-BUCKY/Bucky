@@ -7,6 +7,7 @@
 	const TERM_ORDER = [
 		'ball_to_goal',
 		'approach',
+		'speed',
 		'possession',
 		'front_alignment',
 		'goal',
@@ -14,7 +15,7 @@
 		'ball_out',
 		'spin',
 		'time_penalty',
-		'action_magnitude'
+		'action_smoothness'
 	];
 
 	const POS = '#34d399';
