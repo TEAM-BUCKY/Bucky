@@ -132,12 +132,16 @@ class BuckySingleEnv(gym.Env):
 
         self._heading_drift += self._ep_rand.heading_drift_rate
 
-        if info["ball_out"]:
+        # Raw crossing flag: the ball is past the white line *this step* (pre-grace). Used to
+        # attribute the out-of-bounds shot penalty to the kick that caused it (tight credit
+        # assignment) and to suppress positive shaping while the ball is out (see compute_rewards).
+        raw_ball_out = bool(info["ball_out"])
+        if raw_ball_out:
             self._ball_out_steps += 1
         else:
             self._ball_out_steps = 0
-        ball_out_of_bounds = self._ball_out_steps >= OOB_GRACE_STEPS
-        if ball_out_of_bounds:
+        ball_relocated = self._ball_out_steps >= OOB_GRACE_STEPS
+        if ball_relocated:
             # Rule §4.8/§4.9.5: replace the ball at the nearest neutral spot, play on.
             spot = field.nearest_neutral_spot(self._physics._ball_pos,
                                               occupied=[self._physics._robot_pos],
@@ -146,12 +150,15 @@ class BuckySingleEnv(gym.Env):
             self._physics._ball_vel = np.zeros(2)
             self._ball_out_steps = 0
 
-        info["ball_out"] = ball_out_of_bounds
+        info["ball_out"] = ball_relocated
+        info["ball_out_raw"] = raw_ball_out
 
-        # Shot out of bounds: a kicked ball that left the robot and then had to be relocated
-        # for going out of play. Heavily penalized — UNLESS it scored, since a rebound into
-        # the goal fires goal_scored (and ends the episode) before any relocation, so it
-        # never reaches this branch. Recapturing the ball resolves the shot with no penalty.
+        # Shot out of bounds: a kicked ball that left the robot and then crossed the white line.
+        # The penalty fires the moment the ball crosses (not after the 50-step relocation grace),
+        # so it lands a few steps after the kick — close enough for γ=0.99 and the memoryless
+        # policy to credit the kick. UNLESS it scored: a rebound into the goal fires goal_scored
+        # (and ends the episode) first, so it never reaches this branch. Recapturing the ball
+        # resolves the shot with no penalty.
         d_robot_ball = float(np.linalg.norm(state1.ball_pos - state1.robot_pos))
         if info["kicked"]:
             self._shot_in_flight = True
@@ -162,7 +169,7 @@ class BuckySingleEnv(gym.Env):
                 self._shot_departed = True
             if info["goal_scored"]:
                 self._shot_in_flight = False
-            elif self._shot_departed and ball_out_of_bounds:
+            elif self._shot_departed and raw_ball_out:
                 shot_out_of_bounds = True
                 self._shot_in_flight = False
             elif self._shot_departed and d_robot_ball < CONTACT_DIST:

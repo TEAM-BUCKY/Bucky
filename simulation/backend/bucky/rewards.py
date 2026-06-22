@@ -10,7 +10,7 @@ from dataclasses import fields as dataclass_fields
 
 import numpy as np
 
-from bucky.game.field import OPP_GOAL
+from bucky.game.field import GOAL_HALF_WIDTH, HALF_H, HALF_W, OPP_GOAL, WALL_BAND
 from bucky.physics.backend import PhysicsState
 from bucky.physics.python_backend import MAX_LINEAR
 
@@ -24,6 +24,41 @@ SHOT_SPEED_THRESHOLD = 1.2  # m/s; above this a free ball counts as a struck sho
                             # NOTE: with the real MAX_LINEAR≈5.24 m/s a hard dribble can now exceed
                             # this, so the threshold no longer cleanly separates dribble vs kick —
                             # revisit if shot_on_goal starts firing on driven balls.
+
+# Anti-stuck: below these speeds (m/s) the ball/robot count as "not moving".
+STUCK_BALL_SPEED = 0.15
+STUCK_ROBOT_SPEED = 0.15
+# Extra multiplier on the play-out-of-bounds penalty when the robot actively kicks the out ball.
+KICK_OOB_EXTRA = 3.0
+
+
+def _shot_enters_goal_mouth(ball_pos, ball_vel) -> bool:
+    """True if a free ball travelling straight from ``ball_pos`` along ``ball_vel`` would reach
+    the opponent (+x) goal line *inside the mouth* before crossing any other white line — i.e.
+    the shot is genuinely on target and stays in play until it scores.
+
+    Used to gate the kick-shaping reward so that only on-target shots pay out: a goal-ward kick
+    that would sail past a side/back line (out of bounds) earns nothing, removing the incentive
+    to blast the ball out of play.
+    """
+    vx, vy = float(ball_vel[0]), float(ball_vel[1])
+    if vx <= 1e-6:                                  # not heading toward the +x goal at all
+        return False
+    t_goal = (HALF_W - float(ball_pos[0])) / vx
+    if t_goal <= 0.0:                               # already past the goal line
+        return False
+    y_at_goal = float(ball_pos[1]) + vy * t_goal
+    if abs(y_at_goal) >= GOAL_HALF_WIDTH:           # crosses the +x line outside the mouth → out
+        return False
+    if vy > 1e-9:                                   # crosses a side line before the goal? → out
+        t_side = (HALF_H - float(ball_pos[1])) / vy
+        if 0.0 < t_side < t_goal:
+            return False
+    elif vy < -1e-9:
+        t_side = (-HALF_H - float(ball_pos[1])) / vy
+        if 0.0 < t_side < t_goal:
+            return False
+    return True
 
 
 @dataclass
@@ -42,6 +77,12 @@ class RewardConfig:
     w_defective: float = -25.0            # removed as defective (rules §4.7)
     w_spin: float = -1
 
+    # Per-step penalty while the ball sits out of bounds (in the relocation grace window) —
+    # chasing / re-kicking it only drives it further out. Scaled by how far past the line it is.
+    w_play_oob_ball: float = -0.5
+    # Per-step nudge when idling away from the ball (ball still, robot still, no possession).
+    w_stuck: float = -0.1
+
     # Skilled-play terms (kicker + opponent-aware; see bucky.play_events).
     w_steal: float = 10.0                  # capture ball from enemy, × field-position gradient
     w_blocked_shot: float = 15            # block an enemy shot on our goal
@@ -54,8 +95,9 @@ class RewardConfig:
     # UNLESS it banks in for a goal — that scores before any relocation, so it never fires this.
     w_shot_out_of_bounds: float = -40.0
 
-    w_kick_attempt: float = 0.5           # flat bonus for a legal kick aimed goal-ward (clear path)
-    w_kick_power_to_goal: float = 2     # × cos(kick heading, ball→goal): reward aiming kicks at goal
+    w_kick_attempt: float = 0.0           # flat bonus, only paid for an on-target in-play shot
+                                          # (default off: kept the spam incentive in check)
+    w_kick_power_to_goal: float = 2     # × cos(ball velocity, ball→goal) for on-target shots
 
     w_shot_on_goal: float = 2.5           # × (ball velocity component toward goal), when ball is fast & free
 
@@ -93,6 +135,8 @@ class RewardTerms:
     lack_of_progress: float = 0.0
     defective: float = 0.0
     spin: float = 0.0
+    play_oob_ball: float = 0.0
+    stuck: float = 0.0
 
     steal: float = 0.0
     blocked_shot: float = 0.0
@@ -114,7 +158,8 @@ class RewardTerms:
         return (self.approach + self.speed + self.ball_to_goal + self.possession +
                 self.front_alignment + self.goal + self.goal_against +
                 self.out_of_bounds + self.lack_of_progress + self.defective +
-                self.spin + self.steal + self.blocked_shot + self.kick_goal +
+                self.spin + self.play_oob_ball + self.stuck +
+                self.steal + self.blocked_shot + self.kick_goal +
                 self.bank_shot + self.risky_shot + self.kick_lost +
                 self.kick_at_opponent + self.shot_out_of_bounds + self.kick_attempt +
                 self.kick_power_to_goal + self.shot_on_goal + self.time_penalty +
@@ -133,6 +178,8 @@ class RewardTerms:
             "lack_of_progress": self.lack_of_progress,
             "defective": self.defective,
             "spin": self.spin,
+            "play_oob_ball": self.play_oob_ball,
+            "stuck": self.stuck,
             "steal": self.steal,
             "blocked_shot": self.blocked_shot,
             "kick_goal": self.kick_goal,
@@ -159,6 +206,11 @@ def compute_rewards(
 ) -> RewardTerms:
     terms = RewardTerms()
 
+    # The ball has crossed the white line this step (in the relocation grace window). While this
+    # holds, engaging the ball (chasing, dribbling, kicking it goal-ward) only drives it further
+    # out, so the positive shaping below is suppressed and a dedicated penalty is applied instead.
+    ball_out_raw = bool(info.get("ball_out_raw", False))
+
     d_robot_ball_0 = float(np.linalg.norm(s0.ball_pos - s0.robot_pos))
     d_robot_ball_1 = float(np.linalg.norm(s1.ball_pos - s1.robot_pos))
     terms.approach = config.w_approach * (d_robot_ball_0 - d_robot_ball_1)
@@ -177,9 +229,11 @@ def compute_rewards(
 
     d_ball_goal_0 = float(np.linalg.norm(s0.ball_pos - OPP_GOAL))
     d_ball_goal_1 = float(np.linalg.norm(s1.ball_pos - OPP_GOAL))
-    terms.ball_to_goal = config.w_ball_to_goal * (d_ball_goal_0 - d_ball_goal_1)
+    ball_to_goal = config.w_ball_to_goal * (d_ball_goal_0 - d_ball_goal_1)
+    # While the ball is out, keep only the penalty side (don't reward shoving an out ball goalward).
+    terms.ball_to_goal = min(0.0, ball_to_goal) if ball_out_raw else ball_to_goal
 
-    if d_robot_ball_1 < CAPTURE_RADIUS:
+    if d_robot_ball_1 < CAPTURE_RADIUS and not ball_out_raw:
         heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
         if np.dot(heading_vec, s1.ball_pos - s1.robot_pos) > 0:
             terms.possession = config.w_possession
@@ -193,7 +247,7 @@ def compute_rewards(
     # Faded in by proximity.
     to_goal = OPP_GOAL - s1.ball_pos
     to_goal_dist = float(np.linalg.norm(to_goal))
-    if to_goal_dist > 1e-6 and d_robot_ball_1 > 1e-6:
+    if to_goal_dist > 1e-6 and d_robot_ball_1 > 1e-6 and not ball_out_raw:
         goal_dir = to_goal / to_goal_dist
         approach_dir = (s1.ball_pos - s1.robot_pos) / d_robot_ball_1
         heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
@@ -247,33 +301,52 @@ def compute_rewards(
     if kick_at_opponent:
         terms.kick_at_opponent = config.w_kick_at_opponent
 
-    # Dense kicker shaping: a legal kick (``info["kicked"]``) earns a flat attempt bonus plus
-    # a term scaled by how well the kick heading points at the opponent goal. Backward / sideways
-    # kicks (cos ≤ 0) earn nothing, and a kick aimed into the opponent earns nothing either — so
-    # this rewards *useful* kicks with a clear path, not flailing or feeding the enemy.
-    if info.get("kicked", False) and not kick_at_opponent:
+    # Dense kicker shaping: a legal kick (``info["kicked"]``) is rewarded only when the struck
+    # ball is genuinely *on target* — its post-kick trajectory enters the opponent goal mouth
+    # before crossing any white line (``_shot_enters_goal_mouth``). A goal-ward kick that would
+    # sail out of bounds, a kick into the opponent, or a kick of an already-out ball earns
+    # nothing — removing the "blast it anywhere goal-ward" incentive behind random / out-of-play
+    # kicks. The reward scales by how squarely the ball is aimed at the goal.
+    if info.get("kicked", False) and not kick_at_opponent and not ball_out_raw \
+            and _shot_enters_goal_mouth(s1.ball_pos, s1.ball_vel):
+        speed = float(np.linalg.norm(s1.ball_vel))
         to_goal = OPP_GOAL - s1.ball_pos
         to_goal_norm = float(np.linalg.norm(to_goal))
-        if to_goal_norm > 1e-6:
-            goal_dir = to_goal / to_goal_norm
-            heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
-            cos_to_goal = float(np.dot(heading_vec, goal_dir))
-            if cos_to_goal > 0.0:
-                terms.kick_attempt = config.w_kick_attempt
-                terms.kick_power_to_goal = config.w_kick_power_to_goal * cos_to_goal
+        if speed > 1e-6 and to_goal_norm > 1e-6:
+            cos_to_goal = float(np.dot(s1.ball_vel / speed, to_goal / to_goal_norm))
+            terms.kick_attempt = config.w_kick_attempt
+            terms.kick_power_to_goal = config.w_kick_power_to_goal * max(0.0, cos_to_goal)
 
     # Quick-shot shaping: reward a fast, *free* ball heading at the goal. Gated on the ball
     # being out of the robot's capture radius (so a fast dribble doesn't count) and above a
     # speed threshold (so only a struck shot counts). Only the goalward velocity component is
     # rewarded; a fast ball going the wrong way earns nothing (clamped at 0).
     ball_speed = float(np.linalg.norm(s1.ball_vel))
-    if ball_speed > SHOT_SPEED_THRESHOLD and d_robot_ball_1 > CAPTURE_RADIUS:
+    if ball_speed > SHOT_SPEED_THRESHOLD and d_robot_ball_1 > CAPTURE_RADIUS and not ball_out_raw:
         to_goal = OPP_GOAL - s1.ball_pos
         to_goal_norm = float(np.linalg.norm(to_goal))
         if to_goal_norm > 1e-6:
             goal_dir = to_goal / to_goal_norm
             vel_to_goal = float(np.dot(s1.ball_vel, goal_dir))
             terms.shot_on_goal = config.w_shot_on_goal * max(0.0, vel_to_goal)
+
+    # Playing an out-of-bounds ball: while it sits past the white line (relocation grace window),
+    # chasing or re-kicking it only drives it further out. Penalize per step, scaled by how far
+    # past the line the ball is, with an extra slap for actively kicking it out there.
+    if ball_out_raw:
+        over = max(abs(float(s1.ball_pos[0])) - HALF_W,
+                   abs(float(s1.ball_pos[1])) - HALF_H, 0.0)
+        pen = 1.0 + over / WALL_BAND
+        if info.get("kicked", False):
+            pen += KICK_OOB_EXTRA
+        terms.play_oob_ball = config.w_play_oob_ball * pen
+
+    # Anti-stuck: not in possession, the ball essentially stationary, and the robot barely moving
+    # — i.e. idling instead of going to the ball (including pinned against a wall). A small per-step
+    # nudge to keep it active; brief decelerations cost little.
+    if (d_robot_ball_1 > CAPTURE_RADIUS and not ball_out_raw
+            and ball_speed < STUCK_BALL_SPEED and robot_speed < STUCK_ROBOT_SPEED):
+        terms.stuck = config.w_stuck
 
     excess_spin = max(0.0, abs(s1.robot_omega) - MAX_OMEGA_PENALTY)
     terms.spin = config.w_spin * excess_spin

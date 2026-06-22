@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from bucky.game.field import COLLISION_DIST, GOAL_HALF_WIDTH, HALF_W
+from bucky.game.field import COLLISION_DIST, GOAL_HALF_WIDTH, HALF_W, ball_out_of_play
 from bucky.physics.backend import PhysicsState
 from bucky.rewards import CAPTURE_RADIUS
 
@@ -125,17 +125,18 @@ class PlayEventTracker:
         if self._kick_goal_timer > 0:
             self._kick_goal_timer -= 1
 
-        # ── shot out of bounds: a kicked ball that left A and then had to be relocated for
-        #    leaving the field of play ("out_of_reach"), without scoring. The env passes the
-        #    referee's relocation reason in ``ball_oob_relocated``. The goal case is excluded
-        #    structurally (a bank/rebound that scores fires ``goal_a`` and the referee never
-        #    relocates), and resolving on recovery / loss-to-B keeps it from misfiring later. ──
+        # ── shot out of bounds: a kicked ball that left A and then crossed the white line,
+        #    without scoring. Fires the moment the ball goes out (``ball_out_of_play``) rather
+        #    than waiting for the referee's relocation grace, so the penalty lands a few steps
+        #    after the kick — tight enough for the memoryless policy to credit it. The goal case
+        #    is excluded structurally (a bank/rebound that scores fires ``goal_a`` first), and
+        #    resolving on recovery / loss-to-B keeps it from misfiring later. ──
         if self._shot_in_flight:
             if not self._shot_departed and a_dist > CONTACT_DIST:
                 self._shot_departed = True
             if goal_a:
                 self._shot_in_flight = False                       # scored — rewarded, not punished
-            elif self._shot_departed and phys_info.get("ball_oob_relocated", False):
+            elif self._shot_departed and ball_out_of_play(ball_pos):
                 out["shot_out_of_bounds"] = True
                 self._shot_in_flight = False
             elif self._shot_departed and (a_owns or owner == "b"):

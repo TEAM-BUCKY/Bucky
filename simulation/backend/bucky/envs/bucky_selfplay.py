@@ -20,6 +20,7 @@ from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.physics.python_backend import TwoRobotPhysics
 from bucky.play_events import PlayEventTracker
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
+from bucky.game.field import ball_out_of_play
 from bucky.game.referee import Referee
 from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
 from bucky.selfplay import (
@@ -157,6 +158,9 @@ class BuckySelfPlayEnv(gym.Env):
             "lack_of_progress": "lack_of_progress" in decision.events,
             "defective": any(e.startswith("defective_a") for e in decision.events),
             "ball_out": decision.ball_relocated,
+            # Raw crossing flag (pre-relocation): the ball is past the white line this step.
+            # Suppresses positive shaping and drives the play-out-of-bounds penalty.
+            "ball_out_raw": ball_out_of_play(state1.ball_pos),
             # Learner is robot A; surface its legal-kick flag for the dense kick-shaping terms.
             "kicked": bool(info.get("kicked_a", False)),
         }

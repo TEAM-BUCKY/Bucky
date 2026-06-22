@@ -1,6 +1,6 @@
 """Observation builder — single source of truth for the observation vector.
 
-Layout (total 18 dims):
+Layout (total 23 dims):
   [0:2]  ball_bearing (sin, cos)            — avoids angle wrap
   [2]    ball_distance (normalized)
   [3:5]  ball_vel (vx, vy) robot frame
@@ -11,11 +11,16 @@ Layout (total 18 dims):
   [13]   over_goal_area_flag
   [14:17] teammate (rel_x, rel_y, has_ball) — zeroed in stage 1
   [17]   kick_ready (1.0 = kicker recharged, 0.0 = on cooldown)
+  [18]   ball_line_dist  — ball's signed distance to its nearest white line (>0 inside)
+  [19]   ball_vel_toward_line — ball speed component toward that line (>0 heading out)
+  [20:22] respawn_rel (rel_x, rel_y) — robot-frame vector to where the ball would relocate
+  [22]   ball_out_flag   — 1.0 while the ball is past the white line (in the grace window)
 """
 from __future__ import annotations
 
 import numpy as np
 
+from bucky.game import field as _field
 from bucky.game.field import FIELD_H as _FIELD_H
 from bucky.game.field import FIELD_W as _FIELD_W
 from bucky.game.field import PENALTY_DEPTH, PENALTY_HALF_WIDTH
@@ -29,7 +34,7 @@ _MAX_OMEGA = 58.18
 # so robot/ball velocity observations span ~[-1, 1] instead of clipping.
 _MAX_VEL = 5.236
 
-OBS_DIM: int = 18
+OBS_DIM: int = 23
 
 _NOISE_BEARING_STD = np.deg2rad(3.0)
 _NOISE_DIST_FRAC_STD = 0.15
@@ -97,6 +102,25 @@ def build_observation(
     in_goal_y = abs(state.robot_pos[1]) < PENALTY_HALF_WIDTH
     over_goal = float(in_goal_x and in_goal_y)
 
+    # Ball-vs-boundary awareness, so the memoryless policy can *anticipate* the ball going out
+    # (and where it will respawn) instead of only reacting after the fact. Signed distance from
+    # the ball to its nearest white line (>0 inside), the ball's velocity component toward that
+    # line (>0 = heading out), a robot-frame vector to the spot the ball would be relocated to,
+    # and a flag for the ball already being out. Derived from ground truth (no sensor noise) —
+    # these are coarse spatial cues, not a sensor reading.
+    bx, by = float(state.ball_pos[0]), float(state.ball_pos[1])
+    line_dists = (_FIELD_W / 2 - bx, bx + _FIELD_W / 2,
+                  _FIELD_H / 2 - by, by + _FIELD_H / 2)
+    line_normals = ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0))
+    near_idx = int(np.argmin(line_dists))
+    ball_line_dist = line_dists[near_idx] / (_FIELD_H / 2)
+    n = line_normals[near_idx]
+    ball_vel_toward_line = float(state.ball_vel[0] * n[0] + state.ball_vel[1] * n[1]) / _MAX_VEL
+
+    respawn = _field.nearest_neutral_spot(state.ball_pos)
+    respawn_rel = (R @ (respawn - state.robot_pos)) / _FIELD_DIAG
+    ball_out_flag = float(_field.ball_out_of_play(state.ball_pos))
+
     obs = np.array([
         np.sin(bearing),
         np.cos(bearing),
@@ -114,6 +138,11 @@ def build_observation(
         over_goal,
         0.0, 0.0, 0.0,   # teammate (stage-1 zeros)
         float(kick_ready),
+        ball_line_dist,
+        ball_vel_toward_line,
+        respawn_rel[0],
+        respawn_rel[1],
+        ball_out_flag,
     ], dtype=np.float32)
 
     return obs

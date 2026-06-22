@@ -4,7 +4,7 @@ The single-agent policy is trained to attack the **+x** goal. Robot B attacks **
 to drive B with the same policy we reflect the world across the x-axis (B then "sees" itself
 attacking +x), run the policy, and un-mirror the resulting action. Opponent perception is via
 a 4-beam sonar model (the real robot only has 4 ultrasonic sensors at 90° spacing), appended
-to the 18-dim single-agent observation → a 22-dim opponent-aware observation.
+to the 23-dim single-agent observation → a 27-dim opponent-aware observation.
 """
 from __future__ import annotations
 import numpy as np
@@ -20,7 +20,7 @@ MAX_SONAR_RANGE = 1.5               # metres; beyond this a beam reads "clear" (
 _SONAR_NOISE_STD = 0.02             # metres, when domain randomization is on
 _SONAR_DROPOUT_P = 0.05             # chance a beam misses (reads clear)
 
-SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 18 base + 4 sonar = 22
+SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 23 base + 4 sonar = 27
 
 
 def _wrap(a: float) -> float:
@@ -120,7 +120,7 @@ def sonar_ranges(
     return readings
 
 
-# ── opponent-aware observation (21-dim) ──────────────────────────────────────
+# ── opponent-aware observation (27-dim) ──────────────────────────────────────
 def build_robot_obs(
     state: PhysicsState,
     opponent_pos: np.ndarray | None,

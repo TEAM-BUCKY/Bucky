@@ -5,7 +5,7 @@ from bucky.physics.python_backend import TwoRobotPhysics
 from bucky.physics.backend import PhysicsState
 from bucky.selfplay import (
     reflect_pos, reflect_vel, reflect_heading, reflect_omega, mirror_action,
-    reflect_state, build_robot_obs,
+    reflect_state, build_robot_obs, SELF_PLAY_OBS_DIM,
 )
 from bucky.obs import build_observation, OBS_DIM
 
@@ -54,14 +54,14 @@ def test_reflect_state_is_involution():
     assert np.allclose(back.ball_pos, st.ball_pos)
 
 
-def test_build_robot_obs_is_22_dims():
+def test_build_robot_obs_is_self_play_dims():
     st = PhysicsState(
         robot_pos=np.array([0.0, 0.0]), robot_vel=np.zeros(2),
         robot_heading=0.0, robot_omega=0.0,
         ball_pos=np.array([0.5, 0.0]), ball_vel=np.zeros(2),
     )
     obs = build_robot_obs(st, opponent_pos=np.array([0.6, 0.0]))
-    assert obs.shape == (22,)
+    assert obs.shape == (SELF_PLAY_OBS_DIM,)
     assert obs.dtype == np.float32
     # First OBS_DIM dims match the single-agent observation exactly.
     assert np.allclose(obs[:OBS_DIM], build_observation(st))

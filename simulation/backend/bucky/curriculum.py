@@ -43,7 +43,7 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
             "kick_goal", "bank_shot", "risky_shot", "kick_lost", "kick_at_opponent",
             "shot_out_of_bounds",
             "out_of_bounds", "lack_of_progress", "defective", "spin", "time_penalty",
-            "action_smoothness",
+            "action_smoothness", "play_oob_ball", "stuck",
         ],
         opponent_present=True,
         recommended_ent_coef=0.025,  # more exploration so the two robots don't lock into a symmetric stalemate
