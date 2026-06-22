@@ -42,7 +42,7 @@ class BuckySingleEnv(gym.Env):
 
     def __init__(
         self,
-        stage: Stage | str = Stage.APPROACH_STATIC_BALL,
+        stage: Stage | str = Stage.SELF_PLAY_1V1,
         domain_rand: bool = True,
         reward_config: RewardConfig | None = None,
         viz_callback=None,

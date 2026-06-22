@@ -7,12 +7,12 @@ from bucky.curriculum import Stage
 
 @pytest.fixture
 def env():
-    e = BuckySingleEnv(stage=Stage.APPROACH_STATIC_BALL, domain_rand=False)
+    e = BuckySingleEnv(stage=Stage.SELF_PLAY_1V1, domain_rand=False)
     yield e
     e.close()
 
 def test_gymnasium_check_env():
-    env = BuckySingleEnv(stage=Stage.APPROACH_STATIC_BALL, domain_rand=False)
+    env = BuckySingleEnv(stage=Stage.SELF_PLAY_1V1, domain_rand=False)
     check_env(env, warn=True)
     env.close()
 
