@@ -28,38 +28,38 @@ SHOT_SPEED_THRESHOLD = 1.2  # m/s; above this a free ball counts as a struck sho
 
 @dataclass
 class RewardConfig:
-    w_approach: float = 1.0
-    w_ball_to_goal: float = 2.5
+    w_approach: float = 2.5
+    w_ball_to_goal: float = 5.0
 
-    w_possession: float = 1.0
-    w_front_align: float = 3.0
+    w_possession: float = 5.0
+    w_front_align: float = 10.0
 
-    w_goal: float = 20.0
-    w_goal_against: float = -40.0
+    w_goal: float = 50.0
+    w_goal_against: float = -100.0
 
-    w_out_of_bounds: float = -20.0        # robot fully out → 30 s suspension (rules §4.9)
-    w_lack_of_progress: float = -2.0      # ball stuck between robots (rules §4.6)
-    w_defective: float = -10.0            # removed as defective (rules §4.7)
-    w_spin: float = -0.2
+    w_out_of_bounds: float = -50.0        # robot fully out → 30 s suspension (rules §4.9)
+    w_lack_of_progress: float = -5.0      # ball stuck between robots (rules §4.6)
+    w_defective: float = -25.0            # removed as defective (rules §4.7)
+    w_spin: float = -1
 
     # Skilled-play terms (kicker + opponent-aware; see bucky.play_events).
-    w_steal: float = 3.0                  # capture ball from enemy, × field-position gradient
-    w_blocked_shot: float = 10           # block an enemy shot on our goal
-    w_kick_goal: float = 4.0              # bonus: goal scored from a kick (vs dribbling it in)
-    w_bank_shot: float = 5.0              # bonus: goal scored off a wall bounce
-    w_risky_shot: float = 1.0             # kick threaded *past* (clearing) the opponent toward goal
-    w_kick_lost: float = -14.0            # giving the enemy the ball: our kicked ball captured by enemy
-    w_kick_at_opponent: float = -6.0      # firing the ball straight into the opponent (a give-away)
+    w_steal: float = 10.0                  # capture ball from enemy, × field-position gradient
+    w_blocked_shot: float = 15            # block an enemy shot on our goal
+    w_kick_goal: float = 8.0              # bonus: goal scored from a kick (vs dribbling it in)
+    w_bank_shot: float = 6.0              # bonus: goal scored off a wall bounce
+    w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
+    w_kick_lost: float = -20.0            # giving the enemy the ball: our kicked ball captured by enemy
+    w_kick_at_opponent: float = -10.0      # firing the ball straight into the opponent (a give-away)
 
-    w_kick_attempt: float = 0.1           # flat bonus for a legal kick aimed goal-ward (clear path)
-    w_kick_power_to_goal: float = 1.5     # × cos(kick heading, ball→goal): reward aiming kicks at goal
+    w_kick_attempt: float = 0.5           # flat bonus for a legal kick aimed goal-ward (clear path)
+    w_kick_power_to_goal: float = 2     # × cos(kick heading, ball→goal): reward aiming kicks at goal
 
-    w_shot_on_goal: float = 1.5           # × (ball velocity component toward goal), when ball is fast & free
+    w_shot_on_goal: float = 2.5           # × (ball velocity component toward goal), when ball is fast & free
 
-    w_speed: float = 0.05
+    w_speed: float = 0.1
 
-    w_time: float = -0.01
-    w_action_smooth: float = -0.01
+    w_time: float = -0.02
+    w_action_smooth: float = -0.02
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "RewardConfig":
