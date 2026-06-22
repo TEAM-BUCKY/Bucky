@@ -10,7 +10,7 @@ def state():
     return p.reset(seed=0)
 
 def test_obs_dim_constant():
-    assert OBS_DIM == 23
+    assert OBS_DIM == 35
 
 
 def _place(physics, robot_pos, heading, ball_pos, ball_vel=(0.0, 0.0)):
@@ -59,6 +59,17 @@ def test_obs_ball_vel_toward_line_sign():
     inward = build_observation(_place(p, [0.0, 0.0], 0.0, [0.8, 0.0], [-3.0, 0.0]))
     assert outward[19] > 0.0
     assert inward[19] < 0.0
+
+def test_obs_kick_prediction_block_on_target():
+    # Robot behind the ball facing +x: a kick fired now flies straight into the opponent goal.
+    # The kick-prediction block [23:35] must flag the 1st contact as a goal and leave the 2nd empty.
+    p = PyPhysics(); p.reset(seed=0)
+    obs = build_observation(_place(p, [-0.2, 0.0], 0.0, [0.0, 0.0]))
+    first, second = obs[23:29], obs[29:35]
+    assert first[0] == 1.0 and first[1] == 0.0 and first[2] == 0.0      # 1st contact = goal
+    assert first[5] > 0.0                                                # positive distance to it
+    assert np.all(second == 0.0)                                         # goal is terminal
+
 
 def test_obs_shape(state):
     obs = build_observation(state)

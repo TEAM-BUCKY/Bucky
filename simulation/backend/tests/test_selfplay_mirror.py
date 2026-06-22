@@ -60,11 +60,13 @@ def test_build_robot_obs_is_self_play_dims():
         robot_heading=0.0, robot_omega=0.0,
         ball_pos=np.array([0.5, 0.0]), ball_vel=np.zeros(2),
     )
-    obs = build_robot_obs(st, opponent_pos=np.array([0.6, 0.0]))
+    opp = np.array([0.6, 0.0])
+    obs = build_robot_obs(st, opponent_pos=opp)
     assert obs.shape == (SELF_PLAY_OBS_DIM,)
     assert obs.dtype == np.float32
-    # First OBS_DIM dims match the single-agent observation exactly.
-    assert np.allclose(obs[:OBS_DIM], build_observation(st))
+    # First OBS_DIM dims match the single-agent observation built with the same opponent (the
+    # kick-prediction block depends on the opponent, so it must be passed through here too).
+    assert np.allclose(obs[:OBS_DIM], build_observation(st, opponent_pos=opp))
 
 
 def test_mirror_keeps_b_the_reflection_of_a():

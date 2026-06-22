@@ -128,6 +128,20 @@ def test_ball_still_scores_through_the_mouth(phys):
     assert info["goal_a"] is True
 
 
+def test_near_post_shot_scores_even_if_it_exits_the_mouth_edge(phys):
+    """Regression for the out-then-goal bug: a fast diagonal shot that crosses the goal line
+    *inside* the mouth but ends the step with |y| just past the mouth edge must score — it was
+    in the opening when it crossed the line. The old end-of-step y test mis-counted it as out."""
+    phys.reset(seed=0)
+    phys._a_pos = np.array([0.0, -0.4])
+    phys._b_pos = np.array([0.0, 0.4])
+    phys._ball_pos = np.array([0.90, 0.20])   # field side of the +x line, inside the mouth in y
+    phys._ball_vel = np.array([3.0, 3.0])     # one step → x:0.90→0.96 (across line), y:0.20→0.26
+    info = phys.step(ZERO, ZERO)
+    assert info["goal_a"] is True
+    assert info["ball_out"] is False          # scored, so never flagged out / relocated
+
+
 def test_robot_a_moves_forward(phys):
     phys.reset(seed=0)
     phys._a_pos = np.array([0.0, 0.0])

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from bucky.match import MatchEngine
-from bucky.obs import LEGACY_OBS_DIM, OBS_DIM
+from bucky.obs import LEGACY_OBS_DIM, OBS_DIM, PRE_KICK_PRED_OBS_DIM
 from bucky.selfplay import (
     MATCH_COMPATIBLE_OBS_DIMS,
     SELF_PLAY_OBS_DIM,
@@ -17,7 +17,8 @@ from bucky.selfplay import (
     adapt_obs_to_policy,
 )
 
-LEGACY_22 = LEGACY_OBS_DIM + 4   # pre-boundary base + sonar
+LEGACY_22 = LEGACY_OBS_DIM + 4        # pre-boundary base + sonar
+LEGACY_27 = PRE_KICK_PRED_OBS_DIM + 4  # pre-kick-prediction base + sonar
 
 
 class RecordingModel:
@@ -39,10 +40,20 @@ def test_adapt_is_identity_for_native_dim():
 def test_adapt_projects_to_legacy_layout():
     obs = np.arange(SELF_PLAY_OBS_DIM, dtype=np.float32)
     out = adapt_obs_to_policy(obs, LEGACY_22)
-    # Keeps the pre-boundary base [0:18] and the sonar tail [OBS_DIM:27]; drops the boundary block.
+    # Keeps the pre-boundary base [0:18] and the sonar tail [OBS_DIM:]; drops the later blocks.
     expected = np.concatenate([np.arange(LEGACY_OBS_DIM),
                                np.arange(OBS_DIM, SELF_PLAY_OBS_DIM)]).astype(np.float32)
     assert out.shape == (LEGACY_22,)
+    assert np.array_equal(out, expected)
+
+
+def test_adapt_projects_to_pre_kick_pred_layout():
+    obs = np.arange(SELF_PLAY_OBS_DIM, dtype=np.float32)
+    out = adapt_obs_to_policy(obs, LEGACY_27)
+    # Keeps the pre-kick-prediction base [0:23] and the sonar tail; drops the kick-prediction block.
+    expected = np.concatenate([np.arange(PRE_KICK_PRED_OBS_DIM),
+                               np.arange(OBS_DIM, SELF_PLAY_OBS_DIM)]).astype(np.float32)
+    assert out.shape == (LEGACY_27,)
     assert np.array_equal(out, expected)
 
 
@@ -61,6 +72,7 @@ def test_compat_policy_downprojects_before_predict():
 def test_supported_dims_include_native_and_legacy():
     assert SELF_PLAY_OBS_DIM in MATCH_COMPATIBLE_OBS_DIMS
     assert LEGACY_22 in MATCH_COMPATIBLE_OBS_DIMS
+    assert LEGACY_27 in MATCH_COMPATIBLE_OBS_DIMS
 
 
 def test_legacy_and_current_policies_can_play_each_other():

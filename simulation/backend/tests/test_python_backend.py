@@ -41,6 +41,18 @@ def test_ball_out_flag_in_outer_band(physics):
     assert bool(info["ball_out"]) is True
     assert bool(info["goal_scored"]) is False
 
+def test_near_post_shot_scores_even_if_it_exits_the_mouth_edge(physics):
+    """Regression for the out-then-goal bug: a fast diagonal shot crossing the goal line inside
+    the mouth but ending the step with |y| just past the mouth edge must score, not be flagged
+    out. The crossing y is interpolated, not read from the end-of-step position."""
+    physics.reset(seed=0)
+    physics._robot_pos = np.array([0.0, -0.4])     # well clear of the ball
+    physics._ball_pos = np.array([0.90, 0.20])     # field side of +x line, inside the mouth
+    physics._ball_vel = np.array([3.0, 3.0])       # x:0.90→0.96 across line, y:0.20→0.26 (exits edge)
+    _, info = physics.step(0.0, 0.0, 0.0)
+    assert bool(info["goal_scored"]) is True
+    assert bool(info["ball_out"]) is False
+
 def test_robot_moves_forward(physics):
     physics.reset(seed=0)
     physics._robot_pos = np.array([0.0, 0.0])

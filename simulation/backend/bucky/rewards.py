@@ -69,7 +69,7 @@ class RewardConfig:
     w_possession: float = 5.0
     w_front_align: float = 10.0
 
-    w_goal: float = 50.0
+    w_goal: float = 55.0
     w_goal_against: float = -100.0
 
     w_out_of_bounds: float = -50.0        # robot fully out → 30 s suspension (rules §4.9)
@@ -86,7 +86,7 @@ class RewardConfig:
     # Skilled-play terms (kicker + opponent-aware; see bucky.play_events).
     w_steal: float = 10.0                  # capture ball from enemy, × field-position gradient
     w_blocked_shot: float = 15            # block an enemy shot on our goal
-    w_kick_goal: float = 8.0              # bonus: goal scored from a kick (vs dribbling it in)
+    w_kick_goal: float = 12.0             # bonus: goal scored from a kick (vs dribbling it in)
     w_bank_shot: float = 6.0              # bonus: goal scored off a wall bounce
     w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
     w_kick_lost: float = -20.0            # giving the enemy the ball: our kicked ball captured by enemy
