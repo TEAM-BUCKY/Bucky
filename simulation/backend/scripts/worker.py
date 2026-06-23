@@ -56,11 +56,36 @@ def _ws_ingest(api_base: str, run: str) -> str:
 
 
 class Worker:
-    def __init__(self, server: str, token: str, slots: int = 1) -> None:
+    def __init__(self, server: str, token: str, slots: int | None = None,
+                 device: str = "cpu") -> None:
         self.api = _api_base(server)
         self.token = token
-        self.headers = {"X-Device-Token": token}
-        self.slots = max(1, slots)
+        # Self-reported capability: raw core count (the slider's ceiling in the UI) and a
+        # recommended concurrent-job count. A training job grabs ~16 env-workers, so beyond
+        # a couple of jobs the CPU oversubscribes — cores//8 is a conservative default the
+        # admin can override upward with the slider, up to the full core count.
+        self.cores = os.cpu_count() or 1
+        self.capacity = max(1, self.cores // 8)
+        self.headers = {
+            "X-Device-Token": token,
+            "X-Worker-Cores": str(self.cores),
+            "X-Worker-Capacity": str(self.capacity),
+        }
+        # Local hard ceiling on concurrency (machine owner's safety cap). Defaults to the
+        # core count, i.e. effectively "no extra cap" — the server/slider is the primary
+        # control. The server's per-device budget is the live authority below this.
+        self.slots_ceiling = max(1, slots) if slots else self.cores
+        # Concurrency budget last reported by the server (None until the first lease/beat).
+        self._server_slots: int | None = None
+        # Torch device for the local trainer. Defaults to cpu — for this tiny [64,64] MLP
+        # the GPU's per-step host<->device copies usually outweigh its compute, so cuda is
+        # opt-in per machine (this machine owns the GPU, so the worker decides).
+        self.device = device
+
+    def _effective_slots(self) -> int:
+        """How many jobs to run at once: the server's budget, capped by the local ceiling."""
+        budget = self._server_slots if self._server_slots else self.capacity
+        return max(1, min(self.slots_ceiling, budget))
 
     # ── server calls ──────────────────────────────────────────────────────────
     def lease(self) -> dict | None:
@@ -115,6 +140,7 @@ class Worker:
             "--run-name", run_name,
             "--stream-url", ingest,
             "--stream-token", self.token,
+            "--device", self.device,
             *stop_args,
         ]
         # Headless by default; animate the field only when the launch opted in.
@@ -142,6 +168,9 @@ class Worker:
         def _beat() -> None:
             while not stop_hb.wait(HEARTBEAT_INTERVAL):
                 resp = self.heartbeat(run_name)
+                if resp and resp.get("max_slots"):
+                    # Pick up slider changes mid-job so we scale up/down without a restart.
+                    self._server_slots = int(resp["max_slots"])
                 if resp and resp.get("cancel") and not cancelled.is_set():
                     cancelled.set()
                     print(f"[worker] stop requested for {run_name}; signalling trainer", flush=True)
@@ -194,14 +223,20 @@ class Worker:
 
     # ── main loop ─────────────────────────────────────────────────────────────
     def serve_forever(self) -> None:
-        print(f"[worker] polling {self.api} for jobs… ({self.slots} slot(s))", flush=True)
+        print(f"[worker] polling {self.api} for jobs… "
+              f"({self.cores} cores, recommend {self.capacity} slot(s); "
+              f"local ceiling {self.slots_ceiling}; server sets the live cap)",
+              flush=True)
         active: dict[str, threading.Thread] = {}
         while True:
             # Reap finished jobs so their slots free up.
             for rn in [rn for rn, t in active.items() if not t.is_alive()]:
                 del active[rn]
 
-            if len(active) >= self.slots:
+            # Concurrency is the server's live budget, capped by the local ceiling. The
+            # server also refuses to lease past it, so this is mostly to avoid pointless
+            # polling once we're full.
+            if len(active) >= self._effective_slots():
                 time.sleep(POLL_INTERVAL)
                 continue
 
@@ -214,6 +249,11 @@ class Worker:
             if job is None:
                 time.sleep(POLL_INTERVAL)
                 continue
+
+            # The lease carries our current concurrency budget — adopt it so we fill up
+            # to (or back off to) whatever the admin slider currently allows.
+            if job.get("max_slots"):
+                self._server_slots = int(job["max_slots"])
 
             run_name = job["run_name"]
             t = threading.Thread(target=self._safe_run, args=(job,), daemon=True)
@@ -228,16 +268,24 @@ def main() -> None:
                         help="Server base URL, e.g. https://bucky.example.com")
     parser.add_argument("--token", default=os.getenv("BUCKY_DEVICE_TOKEN", ""),
                         help="Device token from the admin panel (Devices tab)")
-    parser.add_argument("--slots", type=int, default=int(os.getenv("BUCKY_SLOTS", "1") or "1"),
-                        help="How many leased jobs to train concurrently (default 1). "
-                             "Each job is a separate trainer process — raise only as far "
-                             "as this machine's CPU/RAM allows.")
+    parser.add_argument("--slots", type=int, default=int(os.getenv("BUCKY_SLOTS", "0") or "0"),
+                        help="Local hard ceiling on concurrent jobs (a safety cap for this "
+                             "machine). Default 0 = no extra cap (use the core count); the "
+                             "admin's per-device slider on the server is the primary, live "
+                             "control and is honoured up to this ceiling.")
+    parser.add_argument("--device", default=os.getenv("BUCKY_DEVICE", "cpu"),
+                        choices=["cpu", "cuda", "auto"],
+                        help="Torch device for this machine's trainer (default cpu, or "
+                             "BUCKY_DEVICE). 'cuda'/'auto' opt this worker's GPU in — note "
+                             "that for the tiny [64,64] MLP the GPU is often *slower* than "
+                             "CPU because per-step host<->device copies dominate; benchmark "
+                             "before relying on it.")
     args = parser.parse_args()
     if not args.server or not args.token:
         sys.exit("Set --server and --token (or BUCKY_SERVER / BUCKY_DEVICE_TOKEN).")
 
     try:
-        Worker(args.server, args.token, slots=args.slots).serve_forever()
+        Worker(args.server, args.token, slots=args.slots, device=args.device).serve_forever()
     except KeyboardInterrupt:
         print("\n[worker] stopped.", flush=True)
 

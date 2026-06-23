@@ -87,6 +87,18 @@ def robot_fully_out(robot_pos) -> bool:
             abs(float(robot_pos[1])) > HALF_H + ROBOT_RADIUS)
 
 
+def robot_in_goal(pos) -> bool:
+    """True if the robot centre is inside *either* goal box (behind a goal line, within the mouth).
+
+    Entering the mouth is physically possible (it is an opening) but is a violation — heavily
+    penalised in the reward. The goal's side/back walls are solid for the robot (see physics
+    ``_resolve_robot_goal``), so it can never drive *through* the goal into the rear band.
+    Covers both goals: attacking into the opponent goal *and* backing into one's own goal are bad.
+    """
+    x, y = float(pos[0]), float(pos[1])
+    return abs(x) > HALF_W and abs(y) < GOAL_HALF_WIDTH
+
+
 def in_penalty_area(pos, goal_sign: int) -> bool:
     """True if ``pos`` is inside the penalty area in front of the ``goal_sign`` goal.
 

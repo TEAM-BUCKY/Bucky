@@ -238,6 +238,14 @@ export interface DeviceInfo {
 	/** Back-compat: the first current job, or null when idle. */
 	current_job: string | null;
 	online: boolean;
+	/** Admin concurrency cap (slider); null = run at the worker's reported capacity. */
+	max_slots: number | null;
+	/** Worker-reported CPU core count (the slider's ceiling); null until first check-in. */
+	reported_cores: number | null;
+	/** Worker-reported recommended concurrency (the default when max_slots is unset). */
+	reported_capacity: number | null;
+	/** Effective concurrency in force now: max_slots ?? reported_capacity (≥1). */
+	effective_slots: number;
 }
 
 /** One in-flight run (local or leased to a device), as listed by the `active_runs` frame. */
@@ -941,6 +949,15 @@ class SimulationState {
 
 	async revokeDevice(id: string) {
 		await this._control(`/devices/${encodeURIComponent(id)}`, undefined, 'DELETE');
+	}
+
+	/**
+	 * Set how many jobs a device may train concurrently. `null` clears the override so
+	 * the device runs at its worker-reported capacity. The cap takes effect on the
+	 * worker's next poll/heartbeat; the server re-broadcasts the device list on success.
+	 */
+	async setDeviceSlots(id: string, maxSlots: number | null) {
+		return this._control(`/devices/${encodeURIComponent(id)}/slots`, { max_slots: maxSlots });
 	}
 
 	/** Issue a fresh token for a device (old one stops working). Returns it once, or null. */

@@ -14,10 +14,10 @@ from gymnasium import spaces
 from bucky.game import field
 from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.obs import OBS_DIM, build_observation
-from bucky.physics.python_backend import PyPhysics
+from bucky.physics.python_backend import PyPhysics, predict_goal_by_rollout
 from bucky.play_events import CONTACT_DIST, KICK_GOAL_WINDOW
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
-from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
+from bucky.rewards import CAPTURE_RADIUS, RewardConfig, RewardTerms, compute_rewards
 
 # Action scaling (MAX_LINEAR / MAX_OMEGA) lives in PyPhysics.step — this env passes raw
 # normalized actions through (with the motor-saturation factor on the linear dims).
@@ -69,6 +69,7 @@ class BuckySingleEnv(gym.Env):
         self._bounce_since_kick = False
         self._shot_in_flight = False
         self._shot_departed = False
+        self._possession_steps = 0
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -87,6 +88,7 @@ class BuckySingleEnv(gym.Env):
         self._bounce_since_kick = False
         self._shot_in_flight = False
         self._shot_departed = False
+        self._possession_steps = 0
         obs = self._get_obs()
         return obs, {}
 
@@ -182,12 +184,33 @@ class BuckySingleEnv(gym.Env):
 
         info["out_of_bounds"] = robot_just_out
 
+        # Possession-hold counter (consecutive steps with the ball in the capture zone and the
+        # robot facing it) → decays the possession reward so camping stops paying.
+        heading_vec = np.array([np.cos(state1.robot_heading), np.sin(state1.robot_heading)])
+        facing = float(np.dot(heading_vec, state1.ball_pos - state1.robot_pos)) > 0
+        if d_robot_ball < CAPTURE_RADIUS and facing:
+            self._possession_steps += 1
+        else:
+            self._possession_steps = 0
+        info["possession_steps"] = self._possession_steps
+
+        # Look-ahead "inevitable goal": on a kick (that didn't already score this step), roll the
+        # ball forward; if it scores, award goal-level credit now and end the episode early.
+        predicted_goal = False
+        if info["kicked"] and not info["goal_scored"]:
+            scored, _, _ = predict_goal_by_rollout(
+                state1.ball_pos, state1.ball_vel, attack_sign=1,
+                horizon_steps=int(self._reward_cfg.predicted_goal_horizon_steps),
+            )
+            predicted_goal = scored
+        info["predicted_goal"] = predicted_goal
+
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, info,
                                        action=action, prev_action=self._prev_action)
         reward = self._filter_reward(reward_terms)
         self._prev_action = action.copy()
 
-        terminated = bool(info["goal_scored"] or info["robot_fully_out"])
+        terminated = bool(info["goal_scored"] or info["robot_fully_out"] or predicted_goal)
         self._step_count += 1
         truncated = self._step_count >= self._stage_cfg.max_episode_steps
 

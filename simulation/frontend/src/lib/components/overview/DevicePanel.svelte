@@ -165,6 +165,35 @@
 						<span class="font-mono text-[10px] text-amber-400">▶ {job}</span>
 					{/each}
 					<span class="ml-auto flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
+						{#if d.reported_cores}
+							<span
+								class="flex items-center gap-1.5"
+								title="{d.reported_cores} cores · recommended {d.reported_capacity ??
+									1} concurrent job(s)"
+							>
+								<span>slots</span>
+								<input
+									type="range"
+									min="1"
+									max={d.reported_cores}
+									value={d.effective_slots}
+									disabled={!canControl}
+									onchange={(e) =>
+										simulation.setDeviceSlots(
+											d.id,
+											+(e.currentTarget as HTMLInputElement).value
+										)}
+									class="h-1 w-20 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+								/>
+								<span class="w-10 tabular-nums text-foreground">
+									{d.effective_slots}×{d.max_slots == null ? ' auto' : ''}
+								</span>
+							</span>
+						{:else}
+							<span class="text-muted-foreground/60" title="waiting for the worker to report its capacity"
+								>slots —</span
+							>
+						{/if}
 						<span>seen {fmtSeen(d.last_seen)}</span>
 						<Button
 							variant="ghost"

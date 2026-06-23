@@ -102,8 +102,16 @@ class DeviceRegistry:
         *,
         add_job: str | None = None,
         remove_job: str | None = None,
+        cores: int | None = None,
+        capacity: int | None = None,
     ) -> None:
-        """Record a check-in (``last_seen``) and optionally add/remove a current job."""
+        """Record a check-in (``last_seen``) and optionally add/remove a current job.
+
+        ``cores``/``capacity`` are the worker's self-reported capability (CPU core
+        count and recommended concurrent-job count); when supplied they are persisted
+        so the admin UI can size the concurrency slider. They ride the lease poll, so
+        an idle worker still keeps its reported capability fresh.
+        """
         dev = self._get(device_id)
         if not dev:
             return
@@ -112,10 +120,36 @@ class DeviceRegistry:
             jobs.add(add_job)
         if remove_job:
             jobs.discard(remove_job)
+        # Only overwrite the reported capability when the worker actually sent it, so a
+        # heartbeat/complete touch (which carries no capacity) leaves the last value intact.
+        new_cores = int(cores) if cores else dev.get("reported_cores")
+        new_capacity = int(capacity) if capacity else dev.get("reported_capacity")
         self._db.execute(
-            "UPDATE devices SET last_seen=?, current_jobs=? WHERE id=?",
-            (time.time(), json.dumps(sorted(jobs)), device_id),
+            "UPDATE devices SET last_seen=?, current_jobs=?, "
+            "reported_cores=?, reported_capacity=? WHERE id=?",
+            (time.time(), json.dumps(sorted(jobs)), new_cores, new_capacity, device_id),
         )
+
+    def set_max_slots(self, device_id: str, n: int | None) -> bool:
+        """Set the admin concurrency cap for a device (``None`` clears it).
+
+        Cleared (``None``) means "no override → run at the worker's reported capacity".
+        A concrete value is clamped to ``1..reported_cores`` when the worker has
+        reported its core count; otherwise only the lower bound of 1 is enforced.
+        Returns ``False`` if the device is unknown.
+        """
+        dev = self._get(device_id)
+        if not dev:
+            return False
+        if n is not None:
+            n = max(1, int(n))
+            ceiling = dev.get("reported_cores")
+            if ceiling:
+                n = min(n, int(ceiling))
+        self._db.execute(
+            "UPDATE devices SET max_slots=? WHERE id=?", (n, device_id)
+        )
+        return True
 
     def public(self, device_id: str) -> dict:
         dev = self._get(device_id)
@@ -124,6 +158,12 @@ class DeviceRegistry:
         last_seen = dev.get("last_seen")
         online = bool(last_seen and (time.time() - last_seen) < ONLINE_TTL)
         jobs = list(dev.get("current_jobs") or [])
+        max_slots = dev.get("max_slots")
+        reported_cores = dev.get("reported_cores")
+        reported_capacity = dev.get("reported_capacity")
+        # How many jobs this device may run concurrently: the admin override when set,
+        # otherwise the worker's recommended capacity (and 1 until a worker has reported).
+        effective_slots = int(max_slots) if max_slots else int(reported_capacity or 1)
         return {
             "id": dev["id"],
             "name": dev["name"],
@@ -133,6 +173,10 @@ class DeviceRegistry:
             # Back-compat single field: the first current job (or null when idle).
             "current_job": jobs[0] if jobs else None,
             "online": online,
+            "max_slots": int(max_slots) if max_slots else None,
+            "reported_cores": int(reported_cores) if reported_cores else None,
+            "reported_capacity": int(reported_capacity) if reported_capacity else None,
+            "effective_slots": effective_slots,
         }
 
     def list_public(self) -> list[dict]:

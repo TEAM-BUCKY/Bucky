@@ -25,10 +25,12 @@ from bucky.game.field import (
     COLLISION_DIST,
     FIELD_H,
     FIELD_W,
+    GOAL_HALF_WIDTH,
     GOAL_WIDTH,
     HALF_W,
     PENALTY_DEPTH,
     ROBOT_RADIUS,
+    ball_out_of_play,
 )
 from bucky.physics.backend import PhysicsBackend, PhysicsState
 
@@ -109,6 +111,113 @@ def _crosses_goal(prev_x: float, prev_y: float, x: float, y: float, sign: int) -
     t = (line - prev_x) / (x - prev_x)          # x != prev_x is guaranteed by the crossing test
     y_cross = prev_y + t * (y - prev_y)
     return abs(y_cross) < GOAL_WIDTH / 2
+
+
+# ── Goal box (solid for the robot) ───────────────────────────────────────────
+# The goal is a box recessed behind each goal line. Its mouth (the GOAL_WIDTH opening at
+# x = ±HALF_W between the posts) is open so a robot may poke in, but the two side walls running
+# back from the posts are SOLID — the robot cannot cross them or drive through the goal into the
+# rear band (the back wall coincides with the arena clamp in x). Modelled as circle-vs-segment
+# push-out against each side wall; each segment's field-side endpoint acts as the goalpost.
+_GOAL_SIDE_WALLS = tuple(
+    (np.array([s * HALF_W, sy * GOAL_HALF_WIDTH]),
+     np.array([s * ARENA_HALF_X, sy * GOAL_HALF_WIDTH]))
+    for s in (1.0, -1.0)
+    for sy in (1.0, -1.0)
+)
+
+
+def _circle_segment_pushout(pos, a, b, radius):
+    """Push the circle ``(pos, radius)`` out of the thin solid wall segment ``a→b``.
+
+    The wall has no preferred side: the circle is pushed to whichever side its centre already
+    lies on, so a robot can sit on either face but never cross. Endpoints handle the post corners.
+    """
+    ab = b - a
+    denom = float(np.dot(ab, ab))
+    t = 0.0 if denom < 1e-12 else float(np.clip(np.dot(pos - a, ab) / denom, 0.0, 1.0))
+    closest = a + t * ab
+    d = pos - closest
+    dist = float(np.linalg.norm(d))
+    if 1e-9 < dist < radius:
+        return closest + d * (radius / dist)
+    return pos
+
+
+def _resolve_robot_goal(pos):
+    """Keep a robot out of both goal boxes (push it off the solid goal side walls/posts)."""
+    out = pos
+    for a, b in _GOAL_SIDE_WALLS:
+        out = _circle_segment_pushout(out, a, b, ROBOT_RADIUS)
+    return out
+
+
+def _resolve_ball_walls_pure(ball_pos, ball_vel, prev_x: float, prev_y: float):
+    """Pure ball↔wall resolution (arena walls + goal side walls), returning new (pos, vel, bounced).
+
+    Single source of truth shared by :meth:`PyPhysics._resolve_ball_walls` (in-place wrapper) and
+    :func:`predict_goal_by_rollout` (look-ahead), so the prediction matches the real physics.
+    ``prev_x``/``prev_y`` are the ball's start-of-step position (makes the goal side-wall test swept).
+    """
+    ball_pos = np.array(ball_pos, dtype=float)
+    ball_vel = np.array(ball_vel, dtype=float)
+    bounced = False
+    hx, hy = ARENA_HALF_X - BALL_RADIUS, ARENA_HALF_Y - BALL_RADIUS
+    ghw = GOAL_WIDTH / 2
+    in_goal_y = abs(ball_pos[1]) < ghw
+    if not in_goal_y:
+        if ball_pos[0] < -hx:
+            ball_pos[0] = -hx
+            ball_vel[0] = abs(ball_vel[0]) * BALL_RESTITUTION
+            bounced = True
+        elif ball_pos[0] > hx:
+            ball_pos[0] = hx
+            ball_vel[0] = -abs(ball_vel[0]) * BALL_RESTITUTION
+            bounced = True
+    if abs(ball_pos[1]) > hy:
+        ball_vel[1] *= -BALL_RESTITUTION
+        ball_pos[1] = np.sign(ball_pos[1]) * hy
+        bounced = True
+    side = ghw + BALL_RADIUS
+    if abs(prev_x) > HALF_W and abs(prev_y) >= ghw and abs(ball_pos[1]) < side:
+        sgn = np.sign(prev_y) or 1.0
+        ball_pos[1] = sgn * side
+        ball_vel[1] = sgn * abs(ball_vel[1]) * BALL_RESTITUTION
+        bounced = True
+    return ball_pos, ball_vel, bounced
+
+
+def predict_goal_by_rollout(ball_pos, ball_vel, attack_sign: int = 1, dt: float = DT,
+                            horizon_steps: int = 75, opponent_pos=None,
+                            speed_floor: float = 0.2):
+    """Roll a *ball-only* copy forward to decide whether the current shot will score.
+
+    Mirrors the ball half of :meth:`PyPhysics.step` (damping + wall/goal-wall bounces via
+    :func:`_resolve_ball_walls_pure` + the :func:`_crosses_goal` mouth test). Robots are not
+    simulated; if ``opponent_pos`` is given, the ball passing within ``COLLISION_DIST`` of it marks
+    the prediction *intercepted* (caller treats that as "not confident"). Early-exits the instant
+    the outcome is known. ``attack_sign`` is the goal the shooter attacks (+1 → +x, -1 → -x).
+
+    Returns ``(scored, steps_to_goal, intercepted)``.
+    """
+    pos = np.array(ball_pos, dtype=float)
+    vel = np.array(ball_vel, dtype=float)
+    opp = None if opponent_pos is None else np.asarray(opponent_pos, dtype=float)
+    intercepted = False
+    for i in range(1, int(horizon_steps) + 1):
+        prev_x, prev_y = float(pos[0]), float(pos[1])
+        vel = vel * (1.0 - BALL_DAMPING * dt)
+        pos = pos + vel * dt
+        pos, vel, _ = _resolve_ball_walls_pure(pos, vel, prev_x, prev_y)
+        if opp is not None and float(np.linalg.norm(pos - opp)) < COLLISION_DIST:
+            intercepted = True
+        if _crosses_goal(prev_x, prev_y, float(pos[0]), float(pos[1]), attack_sign):
+            return True, i, intercepted
+        if ball_out_of_play(pos):
+            return False, i, intercepted
+        if float(np.linalg.norm(vel)) < speed_floor:
+            return False, i, intercepted
+    return False, int(horizon_steps), intercepted
 
 
 def omni_kinematics(vx: float, vy: float, omega: float) -> np.ndarray:
@@ -209,6 +318,9 @@ class PyPhysics(PhysicsBackend):
             [-ARENA_HALF_X + ROBOT_RADIUS, -ARENA_HALF_Y + ROBOT_RADIUS],
             [ARENA_HALF_X - ROBOT_RADIUS, ARENA_HALF_Y - ROBOT_RADIUS],
         )
+        # The goal is a solid-walled recess: the robot may poke into the open mouth (penalised in
+        # the reward) but cannot cross the side walls or drive through to the rear band.
+        self._robot_pos = _resolve_robot_goal(self._robot_pos)
 
         goal = self._check_goal(prev_bx, prev_by)
         info = {
@@ -244,47 +356,14 @@ class PyPhysics(PhysicsBackend):
                 self._ball_vel -= (1 + BALL_RESTITUTION) * impulse * normal
 
     def _resolve_ball_walls(self, prev_x: float, prev_y: float) -> bool:
-        # The ball bounces off the arena walls (so it can roll into the outer band and
-        # get pinned in the corners). The goal mouth is an opening in the white-line
-        # goal line, so a ball heading into it passes through to score instead.
-        # ``prev_x``/``prev_y`` are the ball's start-of-step position, used to make the goal
-        # side-wall collision a *swept* test (a fast ball can't tunnel through the thin wall).
+        # In-place wrapper over :func:`_resolve_ball_walls_pure` (the shared single source of truth,
+        # also used by the look-ahead rollout). The ball bounces off the arena walls (rolling into
+        # the outer band / corners), passes through the goal mouth to score, and bounces off the
+        # solid goal side walls (swept test via ``prev_x``/``prev_y`` so a fast ball can't tunnel).
         # Returns True if any wall bounce occurred this step (used for bank-shot detection).
-        bounced = False
-        hx, hy = ARENA_HALF_X - BALL_RADIUS, ARENA_HALF_Y - BALL_RADIUS
-        ghw = GOAL_WIDTH / 2
-        in_goal_y = abs(self._ball_pos[1]) < ghw
-        if not in_goal_y:
-            if self._ball_pos[0] < -hx:
-                self._ball_pos[0] = -hx
-                self._ball_vel[0] = abs(self._ball_vel[0]) * BALL_RESTITUTION
-                bounced = True
-            elif self._ball_pos[0] > hx:
-                self._ball_pos[0] = hx
-                self._ball_vel[0] = -abs(self._ball_vel[0]) * BALL_RESTITUTION
-                bounced = True
-        if abs(self._ball_pos[1]) > hy:
-            self._ball_vel[1] *= -BALL_RESTITUTION
-            self._ball_pos[1] = np.sign(self._ball_pos[1]) * hy
-            bounced = True
-
-        # Goal side walls (swept). The goal is a box recessed behind the goal line: its mouth
-        # (the GOAL_WIDTH opening at x = ±HALF_W) is open, but the two side walls running back
-        # from the goalposts at y = ±GOAL_WIDTH/2 are solid. A ball that was *already behind a
-        # goal line* at the start of the step (|prev_x| > HALF_W) is in the out-of-bounds band
-        # beside the goal; the only way into the goal box is through the mouth at the goal line,
-        # which it has not crossed. So if it ends the step inside the box width (|y| < the wall
-        # surface), it must have crossed a side wall — clamp it back to the wall it came from and
-        # reflect its lateral velocity. Using the start-of-step position makes this a swept test,
-        # so a fast ball can't jump clean over the thin wall band in one 20 ms step. A ball coming
-        # from the *field* (|prev_x| <= HALF_W) is untouched: it either scores through the mouth or
-        # passes beside the goal as an ordinary out-of-bounds ball.
-        side = ghw + BALL_RADIUS
-        if abs(prev_x) > HALF_W and abs(prev_y) >= ghw and abs(self._ball_pos[1]) < side:
-            sgn = np.sign(prev_y) or 1.0
-            self._ball_pos[1] = sgn * side
-            self._ball_vel[1] = sgn * abs(self._ball_vel[1]) * BALL_RESTITUTION
-            bounced = True
+        self._ball_pos, self._ball_vel, bounced = _resolve_ball_walls_pure(
+            self._ball_pos, self._ball_vel, prev_x, prev_y
+        )
         return bounced
 
     def _check_goal(self, prev_x: float, prev_y: float) -> bool:
@@ -472,9 +551,9 @@ class TwoRobotPhysics:
         bounced = self._resolve_ball_walls(prev_bx, prev_by)
 
         if not self._a_removed:
-            self._a_pos = self._clamp_robot(self._a_pos)
+            self._a_pos = _resolve_robot_goal(self._clamp_robot(self._a_pos))
         if not self._b_removed:
-            self._b_pos = self._clamp_robot(self._b_pos)
+            self._b_pos = _resolve_robot_goal(self._clamp_robot(self._b_pos))
 
         # A goal is the ball *crossing* a goal line through the mouth this step (y interpolated at
         # the crossing, so a fast/diagonal shot that exits the mouth edge after crossing the line

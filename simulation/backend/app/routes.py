@@ -143,6 +143,11 @@ class DeviceRegisterRequest(BaseModel):
     name: str = "device"
 
 
+class DeviceSlotsRequest(BaseModel):
+    # Admin concurrency cap for a device; null clears it back to the reported capacity.
+    max_slots: Optional[int] = None
+
+
 class WorkerCompleteRequest(BaseModel):
     run_name: str
     status: str = "done"
@@ -347,6 +352,22 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         # The new plaintext token is returned exactly once; the old one is now dead.
         return {"ok": True, "token": token}
 
+    @router.post("/devices/{device_id}/slots")
+    async def set_device_slots(
+        device_id: str,
+        req: DeviceSlotsRequest,
+        _user: str = Depends(require_control),
+    ) -> dict:
+        """Set how many jobs a device may train concurrently (admin slider).
+
+        ``max_slots`` null clears the override so the device runs at its reported
+        capacity. The new cap takes effect on the worker's next poll/heartbeat."""
+        ok = manager.devices.set_max_slots(device_id, req.max_slots)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Device not found.")
+        await broadcaster.broadcast(manager.devices_msg())
+        return {"ok": True}
+
     # ── worker protocol (device-token gated) ────────────────────────────────
     def require_device(x_device_token: str = Header(default="")) -> str:
         device_id = manager.devices.verify(x_device_token)
@@ -355,10 +376,18 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         return device_id
 
     @router.post("/worker/lease")
-    async def worker_lease(device_id: str = Depends(require_device)):
-        job = await manager.lease_for_worker(device_id)
+    async def worker_lease(
+        device_id: str = Depends(require_device),
+        x_worker_cores: Optional[int] = Header(default=None),
+        x_worker_capacity: Optional[int] = Header(default=None),
+    ):
+        # The worker reports its capability (CPU cores + recommended concurrency) on
+        # each poll so the admin UI can size the concurrency slider.
+        job = await manager.lease_for_worker(
+            device_id, cores=x_worker_cores, capacity=x_worker_capacity
+        )
         if job is None:
-            return Response(status_code=204)  # nothing ready
+            return Response(status_code=204)  # nothing ready (or device at capacity)
         return job
 
     @router.post("/worker/heartbeat")

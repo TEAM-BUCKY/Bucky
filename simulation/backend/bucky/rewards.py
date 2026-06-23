@@ -10,7 +10,7 @@ from dataclasses import fields as dataclass_fields
 
 import numpy as np
 
-from bucky.game.field import GOAL_HALF_WIDTH, HALF_H, HALF_W, OPP_GOAL, WALL_BAND
+from bucky.game.field import GOAL_HALF_WIDTH, HALF_H, HALF_W, OPP_GOAL, WALL_BAND, robot_in_goal
 from bucky.physics.backend import PhysicsState
 from bucky.physics.python_backend import MAX_LINEAR
 
@@ -68,9 +68,23 @@ class RewardConfig:
 
     w_possession: float = 5.0
     w_front_align: float = 10.0
+    # Possession is reshaped from a sustained per-step "drip" into a decaying capture bonus: the
+    # positive reward fades to ~0 over this many steps of continuous possession, so capturing the
+    # ball still pays but *camping* on it does not — pushing the policy to shoot. (Env tracks the
+    # consecutive-possession step count and passes it via ``info["possession_steps"]``.)
+    possession_decay_steps: float = 30.0
 
     w_goal: float = 55.0
     w_goal_against: float = -100.0
+    # Heavy per-step penalty for the robot driving inside a goal box (rules: robots stay out of
+    # goals). The goal walls are solid (physics ``_resolve_robot_goal``); this discourages even
+    # poking into the open mouth.
+    w_in_goal: float = -4.0
+    # Look-ahead "inevitable goal" bonus: when a kick launches a ball whose forward rollout scores
+    # (env ``predict_goal_by_rollout``), pay goal-level credit immediately at the kick, closing the
+    # kick→goal loop against the possession hot-spot. Horizon caps the rollout (~1.5 s at 50 Hz).
+    w_predicted_goal: float = 55.0
+    predicted_goal_horizon_steps: int = 75
 
     w_out_of_bounds: float = -50.0        # robot fully out → 30 s suspension (rules §4.9)
     w_lack_of_progress: float = -5.0      # ball stuck between robots (rules §4.6)
@@ -130,6 +144,8 @@ class RewardTerms:
 
     goal: float = 0.0
     goal_against: float = 0.0
+    predicted_goal: float = 0.0
+    in_goal: float = 0.0
 
     out_of_bounds: float = 0.0
     lack_of_progress: float = 0.0
@@ -157,6 +173,7 @@ class RewardTerms:
     def total(self) -> float:
         return (self.approach + self.speed + self.ball_to_goal + self.possession +
                 self.front_alignment + self.goal + self.goal_against +
+                self.predicted_goal + self.in_goal +
                 self.out_of_bounds + self.lack_of_progress + self.defective +
                 self.spin + self.play_oob_ball + self.stuck +
                 self.steal + self.blocked_shot + self.kick_goal +
@@ -174,6 +191,8 @@ class RewardTerms:
             "front_alignment": self.front_alignment,
             "goal": self.goal,
             "goal_against": self.goal_against,
+            "predicted_goal": self.predicted_goal,
+            "in_goal": self.in_goal,
             "out_of_bounds": self.out_of_bounds,
             "lack_of_progress": self.lack_of_progress,
             "defective": self.defective,
@@ -236,8 +255,13 @@ def compute_rewards(
     if d_robot_ball_1 < CAPTURE_RADIUS and not ball_out_raw:
         heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
         if np.dot(heading_vec, s1.ball_pos - s1.robot_pos) > 0:
-            terms.possession = config.w_possession
+            # Decaying capture bonus: fades to ~0 over ``possession_decay_steps`` of continuous
+            # possession so camping on the ball stops paying (the env supplies the hold count).
+            hold = float(info.get("possession_steps", 0))
+            decay = max(0.0, 1.0 - hold / max(1.0, config.possession_decay_steps))
+            terms.possession = config.w_possession * decay
         else:
+            # Facing away with the ball in the capture zone is still a flat penalty (no decay).
             terms.possession = -config.w_possession
 
     # Reward setting up to catch the ball and drive it at the enemy goal: the
@@ -262,6 +286,15 @@ def compute_rewards(
 
     if info.get("goal_against", False):
         terms.goal_against = config.w_goal_against
+
+    # Look-ahead "inevitable goal": the env rolled the kicked ball forward and it scores → pay
+    # goal-level credit now, at the kick (see env step / predict_goal_by_rollout).
+    if info.get("predicted_goal", False):
+        terms.predicted_goal = config.w_predicted_goal
+
+    # Heavy penalty for driving inside a goal box (either goal). Per-step, no termination.
+    if robot_in_goal(s1.robot_pos):
+        terms.in_goal = config.w_in_goal
 
     if info.get("out_of_bounds", False):
         terms.out_of_bounds = config.w_out_of_bounds

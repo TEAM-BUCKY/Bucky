@@ -70,6 +70,13 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_ts ON jobs(ts);
     """,
+    # v2 — per-device concurrency: admin-set cap + worker-reported capability.
+    # max_slots NULL means "no admin override → run at the worker's reported capacity".
+    """
+    ALTER TABLE devices ADD COLUMN max_slots          INTEGER;  -- admin slider; NULL = use capacity
+    ALTER TABLE devices ADD COLUMN reported_cores      INTEGER;  -- worker os.cpu_count()
+    ALTER TABLE devices ADD COLUMN reported_capacity   INTEGER;  -- worker recommended concurrency
+    """,
 ]
 
 

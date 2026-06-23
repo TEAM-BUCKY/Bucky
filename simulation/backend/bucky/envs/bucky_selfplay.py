@@ -17,12 +17,12 @@ import numpy as np
 from gymnasium import spaces
 
 from bucky.curriculum import Stage, StageConfig, get_stage_config
-from bucky.physics.python_backend import TwoRobotPhysics
+from bucky.physics.python_backend import TwoRobotPhysics, predict_goal_by_rollout
 from bucky.play_events import PlayEventTracker
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
 from bucky.game.field import ball_out_of_play
 from bucky.game.referee import Referee
-from bucky.rewards import RewardConfig, RewardTerms, compute_rewards
+from bucky.rewards import CAPTURE_RADIUS, RewardConfig, RewardTerms, compute_rewards
 from bucky.selfplay import (
     SELF_PLAY_OBS_DIM, build_robot_obs, load_numpy_opponent, predict_opponent_action,
 )
@@ -37,6 +37,12 @@ OPP_TEMPERATURE = 0.8
 # Wider lateral spawn jitter than the physics default (0.05 m) so self-play episodes start
 # spread across the field width — encouraging play out to the wings, not just down the middle.
 SELF_PLAY_SPAWN_JITTER = 0.25
+# Whether a confidently-predicted goal ends the (long, multi-goal) self-play episode early. Default
+# off: a ball-only rollout ignores the opponent's *future* moves, so terminating risks ending an
+# episode the defender would have saved. The predicted-goal bonus still fires (closing the loop);
+# only the early *termination* is gated here. The interception safeguard (frozen opponent on the
+# ball's path → not confident) further protects the static case.
+EARLY_TERMINATE_ON_PREDICTED_GOAL = False
 
 OBS_LOW = np.full(SELF_PLAY_OBS_DIM, -3.0, dtype=np.float32)
 OBS_HIGH = np.full(SELF_PLAY_OBS_DIM, 3.0, dtype=np.float32)
@@ -74,6 +80,8 @@ class BuckySelfPlayEnv(gym.Env):
         self._opponent = None              # opponent for the current episode (picked in reset)
         self._opponent_pool: list = []     # rolling pool of frozen snapshots to sample from
         self._last_terms = RewardTerms()
+        self._possession_steps = 0
+        self._predicted_goal_guard = 0     # steps remaining to suppress a double-paid real goal
         if opponent_path:
             self.set_opponent(opponent_path)
 
@@ -125,6 +133,8 @@ class BuckySelfPlayEnv(gym.Env):
         self._events.reset()
         self._step_count = 0
         self._heading_drift = 0.0
+        self._possession_steps = 0
+        self._predicted_goal_guard = 0
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
@@ -170,6 +180,42 @@ class BuckySelfPlayEnv(gym.Env):
         # Opponent-aware skilled-play events (steal, block, risky shot, kick lost, kicked/bank goal,
         # shot out of bounds).
         reward_info.update(self._events.update(state1, state_b1, info))
+
+        # Possession-hold counter (consecutive steps with the ball in A's capture zone and A facing
+        # it) → decays the possession reward so camping stops paying.
+        d_ball_a = float(np.linalg.norm(state1.ball_pos - state1.robot_pos))
+        heading_a = np.array([np.cos(state1.robot_heading), np.sin(state1.robot_heading)])
+        facing_a = float(np.dot(heading_a, state1.ball_pos - state1.robot_pos)) > 0
+        if d_ball_a < CAPTURE_RADIUS and facing_a:
+            self._possession_steps += 1
+        else:
+            self._possession_steps = 0
+        reward_info["possession_steps"] = self._possession_steps
+
+        # Look-ahead "inevitable goal" for the learner (A): on a kick that didn't already score,
+        # roll the ball forward with the opponent as a static obstacle. Confident only if it scores
+        # *and* the path doesn't pass through the opponent (interception safeguard).
+        predicted_goal = False
+        if reward_info.get("kicked") and not decision.goal_a:
+            scored, _, intercepted = predict_goal_by_rollout(
+                state1.ball_pos, state1.ball_vel, attack_sign=1,
+                horizon_steps=int(self._reward_cfg.predicted_goal_horizon_steps),
+                opponent_pos=state_b1.robot_pos,
+            )
+            predicted_goal = scored and not intercepted
+        reward_info["predicted_goal"] = predicted_goal
+
+        # Avoid double-paying: a predicted goal pre-pays the credit, so suppress the matching real
+        # goal (and its kick bonus) if it lands within the rollout horizon.
+        if predicted_goal:
+            self._predicted_goal_guard = int(self._reward_cfg.predicted_goal_horizon_steps)
+        elif self._predicted_goal_guard > 0:
+            self._predicted_goal_guard -= 1
+        if self._predicted_goal_guard > 0 and decision.goal_a:
+            reward_info["goal_scored"] = False
+            reward_info["kicked_goal"] = False
+            self._predicted_goal_guard = 0
+
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info,
                                        action=action, prev_action=self._prev_action)
         self._last_terms = reward_terms
@@ -179,6 +225,8 @@ class BuckySelfPlayEnv(gym.Env):
         # Play continues through goals (the referee kicks off); the episode ends only
         # when the learner (A) is sent off, or on the step budget.
         terminated = bool(a_removed)
+        if EARLY_TERMINATE_ON_PREDICTED_GOAL and predicted_goal:
+            terminated = True
         self._step_count += 1
         truncated = self._step_count >= self._stage_cfg.max_episode_steps
 

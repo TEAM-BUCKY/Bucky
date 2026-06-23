@@ -553,6 +553,14 @@ class JobManager:
             ]
             if not domain_rand:
                 args.append("--no-domain-rand")
+            # Torch device for the in-process trainer. Opt-in per launch (config "device")
+            # or per host (BUCKY_DEVICE env); defaults to cpu since the GPU is usually
+            # slower than CPU for this tiny MLP. Unknown values fall back to cpu rather
+            # than failing the launch on train.py's argparse choices.
+            device = str(cfg.get("device") or os.getenv("BUCKY_DEVICE") or "cpu")
+            if device not in ("cpu", "cuda", "auto"):
+                device = "cpu"
+            args += ["--device", device]
             # Headless by default: only animate the live field when the launch opted in.
             viz = bool(cfg.get("viz"))
             if viz:
@@ -1157,21 +1165,34 @@ class JobManager:
         write_meta(ckpt_root, run_name, launch_meta(model_cfg, run_name, created_by))
         return run_name, config_path, model_cfg
 
-    async def lease_for_worker(self, device_id: str) -> dict | None:
+    async def lease_for_worker(
+        self, device_id: str, *, cores: int | None = None, capacity: int | None = None
+    ) -> dict | None:
         """Atomically hand the next ready *train* job to a guest device.
 
         Returns the run name, the full ModelConfig and the resolved stop-condition
         CLI args for the worker to pass to ``scripts/train.py``; ``None`` if nothing
         is ready. Play jobs are skipped (they run locally); a future-scheduled item
-        is held so its slot is preserved."""
+        is held so its slot is preserved.
+
+        ``cores``/``capacity`` are the worker's self-reported capability (recorded on
+        every poll). A device is only handed work up to its effective concurrency cap
+        (the admin slider value, or the reported capacity when unset)."""
         async with self._lease_lock:
             now = time.time()
             # Every poll — even when the queue is empty and nothing is leased — is a
             # check-in. Touch first so an idle worker stays "online"; otherwise a
             # happily-polling device that never gets a job reads as "never online".
-            self._devices.touch(device_id)
+            self._devices.touch(device_id, cores=cores, capacity=capacity)
             await self._bc.broadcast(self.devices_msg())
-            dev = self._devices.public(device_id)["name"] if device_id else "device"
+            pub = self._devices.public(device_id) if device_id else None
+            dev = pub["name"] if pub else "device"
+            # Per-device concurrency cap: never lease past what the device may run at
+            # once. Held jobs (current_jobs) are tracked under the same lease lock, so
+            # this count is consistent with the add_job touch below.
+            effective = pub["effective_slots"] if pub else 1
+            if pub and len(pub["current_jobs"]) >= effective:
+                return None  # at capacity — hold further work for this device
             for q in self._queue:
                 if q.get("status") != "pending":
                     continue
@@ -1216,6 +1237,9 @@ class JobManager:
                     "stop_args": stop_args,
                     # Headless by default; the launcher's opt-in rides along to the worker.
                     "viz": bool(q["config"].get("viz")),
+                    # Tell the worker its current concurrency budget so it sizes how many
+                    # jobs it leases in parallel (live — picks up slider changes).
+                    "max_slots": effective,
                 }
                 # Federated shard: tell the worker how to reach the sync group.
                 if q["config"].get("dist_group"):
@@ -1243,7 +1267,10 @@ class JobManager:
         if entry is not None and cancel:
             entry["state"] = "stopping"
         await self._bc.broadcast(self.devices_msg())
-        return {"ok": True, "cancel": cancel}
+        # Echo the current concurrency budget so an already-busy worker scales up/down
+        # when the admin moves the slider mid-job, without waiting for the next lease.
+        effective = self._devices.public(device_id)["effective_slots"] if device_id else 1
+        return {"ok": True, "cancel": cancel, "max_slots": effective}
 
     def _is_run_leased_by(self, run: str, device_id: str) -> bool:
         """True iff `run` is an active lease currently held by `device_id`.
