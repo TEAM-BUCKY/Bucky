@@ -22,7 +22,7 @@ from bucky.play_events import PlayEventTracker
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
 from bucky.game.field import ball_out_of_play
 from bucky.game.referee import Referee
-from bucky.rewards import CAPTURE_RADIUS, RewardConfig, RewardTerms, compute_rewards
+from bucky.rewards import ALIGN_RADIUS, RewardConfig, RewardTerms, compute_rewards
 from bucky.selfplay import (
     SELF_PLAY_OBS_DIM, build_robot_obs, load_numpy_opponent, predict_opponent_action,
 )
@@ -80,7 +80,7 @@ class BuckySelfPlayEnv(gym.Env):
         self._opponent = None              # opponent for the current episode (picked in reset)
         self._opponent_pool: list = []     # rolling pool of frozen snapshots to sample from
         self._last_terms = RewardTerms()
-        self._possession_steps = 0
+        self._dwell_steps = 0
         self._predicted_goal_guard = 0     # steps remaining to suppress a double-paid real goal
         if opponent_path:
             self.set_opponent(opponent_path)
@@ -133,7 +133,7 @@ class BuckySelfPlayEnv(gym.Env):
         self._events.reset()
         self._step_count = 0
         self._heading_drift = 0.0
-        self._possession_steps = 0
+        self._dwell_steps = 0
         self._predicted_goal_guard = 0
         return self._get_obs(), {}
 
@@ -181,16 +181,16 @@ class BuckySelfPlayEnv(gym.Env):
         # shot out of bounds).
         reward_info.update(self._events.update(state1, state_b1, info))
 
-        # Possession-hold counter (consecutive steps with the ball in A's capture zone and A facing
-        # it) → decays the possession reward so camping stops paying.
+        # Dwell counter (consecutive steps A lingers near the ball within ALIGN_RADIUS, facing it)
+        # → decays the possession + front_alignment rewards so camping stops paying.
         d_ball_a = float(np.linalg.norm(state1.ball_pos - state1.robot_pos))
         heading_a = np.array([np.cos(state1.robot_heading), np.sin(state1.robot_heading)])
         facing_a = float(np.dot(heading_a, state1.ball_pos - state1.robot_pos)) > 0
-        if d_ball_a < CAPTURE_RADIUS and facing_a:
-            self._possession_steps += 1
+        if d_ball_a < ALIGN_RADIUS and facing_a:
+            self._dwell_steps += 1
         else:
-            self._possession_steps = 0
-        reward_info["possession_steps"] = self._possession_steps
+            self._dwell_steps = 0
+        reward_info["dwell_steps"] = self._dwell_steps
 
         # Look-ahead "inevitable goal" for the learner (A): on a kick that didn't already score,
         # roll the ball forward with the opponent as a static obstacle. Confident only if it scores

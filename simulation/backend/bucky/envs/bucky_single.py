@@ -17,7 +17,7 @@ from bucky.obs import OBS_DIM, build_observation
 from bucky.physics.python_backend import PyPhysics, predict_goal_by_rollout
 from bucky.play_events import CONTACT_DIST, KICK_GOAL_WINDOW
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
-from bucky.rewards import CAPTURE_RADIUS, RewardConfig, RewardTerms, compute_rewards
+from bucky.rewards import ALIGN_RADIUS, RewardConfig, RewardTerms, compute_rewards
 
 # Action scaling (MAX_LINEAR / MAX_OMEGA) lives in PyPhysics.step — this env passes raw
 # normalized actions through (with the motor-saturation factor on the linear dims).
@@ -69,7 +69,7 @@ class BuckySingleEnv(gym.Env):
         self._bounce_since_kick = False
         self._shot_in_flight = False
         self._shot_departed = False
-        self._possession_steps = 0
+        self._dwell_steps = 0
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -88,7 +88,7 @@ class BuckySingleEnv(gym.Env):
         self._bounce_since_kick = False
         self._shot_in_flight = False
         self._shot_departed = False
-        self._possession_steps = 0
+        self._dwell_steps = 0
         obs = self._get_obs()
         return obs, {}
 
@@ -184,15 +184,15 @@ class BuckySingleEnv(gym.Env):
 
         info["out_of_bounds"] = robot_just_out
 
-        # Possession-hold counter (consecutive steps with the ball in the capture zone and the
-        # robot facing it) → decays the possession reward so camping stops paying.
+        # Dwell counter (consecutive steps lingering near the ball within ALIGN_RADIUS, facing it)
+        # → decays the possession + front_alignment rewards so camping on the ball stops paying.
         heading_vec = np.array([np.cos(state1.robot_heading), np.sin(state1.robot_heading)])
         facing = float(np.dot(heading_vec, state1.ball_pos - state1.robot_pos)) > 0
-        if d_robot_ball < CAPTURE_RADIUS and facing:
-            self._possession_steps += 1
+        if d_robot_ball < ALIGN_RADIUS and facing:
+            self._dwell_steps += 1
         else:
-            self._possession_steps = 0
-        info["possession_steps"] = self._possession_steps
+            self._dwell_steps = 0
+        info["dwell_steps"] = self._dwell_steps
 
         # Look-ahead "inevitable goal": on a kick (that didn't already score this step), roll the
         # ball forward; if it scores, award goal-level credit now and end the episode early.

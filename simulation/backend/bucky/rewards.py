@@ -67,12 +67,15 @@ class RewardConfig:
     w_ball_to_goal: float = 5.0
 
     w_possession: float = 5.0
-    w_front_align: float = 10.0
-    # Possession is reshaped from a sustained per-step "drip" into a decaying capture bonus: the
-    # positive reward fades to ~0 over this many steps of continuous possession, so capturing the
-    # ball still pays but *camping* on it does not — pushing the policy to shoot. (Env tracks the
-    # consecutive-possession step count and passes it via ``info["possession_steps"]``.)
-    possession_decay_steps: float = 30.0
+    # Front-alignment was the dominant *camping* hot-spot (a v33 rollout farmed ~+1068/ep by
+    # hovering behind the ball without ever kicking). Cut the weight and fade it with dwell time
+    # (see below) so it pays as a setup burst during the approach but not as sustained income.
+    w_front_align: float = 4.0
+    # Both possession and front-alignment are faded to ~0 over this many steps of *dwelling near
+    # the ball* (within ALIGN_RADIUS, facing it). Capturing/lining-up still pays, but camping does
+    # not — pushing the policy to act (kick/drive). The env supplies the dwell count via
+    # ``info["dwell_steps"]``.
+    possession_decay_steps: float = 40.0
 
     w_goal: float = 55.0
     w_goal_against: float = -100.0
@@ -89,11 +92,13 @@ class RewardConfig:
     w_out_of_bounds: float = -50.0        # robot fully out → 30 s suspension (rules §4.9)
     w_lack_of_progress: float = -5.0      # ball stuck between robots (rules §4.6)
     w_defective: float = -25.0            # removed as defective (rules §4.7)
-    w_spin: float = -1
+    w_spin: float = -0.3                  # was -1.0: noisy ω exploration was over-penalised early
 
     # Per-step penalty while the ball sits out of bounds (in the relocation grace window) —
     # chasing / re-kicking it only drives it further out. Scaled by how far past the line it is.
-    w_play_oob_ball: float = -0.5
+    # Was -0.5: at that weight it summed to ~-300..-500/ep (the ball is out a large fraction of a
+    # chaotic episode) and drowned the learning signal. Kept small so it nudges, not dominates.
+    w_play_oob_ball: float = -0.15
     # Per-step nudge when idling away from the ball (ball still, robot still, no possession).
     w_stuck: float = -0.1
 
@@ -103,15 +108,18 @@ class RewardConfig:
     w_kick_goal: float = 12.0             # bonus: goal scored from a kick (vs dribbling it in)
     w_bank_shot: float = 6.0              # bonus: goal scored off a wall bounce
     w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
-    w_kick_lost: float = -20.0            # giving the enemy the ball: our kicked ball captured by enemy
-    w_kick_at_opponent: float = -10.0      # firing the ball straight into the opponent (a give-away)
-    # Blasting our kicked ball out of play (relocated → possession wasted): heavily punished,
-    # UNLESS it banks in for a goal — that scores before any relocation, so it never fires this.
-    w_shot_out_of_bounds: float = -40.0
+    # These three punish *failed* kicks. At their old magnitudes (−20/−10/−40) a robot that can't
+    # yet aim is so heavily punished for trying that it learns never to kick. Softened so kick
+    # exploration survives long enough to improve (still net-negative, just not crushing).
+    w_kick_lost: float = -8.0             # giving the enemy the ball: our kicked ball captured by enemy
+    w_kick_at_opponent: float = -5.0      # firing the ball straight into the opponent (a give-away)
+    w_shot_out_of_bounds: float = -12.0   # blasting our kicked ball out of play (was -40)
 
-    w_kick_attempt: float = 0.0           # flat bonus, only paid for an on-target in-play shot
-                                          # (default off: kept the spam incentive in check)
-    w_kick_power_to_goal: float = 2     # × cos(ball velocity, ball→goal) for on-target shots
+    # Small flat bonus for an *on-target, in-play* kick (gated by _shot_enters_goal_mouth, so it
+    # can't be farmed by blasting the ball anywhere). Turned on now that the front_alignment
+    # camping income is removed, to give the kicker a positive nudge to fire.
+    w_kick_attempt: float = 0.5
+    w_kick_power_to_goal: float = 4     # × cos(ball velocity, ball→goal) for on-target shots (was 2)
 
     w_shot_on_goal: float = 2.5           # × (ball velocity component toward goal), when ball is fast & free
 
@@ -230,6 +238,12 @@ def compute_rewards(
     # out, so the positive shaping below is suppressed and a dedicated penalty is applied instead.
     ball_out_raw = bool(info.get("ball_out_raw", False))
 
+    # Anti-camping decay (shared by possession + front_alignment): fades to 0 the longer the robot
+    # lingers near the ball, so lining-up/capturing pays as a setup burst but camping does not. The
+    # env supplies ``dwell_steps`` = consecutive steps dwelling within ALIGN_RADIUS facing the ball.
+    dwell = float(info.get("dwell_steps", 0))
+    dwell_decay = max(0.0, 1.0 - dwell / max(1.0, config.possession_decay_steps))
+
     d_robot_ball_0 = float(np.linalg.norm(s0.ball_pos - s0.robot_pos))
     d_robot_ball_1 = float(np.linalg.norm(s1.ball_pos - s1.robot_pos))
     terms.approach = config.w_approach * (d_robot_ball_0 - d_robot_ball_1)
@@ -255,11 +269,9 @@ def compute_rewards(
     if d_robot_ball_1 < CAPTURE_RADIUS and not ball_out_raw:
         heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
         if np.dot(heading_vec, s1.ball_pos - s1.robot_pos) > 0:
-            # Decaying capture bonus: fades to ~0 over ``possession_decay_steps`` of continuous
-            # possession so camping on the ball stops paying (the env supplies the hold count).
-            hold = float(info.get("possession_steps", 0))
-            decay = max(0.0, 1.0 - hold / max(1.0, config.possession_decay_steps))
-            terms.possession = config.w_possession * decay
+            # Decaying capture bonus: fades to ~0 as the robot dwells near the ball, so camping
+            # stops paying (see dwell_decay above).
+            terms.possession = config.w_possession * dwell_decay
         else:
             # Facing away with the ball in the capture zone is still a flat penalty (no decay).
             terms.possession = -config.w_possession
@@ -279,7 +291,8 @@ def compute_rewards(
         drive_pos = float(np.dot(approach_dir, goal_dir))     # behind ball -> can drive to goal
         align = 0.5 * (face_ball + drive_pos)
         prox = max(0.0, 1.0 - d_robot_ball_1 / ALIGN_RADIUS)
-        terms.front_alignment = config.w_front_align * align * prox
+        # Faded by dwell time too, so it rewards *setting up* but not camping (the old hot-spot).
+        terms.front_alignment = config.w_front_align * align * prox * dwell_decay
 
     if info.get("goal_scored", False):
         terms.goal = config.w_goal

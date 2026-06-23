@@ -315,3 +315,35 @@ def export_policy_npz(model, path: str) -> None:
     if hasattr(pol, "log_std"):
         arrays["log_std"] = pol.log_std.detach().cpu().numpy()
     np.savez(path, **arrays)
+
+
+def transfer_weights_expand_obs(new_model, old_path: str, device=None) -> tuple[int, int]:
+    """Seed ``new_model`` from a checkpoint whose observation space is a *prefix* of the new one.
+
+    Enables curriculum transfer from the single-agent stages (35-dim obs) into SELF_PLAY_1V1
+    (39-dim: the same 35 dims + a 4-beam sonar block appended at the end). Copies every policy
+    parameter that matches by shape; for the first Linear layer (whose input width grew) copies the
+    overlapping input columns and leaves the new sonar columns at their fresh initialisation.
+    Returns ``(copied, padded)`` tensor counts. Torch/SB3 imported lazily (trainer process only).
+    """
+    from stable_baselines3 import PPO
+
+    old = PPO.load(old_path, device=device)
+    old_sd = old.policy.state_dict()
+    new_sd = new_model.policy.state_dict()
+    copied = padded = 0
+    for k, nv in new_sd.items():
+        ov = old_sd.get(k)
+        if ov is None:
+            continue
+        if ov.shape == nv.shape:
+            new_sd[k] = ov.clone()
+            copied += 1
+        elif (ov.dim() == 2 and nv.dim() == 2 and ov.shape[0] == nv.shape[0]
+              and ov.shape[1] < nv.shape[1]):
+            tmp = nv.clone()
+            tmp[:, :ov.shape[1]] = ov
+            new_sd[k] = tmp
+            padded += 1
+    new_model.policy.load_state_dict(new_sd)
+    return copied, padded

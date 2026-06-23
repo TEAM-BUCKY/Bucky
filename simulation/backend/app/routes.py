@@ -91,6 +91,9 @@ class LaunchRequest(BaseModel):
     # {"shards": N, "sync_every": steps} or a per-device map
     # {"devices": [{"target": id|"server", "n_envs": N}], "sync_every": steps}.
     distributed: Optional[dict] = None
+    # FULL_TRAINING only: per-phase budget fractions (APPROACH / PUSH / SELF_PLAY). The trainer
+    # normalizes them; None → the default 0.15 / 0.25 / 0.60 split.
+    full_training_split: Optional[list[float]] = None
     # Per-model config (optional — when omitted, legacy <stage>_seed<N> behaviour).
     name: Optional[str] = None
     version: Optional[str] = None

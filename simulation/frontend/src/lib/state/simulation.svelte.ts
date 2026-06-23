@@ -126,6 +126,8 @@ export interface Hyperparams {
 
 export interface LaunchConfig {
 	stage: string;
+	/** FULL_TRAINING only: per-phase budget fractions (APPROACH / PUSH / SELF_PLAY). */
+	full_training_split?: number[];
 	timesteps: number;
 	n_envs: number;
 	seed: number;

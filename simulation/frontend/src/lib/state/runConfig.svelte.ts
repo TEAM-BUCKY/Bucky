@@ -17,7 +17,10 @@ export interface RunConfigCaps {
 	identity?: boolean;
 }
 
-export const STAGES = [{ value: 'SELF_PLAY_1V1', label: 'Self-play 1v1' }];
+export const STAGES = [
+	{ value: 'FULL_TRAINING', label: 'Full training' },
+	{ value: 'SELF_PLAY_1V1', label: 'Self-play 1v1' }
+];
 
 export const STOP_TABS: { value: StopKind; label: string }[] = [
 	{ value: 'steps', label: 'Steps' },
@@ -139,7 +142,9 @@ export class RunConfig {
 	mode = $state<'train' | 'match'>('train');
 
 	// ── basics ─────────────────────────────────────────────────────────────────
-	stage = $state('SELF_PLAY_1V1');
+	stage = $state('FULL_TRAINING');
+	/** FULL_TRAINING per-phase budget split as percentages [APPROACH, PUSH, SELF_PLAY] (sums to 100). */
+	fullSplit = $state<number[]>([15, 25, 60]);
 	timesteps = $state(200000);
 	n_envs = $state(16);
 	seed = $state(0);
@@ -253,6 +258,11 @@ export class RunConfig {
 			target: this.target,
 			viz: this.viz
 		};
+		if (this.stage === 'FULL_TRAINING') {
+			// Send normalized fractions (the backend re-normalizes anyway, but keep it explicit).
+			const sum = this.fullSplit.reduce((a, b) => a + b, 0) || 1;
+			p.full_training_split = this.fullSplit.map((v) => +(v / sum).toFixed(4));
+		}
 		if (this.distributed) {
 			const sync_every = Math.max(1, Math.floor(this.distSyncEvery));
 			const perDevice = this.distDevices.filter((d) => d.target && d.n_envs >= 1);
@@ -318,7 +328,8 @@ export class RunConfig {
 
 	// ── chip summaries ─────────────────────────────────────────────────────────
 	get stageSummary(): string {
-		return STAGES.find((s) => s.value === this.stage)?.label ?? this.stage;
+		const label = STAGES.find((s) => s.value === this.stage)?.label ?? this.stage;
+		return this.stage === 'FULL_TRAINING' ? `${label} · ${this.fullSplit.join('/')}` : label;
 	}
 	get stopSummary(): string {
 		if (this.stopKind === 'steps') return `${fmtCount(this.timesteps)} steps`;

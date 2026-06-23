@@ -527,6 +527,7 @@ class JobManager:
                 name=name or run_name,
                 version=version,
                 stage=stage,
+                full_training_split=cfg.get("full_training_split"),
                 n_envs=n_envs,
                 seed=seed,
                 domain_rand=domain_rand,

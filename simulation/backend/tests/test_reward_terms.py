@@ -201,7 +201,8 @@ def test_kick_lost_penalty_is_substantial(physics, config):
     s = physics._make_state()
     terms = compute_rewards(s, s, config, info={"kick_lost": True})
     assert abs(terms.kick_lost - config.w_kick_lost) < 1e-6
-    assert terms.kick_lost <= -10.0   # giving the enemy the ball is a heavy penalty
+    # Still a real penalty, but softened from -20 so early (inaccurate) kick exploration survives.
+    assert terms.kick_lost <= -5.0
 
 
 def test_shot_out_of_bounds_is_heavily_penalized(physics, config):
@@ -209,7 +210,8 @@ def test_shot_out_of_bounds_is_heavily_penalized(physics, config):
     terms = compute_rewards(s, s, config, info={"shot_out_of_bounds": True})
     assert abs(terms.shot_out_of_bounds - config.w_shot_out_of_bounds) < 1e-6
     assert terms.shot_out_of_bounds < 0.0
-    assert terms.shot_out_of_bounds <= -20.0   # really punishing: a wasted shot out of play
+    # A clear penalty for a wasted shot, but softened from -40 so kick exploration isn't crushed.
+    assert terms.shot_out_of_bounds <= -8.0
 
 
 def test_shot_out_of_bounds_zero_without_flag(physics, config):

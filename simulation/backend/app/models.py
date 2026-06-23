@@ -66,7 +66,10 @@ class ModelConfig(BaseModel):
 
     name: str = "model"
     version: str = "1"
-    stage: str = "APPROACH_STATIC_BALL"
+    stage: str = "FULL_TRAINING"
+    # FULL_TRAINING only: fraction of the total budget for each phase (APPROACH / PUSH / SELF_PLAY).
+    # None → the default split in curriculum.FULL_TRAINING_PHASES (0.15 / 0.25 / 0.60).
+    full_training_split: Optional[list[float]] = None
     n_envs: int = 16
     seed: int = 0
     domain_rand: bool = True

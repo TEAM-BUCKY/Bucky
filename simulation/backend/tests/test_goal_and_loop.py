@@ -102,14 +102,14 @@ def test_possession_full_at_zero_hold():
     cfg = RewardConfig()
     s = _state(robot_pos=[0.0, 0.0], ball_pos=[0.1, 0.0])   # in capture radius, facing +x
     assert 0.1 < CAPTURE_RADIUS
-    terms = compute_rewards(s, s, cfg, info={"possession_steps": 0})
+    terms = compute_rewards(s, s, cfg, info={"dwell_steps": 0})
     assert terms.possession == pytest.approx(cfg.w_possession)
 
 
 def test_possession_decays_to_zero_when_camping():
     cfg = RewardConfig()
     s = _state(robot_pos=[0.0, 0.0], ball_pos=[0.1, 0.0])
-    terms = compute_rewards(s, s, cfg, info={"possession_steps": int(cfg.possession_decay_steps)})
+    terms = compute_rewards(s, s, cfg, info={"dwell_steps": int(cfg.possession_decay_steps)})
     assert terms.possession == pytest.approx(0.0, abs=1e-9)
 
 
@@ -117,8 +117,20 @@ def test_possession_facing_away_still_penalised():
     cfg = RewardConfig()
     # Ball behind the robot (robot faces +x, ball at -x) → facing-away penalty, no decay.
     s = _state(robot_pos=[0.0, 0.0], ball_pos=[-0.1, 0.0])
-    terms = compute_rewards(s, s, cfg, info={"possession_steps": 999})
+    terms = compute_rewards(s, s, cfg, info={"dwell_steps": 999})
     assert terms.possession == pytest.approx(-cfg.w_possession)
+
+
+def test_front_alignment_decays_with_dwell():
+    """Front-alignment (the old camping hot-spot) pays as a setup burst but fades while camping."""
+    cfg = RewardConfig()
+    # Robot behind the ball (at origin facing +x), ball ahead within ALIGN_RADIUS → aligned.
+    s = _state(robot_pos=[0.0, 0.0], ball_pos=[0.2, 0.0], heading=0.0)
+    fresh = compute_rewards(s, s, cfg, info={"dwell_steps": 0}).front_alignment
+    camped = compute_rewards(s, s, cfg,
+                             info={"dwell_steps": int(cfg.possession_decay_steps)}).front_alignment
+    assert fresh > 0.0
+    assert camped == pytest.approx(0.0, abs=1e-9)
 
 
 # ── Look-ahead rollout ───────────────────────────────────────────────────────

@@ -14,6 +14,7 @@
 	import Combobox from '$lib/components/ui/combobox/Combobox.svelte';
 	import ConfigChip from '$lib/components/ui/config-chip/ConfigChip.svelte';
 	import DateTimePicker from './DateTimePicker.svelte';
+	import SplitBar from './SplitBar.svelte';
 
 	let { config }: { config: RunConfig } = $props();
 
@@ -124,6 +125,17 @@
 					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Stage</Label>
 					<Combobox bind:value={config.stage} items={STAGES} searchPlaceholder="Search stages…" />
 				</div>
+				{#if config.stage === 'FULL_TRAINING'}
+					<div class="flex flex-col gap-1">
+						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+							Phase budget split
+						</Label>
+						<SplitBar bind:values={config.fullSplit} labels={['Approach', 'Push', 'Self-play']} />
+						<p class="font-mono text-[10px] text-muted-foreground">
+							Drag the dividers to set each phase's share of the total budget.
+						</p>
+					</div>
+				{/if}
 			{/snippet}
 		</ConfigChip>
 
