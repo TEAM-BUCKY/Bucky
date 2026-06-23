@@ -114,6 +114,11 @@ def test_fast_ball_cannot_tunnel_into_goal_from_the_side(phys, goal_sign, y_sign
         info = phys.step(ZERO, ZERO)
         assert info["goal_a"] is False, "fast ball scored in +x goal from the side"
         assert info["goal_b"] is False, "fast ball scored in -x goal from the side"
+        bx, by = phys.state_a().ball_pos
+        # The side wall is solid: a ball behind a goal line must never tunnel through it
+        # into the goal strip (|y| < GOAL_HALF). It must bounce off and stay outside.
+        if abs(bx) > FIELD_W / 2:
+            assert abs(by) >= GOAL_HALF - 1e-6, "fast ball tunneled through the goal side wall"
 
 
 def test_ball_still_scores_through_the_mouth(phys):

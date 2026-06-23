@@ -200,7 +200,7 @@ class PyPhysics(PhysicsBackend):
         )
 
         self._resolve_robot_ball_collision()
-        bounced = self._resolve_ball_walls()
+        bounced = self._resolve_ball_walls(prev_bx, prev_by)
 
         # Robot is bounded by the arena walls, not the white lines — it may roam the
         # outer band freely.
@@ -243,10 +243,12 @@ class PyPhysics(PhysicsBackend):
             if impulse < 0:
                 self._ball_vel -= (1 + BALL_RESTITUTION) * impulse * normal
 
-    def _resolve_ball_walls(self) -> bool:
+    def _resolve_ball_walls(self, prev_x: float, prev_y: float) -> bool:
         # The ball bounces off the arena walls (so it can roll into the outer band and
         # get pinned in the corners). The goal mouth is an opening in the white-line
         # goal line, so a ball heading into it passes through to score instead.
+        # ``prev_x``/``prev_y`` are the ball's start-of-step position, used to make the goal
+        # side-wall collision a *swept* test (a fast ball can't tunnel through the thin wall).
         # Returns True if any wall bounce occurred this step (used for bank-shot detection).
         bounced = False
         hx, hy = ARENA_HALF_X - BALL_RADIUS, ARENA_HALF_Y - BALL_RADIUS
@@ -266,19 +268,23 @@ class PyPhysics(PhysicsBackend):
             self._ball_pos[1] = np.sign(self._ball_pos[1]) * hy
             bounced = True
 
-        # Goal side walls. The goal is a box recessed behind the goal line: its mouth (the
-        # GOAL_WIDTH opening at x = ±HALF_W) is open, but the two side walls running back
-        # from the goalposts at y = ±GOAL_WIDTH/2 are solid. Without them a ball loose in
-        # the neutral band behind a goal line could drift laterally into the goal strip and
-        # score "from the side" without ever passing through the mouth. Keep a ball that is
-        # behind a goal line and outside the mouth on the outside of these walls; the only
-        # way into the strip (and thus a goal) is through the mouth at the goal line itself.
-        if abs(self._ball_pos[0]) > HALF_W:
-            side = ghw + BALL_RADIUS
-            if ghw <= abs(self._ball_pos[1]) < side:
-                self._ball_pos[1] = np.sign(self._ball_pos[1]) * side
-                self._ball_vel[1] = np.sign(self._ball_pos[1]) * abs(self._ball_vel[1]) * BALL_RESTITUTION
-                bounced = True
+        # Goal side walls (swept). The goal is a box recessed behind the goal line: its mouth
+        # (the GOAL_WIDTH opening at x = ±HALF_W) is open, but the two side walls running back
+        # from the goalposts at y = ±GOAL_WIDTH/2 are solid. A ball that was *already behind a
+        # goal line* at the start of the step (|prev_x| > HALF_W) is in the out-of-bounds band
+        # beside the goal; the only way into the goal box is through the mouth at the goal line,
+        # which it has not crossed. So if it ends the step inside the box width (|y| < the wall
+        # surface), it must have crossed a side wall — clamp it back to the wall it came from and
+        # reflect its lateral velocity. Using the start-of-step position makes this a swept test,
+        # so a fast ball can't jump clean over the thin wall band in one 20 ms step. A ball coming
+        # from the *field* (|prev_x| <= HALF_W) is untouched: it either scores through the mouth or
+        # passes beside the goal as an ordinary out-of-bounds ball.
+        side = ghw + BALL_RADIUS
+        if abs(prev_x) > HALF_W and abs(prev_y) >= ghw and abs(self._ball_pos[1]) < side:
+            sgn = np.sign(prev_y) or 1.0
+            self._ball_pos[1] = sgn * side
+            self._ball_vel[1] = sgn * abs(self._ball_vel[1]) * BALL_RESTITUTION
+            bounced = True
         return bounced
 
     def _check_goal(self, prev_x: float, prev_y: float) -> bool:
@@ -463,7 +469,7 @@ class TwoRobotPhysics:
             self._resolve_robot_ball(self._b_pos, self._b_vel)
         if not (self._a_removed or self._b_removed):
             self._resolve_robot_robot()
-        bounced = self._resolve_ball_walls()
+        bounced = self._resolve_ball_walls(prev_bx, prev_by)
 
         if not self._a_removed:
             self._a_pos = self._clamp_robot(self._a_pos)
