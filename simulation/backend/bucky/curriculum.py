@@ -16,6 +16,7 @@ from enum import Enum
 class Stage(str, Enum):
     APPROACH_STATIC_BALL = "APPROACH_STATIC_BALL"
     PUSH_TO_EMPTY_GOAL = "PUSH_TO_EMPTY_GOAL"
+    AIM_AND_KICK = "AIM_AND_KICK"
     SELF_PLAY_1V1 = "SELF_PLAY_1V1"
     FULL_TRAINING = "FULL_TRAINING"
     SELF_PLAY_2V2 = "SELF_PLAY_2V2"
@@ -29,6 +30,14 @@ class StageConfig:
     goal_present: bool
     active_reward_terms: list[str] = field(default_factory=list)
     opponent_present: bool = False
+    # Spawn layout for single-agent stages (BuckySingleEnv._place_entities):
+    #   "default"    → robot near centre, ball within ball_spawn_radius of it (APPROACH).
+    #   "shoot"      → ball on the centre line at varied y; robot anywhere on its own (-x) half,
+    #                  random heading — forces aiming at the goal from off-centre (PUSH).
+    #   "kick_blend" → ball scattered; robot placed behind it (goal-opposite side) at a widely
+    #                  varied distance + angular jitter, random heading — blends close aim shots
+    #                  and mid-range strikes (AIM_AND_KICK).
+    spawn_mode: str = "default"
     # Default PPO entropy coefficient for this stage when the model config doesn't set one.
     # Kick/self-play stages want more exploration (firing the kicker, breaking symmetry).
     recommended_ent_coef: float = 0.01
@@ -58,6 +67,7 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         max_episode_steps=600,
         ball_spawn_radius=0.9,
         goal_present=True,
+        spawn_mode="shoot",              # ball on the centre line, robot anywhere on its own half
         active_reward_terms=[
             "approach", "speed", "ball_to_goal", "possession", "front_alignment",
             "goal", "predicted_goal", "in_goal",
@@ -67,7 +77,26 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         ],
         opponent_present=False,
         recommended_ent_coef=0.02,       # encourage firing the kicker
-        description="Robot learns to drive/kick the ball into an empty goal (no opponent).",
+        description="Drive/kick the ball into an empty goal from varied positions (no opponent).",
+    ),
+    Stage.AIM_AND_KICK: StageConfig(
+        stage=Stage.AIM_AND_KICK,
+        max_episode_steps=400,
+        ball_spawn_radius=0.5,
+        goal_present=True,
+        spawn_mode="kick_blend",         # robot behind a scattered ball, close↔mid distance
+        active_reward_terms=[
+            # Aiming/kicking drill: reward getting behind the ball and firing it on target. No
+            # "possession" term (we want shots, not camping); the kick/goal terms dominate.
+            "approach", "speed", "ball_to_goal", "front_alignment",
+            "goal", "predicted_goal", "in_goal",
+            "kick_attempt", "kick_power_to_goal", "shot_on_goal", "kick_goal", "bank_shot",
+            "shot_out_of_bounds", "out_of_bounds", "lack_of_progress", "defective", "spin",
+            "time_penalty", "action_smoothness", "play_oob_ball", "stuck",
+        ],
+        opponent_present=False,
+        recommended_ent_coef=0.02,
+        description="Aim the kicker: shoot a scattered ball into the goal from varied angles/ranges.",
     ),
     Stage.SELF_PLAY_1V1: StageConfig(
         stage=Stage.SELF_PLAY_1V1,
@@ -99,9 +128,10 @@ STAGE_CONFIGS[Stage.FULL_TRAINING] = StageConfig(
 # The phases FULL_TRAINING runs, in order, with each one's default fraction of the total budget
 # (steps or wall-clock). Overridable per run via the config's ``full_training_split``.
 FULL_TRAINING_PHASES: list[tuple[Stage, float]] = [
-    (Stage.APPROACH_STATIC_BALL, 0.15),
-    (Stage.PUSH_TO_EMPTY_GOAL, 0.25),
-    (Stage.SELF_PLAY_1V1, 0.60),
+    (Stage.APPROACH_STATIC_BALL, 0.10),
+    (Stage.PUSH_TO_EMPTY_GOAL, 0.20),
+    (Stage.AIM_AND_KICK, 0.25),
+    (Stage.SELF_PLAY_1V1, 0.45),
 ]
 
 

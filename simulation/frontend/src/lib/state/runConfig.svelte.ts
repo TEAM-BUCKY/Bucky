@@ -143,8 +143,8 @@ export class RunConfig {
 
 	// ── basics ─────────────────────────────────────────────────────────────────
 	stage = $state('FULL_TRAINING');
-	/** FULL_TRAINING per-phase budget split as percentages [APPROACH, PUSH, SELF_PLAY] (sums to 100). */
-	fullSplit = $state<number[]>([15, 25, 60]);
+	/** FULL_TRAINING per-phase budget split % [APPROACH, PUSH, AIM_AND_KICK, SELF_PLAY] (sums to 100). */
+	fullSplit = $state<number[]>([10, 20, 25, 45]);
 	timesteps = $state(200000);
 	n_envs = $state(16);
 	seed = $state(0);

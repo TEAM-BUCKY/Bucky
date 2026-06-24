@@ -130,7 +130,7 @@
 						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
 							Phase budget split
 						</Label>
-						<SplitBar bind:values={config.fullSplit} labels={['Approach', 'Push', 'Self-play']} />
+						<SplitBar bind:values={config.fullSplit} labels={['Approach', 'Push', 'Kick', 'Self-play']} />
 						<p class="font-mono text-[10px] text-muted-foreground">
 							Drag the dividers to set each phase's share of the total budget.
 						</p>

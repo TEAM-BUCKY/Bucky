@@ -8,9 +8,10 @@ from bucky.obs import OBS_DIM
 
 
 def test_full_training_phase_plan():
-    """FULL_TRAINING runs APPROACH → PUSH → SELF_PLAY with ratios summing to 1."""
+    """FULL_TRAINING runs APPROACH → PUSH → AIM_AND_KICK → SELF_PLAY with ratios summing to 1."""
     stages = [s for s, _ in FULL_TRAINING_PHASES]
-    assert stages == [Stage.APPROACH_STATIC_BALL, Stage.PUSH_TO_EMPTY_GOAL, Stage.SELF_PLAY_1V1]
+    assert stages == [Stage.APPROACH_STATIC_BALL, Stage.PUSH_TO_EMPTY_GOAL,
+                      Stage.AIM_AND_KICK, Stage.SELF_PLAY_1V1]
     assert sum(r for _, r in FULL_TRAINING_PHASES) == 1.0
     # The meta-stage has a sane (self-play-mirroring) config so incidental lookups don't crash.
     assert get_stage_config(Stage.FULL_TRAINING).opponent_present is True
@@ -26,11 +27,13 @@ def test_step_split_distributes_total_with_remainder_to_last():
         s = remaining if is_last else int(round(total * r))
         remaining -= s
         steps.append(s)
-    assert steps == [150, 250, 600]
+    assert steps == [100, 200, 250, 450]
     assert sum(steps) == total
 
 
-@pytest.mark.parametrize("stage", [Stage.APPROACH_STATIC_BALL, Stage.PUSH_TO_EMPTY_GOAL])
+@pytest.mark.parametrize(
+    "stage", [Stage.APPROACH_STATIC_BALL, Stage.PUSH_TO_EMPTY_GOAL, Stage.AIM_AND_KICK]
+)
 def test_foundational_stage_runs(stage):
     cfg = get_stage_config(stage)
     assert cfg.opponent_present is False
@@ -51,6 +54,44 @@ def test_approach_stage_excludes_goal_and_kick_terms():
     assert "approach" in active
     for kick_term in ("goal", "predicted_goal", "kick_power_to_goal", "kick_goal"):
         assert kick_term not in active
+
+
+def test_aim_and_kick_stage_drills_shooting_not_possession():
+    cfg = get_stage_config(Stage.AIM_AND_KICK)
+    active = set(cfg.active_reward_terms)
+    assert cfg.spawn_mode == "kick_blend"
+    assert "possession" not in active            # shoot, don't camp
+    for kick_term in ("goal", "predicted_goal", "kick_power_to_goal", "kick_goal", "kick_attempt"):
+        assert kick_term in active
+
+
+def test_shoot_spawn_puts_ball_on_centre_line_robot_own_half():
+    """PUSH's 'shoot' spawn: ball near the centre line at varied y, robot behind it on its own half."""
+    from bucky.game.field import HALF_W
+    env = BuckySingleEnv(stage=Stage.PUSH_TO_EMPTY_GOAL, domain_rand=False)
+    ys = []
+    for i in range(200):
+        env.reset(seed=i)
+        b, r = env._physics._ball_pos, env._physics._robot_pos
+        assert abs(b[0]) <= 0.11                 # ball on/near centre line
+        assert r[0] < 0                          # robot on its own (-x) half
+        assert r[0] < b[0]                       # behind the ball (so a forward drive points goalward)
+        assert abs(b[0]) < HALF_W
+        ys.append(float(b[1]))
+    assert max(ys) - min(ys) > 0.6               # ball genuinely varies left↔right
+    env.close()
+
+
+def test_kick_blend_spawn_places_robot_behind_ball():
+    from bucky.game.field import ROBOT_RADIUS, BALL_RADIUS
+    env = BuckySingleEnv(stage=Stage.AIM_AND_KICK, domain_rand=False)
+    for i in range(200):
+        env.reset(seed=i)
+        b, r = env._physics._ball_pos, env._physics._robot_pos
+        d = float(np.linalg.norm(b - r))
+        assert r[0] <= b[0] + 1e-6               # robot on the goal-opposite side of the ball
+        assert d >= ROBOT_RADIUS + BALL_RADIUS - 1e-6   # not spawned overlapping the ball
+    env.close()
 
 
 def test_push_stage_includes_goal_and_kick_terms():

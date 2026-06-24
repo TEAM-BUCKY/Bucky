@@ -77,7 +77,7 @@ class BuckySingleEnv(gym.Env):
             self._rng = np.random.default_rng(seed)
         self._physics.reset(seed=seed)
         self._ep_rand = sample_episode_randomization(self._rand_cfg, self._rng)
-        self._spawn_ball()
+        self._place_entities()
         self._action_buffer.clear()
         self._prev_action = np.zeros(4, dtype=np.float32)
         self._step_count = 0
@@ -247,6 +247,53 @@ class BuckySingleEnv(gym.Env):
             return terms.total
         d = terms.as_dict()
         return sum(d.get(k, 0.0) for k in active)
+
+    def _place_entities(self) -> None:
+        """Position the robot + ball for the episode per the stage's ``spawn_mode``.
+
+        ``default`` keeps the physics-reset robot pose and drops the ball near it. ``shoot`` and
+        ``kick_blend`` override both so the robot must aim at the goal from off-centre positions
+        (the fix for "drives forward and shoots" — see PUSH/AIM_AND_KICK in curriculum.py).
+        """
+        mode = getattr(self._stage_cfg, "spawn_mode", "default")
+        if mode == "default":
+            self._spawn_ball()
+            return
+
+        rng = self._rng
+        margin = 0.1
+        ymax = field.HALF_H - margin            # ~0.51 m lateral half-extent for spawns
+
+        if mode == "shoot":
+            # Ball on the centre line (small x jitter), spread across the field width.
+            ball = np.array([rng.uniform(-0.1, 0.1), rng.uniform(-ymax, ymax)])
+            # Robot anywhere on its own (-x) half, at least 0.25 m behind the ball, random heading.
+            robot = np.array([rng.uniform(-(field.HALF_W - margin), ball[0] - 0.25),
+                              rng.uniform(-ymax, ymax)])
+            heading = rng.uniform(-np.pi, np.pi)
+        elif mode == "kick_blend":
+            # Ball scattered across the centre/attacking region.
+            ball = np.array([rng.uniform(-0.1, 0.5), rng.uniform(-0.45, 0.45)])
+            to_goal = field.OPP_GOAL - ball
+            base = np.arctan2(-to_goal[1], -to_goal[0])           # direction ball → away-from-goal
+            ang = base + rng.uniform(-np.deg2rad(50), np.deg2rad(50))
+            d = rng.uniform(0.16, 0.7)                            # close aim shot ↔ mid-range strike
+            robot = ball + d * np.array([np.cos(ang), np.sin(ang)])
+            heading = rng.uniform(-np.pi, np.pi)
+        else:
+            self._spawn_ball()
+            return
+
+        robot = np.clip(
+            robot,
+            [-(field.ARENA_HALF_X - field.ROBOT_RADIUS), -(field.ARENA_HALF_Y - field.ROBOT_RADIUS)],
+            [field.ARENA_HALF_X - field.ROBOT_RADIUS, field.ARENA_HALF_Y - field.ROBOT_RADIUS],
+        )
+        ball = np.clip(ball, [-(field.HALF_W - margin), -ymax], [field.HALF_W - margin, ymax])
+        self._physics._robot_pos = robot.astype(float)
+        self._physics._robot_heading = float(heading)
+        self._physics._ball_pos = ball.astype(float)
+        self._physics._ball_vel = np.zeros(2)
 
     def _spawn_ball(self) -> None:
         angle = self._rng.uniform(-np.pi, np.pi)

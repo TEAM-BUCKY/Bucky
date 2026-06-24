@@ -18,7 +18,7 @@
 	let {
 		values = $bindable(),
 		labels,
-		colors = ['#3c78dc', '#d9a441', '#3cba6b'],
+		colors = ['#3c78dc', '#d9a441', '#3cba6b', '#8b5cf6'],
 		min = 4
 	}: Props = $props();
 
