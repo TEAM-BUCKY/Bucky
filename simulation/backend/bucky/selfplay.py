@@ -63,6 +63,33 @@ def adapt_obs_to_policy(obs, policy_obs_dim: int) -> np.ndarray:
     return obs[idx]
 
 
+# Single-agent base widths (no sonar): pure prefixes of the current OBS_DIM base, since each
+# obs block was *appended* (18 → 23 → 35 → 39). A single-agent policy of one of these widths is
+# driven by slicing that prefix off the current base.
+SINGLE_COMPATIBLE_OBS_DIMS = frozenset(
+    {LEGACY_OBS_DIM, PRE_KICK_PRED_OBS_DIM, PRE_GOAL_REL_OBS_DIM, OBS_DIM})  # {18, 23, 35, 39}
+# Every observation width the eval tool can drive — single-agent (no sonar) or opponent-aware.
+EVAL_COMPATIBLE_OBS_DIMS = SINGLE_COMPATIBLE_OBS_DIMS | MATCH_COMPATIBLE_OBS_DIMS
+
+
+def project_obs(full_obs, policy_obs_dim: int, opponent_aware: bool) -> np.ndarray:
+    """Project the full 43-dim opponent-aware obs down to any legacy policy's layout.
+
+    ``opponent_aware`` disambiguates the one width that two eras share: a 39-dim policy is either
+    the current single-agent base (39, no sonar) or a legacy opponent-aware policy (35 base + 4
+    sonar). For all other widths the dimension alone fixes the layout. The caller builds the full
+    obs (in a single drill, the four sonar dims are wall-only — there is no opponent on the field).
+    """
+    full = np.asarray(full_obs, dtype=np.float32).reshape(-1)
+    if opponent_aware:
+        return adapt_obs_to_policy(full, policy_obs_dim)
+    if policy_obs_dim in SINGLE_COMPATIBLE_OBS_DIMS:
+        return full[:policy_obs_dim]
+    raise ValueError(
+        f"cannot project to a {policy_obs_dim}-dim single-agent policy "
+        f"(supported: {sorted(SINGLE_COMPATIBLE_OBS_DIMS)})")
+
+
 class CompatPolicy:
     """Wraps a policy whose observation is narrower than the current match obs, projecting each
     observation down to that policy's layout before predicting. A drop-in for the wrapped model

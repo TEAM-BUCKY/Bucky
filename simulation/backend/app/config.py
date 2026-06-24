@@ -46,6 +46,10 @@ class Settings:
     # is a separate train.py subprocess (with its own SubprocVecEnv workers), so raise this
     # only as far as the host's CPU/RAM allows. Default 1 preserves single-machine behaviour.
     local_slots: int = max(1, int(os.getenv("LOCAL_SLOTS", "1") or "1"))
+    # Concurrent *evaluation* drills the server runs. Eval is a single-env subprocess (far
+    # lighter than a 16-env training run) and lives in its own lane — it does NOT consume
+    # ``local_slots``, so analysis works while the production trainer keeps running.
+    eval_slots: int = max(1, int(os.getenv("EVAL_SLOTS", "1") or "1"))
 
     # ── GitHub-org OAuth (optional) ──────────────────────────────────────────────
     # When all three are set, control auth switches to "sign in with GitHub" and any

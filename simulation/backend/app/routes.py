@@ -108,6 +108,16 @@ class QueueAddRequest(LaunchRequest):
     start_at: Optional[float] = None
 
 
+class EvalRequest(BaseModel):
+    # Run a checkpoint through a drill (curriculum stage), streaming the reward build-up.
+    run: str
+    checkpoint: str
+    stage: str
+    n_episodes: int = 10
+    seed: int = 999
+    deterministic: bool = True
+
+
 class ControlRequest(BaseModel):
     # Manual control for a play match's red robot. ``run`` is the match run name.
     run: str
@@ -458,6 +468,18 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
             raise HTTPException(status_code=400, detail=result.get("message", "launch failed"))
         return result
 
+    @router.post("/eval")
+    async def create_eval(req: EvalRequest, _user: str = Depends(require_control)) -> dict:
+        """Launch an evaluation drill (separate lane — does not consume training slots)."""
+        result = await manager.launch_eval(req.model_dump(), actor=_user)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("message", "eval failed"))
+        return result
+
+    @router.post("/eval/stop")
+    async def stop_eval(_user: str = Depends(require_control)) -> dict:
+        return await manager.stop_eval(actor=_user)
+
     @router.post("/control")
     async def control_match(req: ControlRequest, _user: str = Depends(require_control)) -> dict:
         """Send a manual control command (human action / red mode) to a running match.
@@ -603,6 +625,7 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
             await broadcaster.send(ws, manager.queue_msg())
             await broadcaster.send(ws, manager.models_msg())
             await broadcaster.send(ws, manager.devices_msg())
+            await broadcaster.send(ws, manager.eval_status_msg())  # recover an in-flight eval
             # The stream is read-only; we still read (and ignore) to detect disconnects.
             while True:
                 await ws.receive_text()

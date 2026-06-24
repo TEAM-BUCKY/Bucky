@@ -79,6 +79,14 @@ def _detect_preload_allocator() -> str | None:
 _PRELOAD_ALLOCATOR = _detect_preload_allocator()
 
 VALID_STAGES = {s.value for s in Stage}
+# Drills the eval tool can run: the four foundational stages, each a concrete scenario
+# (excludes the FULL_TRAINING meta-stage and 2v2, which the eval script doesn't build).
+EVAL_STAGES = {
+    Stage.APPROACH_STATIC_BALL.value,
+    Stage.PUSH_TO_EMPTY_GOAL.value,
+    Stage.AIM_AND_KICK.value,
+    Stage.SELF_PLAY_1V1.value,
+}
 
 
 class JobManager:
@@ -110,6 +118,10 @@ class JobManager:
         # a plain dict broadcast to the UI (minus the unpicklable ``proc``). Replaces the
         # old single-run ``_proc``/``_state``/``_run_meta`` so several runs coexist.
         self._active: dict[str, dict] = {}
+        # Evaluation drills run in a *separate* lane, keyed by run_name. Kept out of
+        # ``_active`` so eval never counts against ``local_slots`` or appears in the training
+        # multi-run panel — analysis can run while the production trainer keeps going.
+        self._eval_active: dict[str, dict] = {}
         # Ref-count of connected local trainer ingest sockets → ``trainer_connected``.
         self._ingest_conns = 0
         self._tasks: list[asyncio.Task] = []
@@ -200,7 +212,7 @@ class JobManager:
         for t in self._tasks:
             t.cancel()
         loop = asyncio.get_running_loop()
-        for entry in self._local_active():
+        for entry in [*self._local_active(), *self._eval_active.values()]:
             proc = entry.get("proc")
             if proc is not None and proc.poll() is None:
                 await loop.run_in_executor(None, self._terminate, proc)
@@ -243,6 +255,18 @@ class JobManager:
         try:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
+            return
+
+        # Eval drills live in their own lane. A status frame updates the eval entry's phase;
+        # eval_step / eval_summary frames fall through to the generic fan-out below (tagged
+        # with run + device) so they reach /api/stream without touching the training lists.
+        eval_entry = self._eval_active.get(run)
+        if eval_entry is not None and msg.get("type") == "trainer_status":
+            if msg.get("phase") is not None:
+                eval_entry["phase"] = msg["phase"]
+            if "message" in msg:
+                eval_entry["message"] = msg["message"]
+            await self._bc.broadcast(self.eval_status_msg())
             return
 
         entry = self._active.get(run)
@@ -719,6 +743,90 @@ class JobManager:
         await self._bc.broadcast(self.active_runs_msg())
         return {"ok": True, "message": "cancel requested"}
 
+    # ── evaluation drills (separate lane, off the training slots) ────────────────
+    def eval_status_msg(self) -> dict:
+        """The current eval drill (or null) — drives the /eval page and recovers an
+        in-flight eval after a page reload."""
+        entry = next(iter(self._eval_active.values()), None)
+        return {"type": "eval_status",
+                "eval": self._public_run(entry) if entry is not None else None}
+
+    async def launch_eval(self, cfg: dict, actor: str | None = None) -> dict:
+        """Run a checkpoint through a drill (curriculum stage), streaming the reward build-up.
+
+        Lives in its own lane: gated by ``eval_slots`` (not ``local_slots``), so a busy
+        trainer can't block it and it never inflates the training run list."""
+        async with self._launch_lock:
+            if len(self._eval_active) >= self._settings.eval_slots:
+                return self._reject("An evaluation is already running.")
+
+            stage = str(cfg.get("stage") or "")
+            if stage not in EVAL_STAGES:
+                return self._reject(f"Eval stage must be one of {sorted(EVAL_STAGES)}.")
+
+            run = str(cfg.get("run", ""))
+            checkpoint = str(cfg.get("checkpoint", ""))
+            path = self.checkpoint_path(run, checkpoint)
+            if path is None:
+                return self._reject(f"Checkpoint not found: {run}/{checkpoint}")
+
+            try:
+                n_episodes = min(100, max(1, int(cfg.get("n_episodes") or 10)))
+                seed = int(cfg.get("seed") or 999)
+            except (TypeError, ValueError):
+                return self._reject("Invalid numeric config.")
+            deterministic = cfg.get("deterministic")
+            deterministic = True if deterministic is None else bool(deterministic)
+
+            run_name = f"eval_{run}_{int(time.time())}"
+            i = 2
+            while run_name in self._eval_active or run_name in self._active:
+                run_name, i = f"eval_{run}_{int(time.time())}_{i}", i + 1
+
+            args = [
+                sys.executable, "scripts/eval_drill.py",
+                "--checkpoint", str(path),
+                "--stage", stage,
+                "--n-episodes", str(n_episodes),
+                "--seed", str(seed),
+                "--stream-url", self._ingest_url(run_name),
+                "--deterministic" if deterministic else "--no-deterministic",
+            ]
+            entry = {
+                "run_name": run_name, "device": "server", "run_type": "eval",
+                "state": "running", "stage": stage,
+                "checkpoint": f"{run}/{checkpoint}", "n_episodes": n_episodes,
+                "seed": seed, "deterministic": deterministic,
+                "phase": "launching", "started_at": time.time(),
+            }
+            proc, spawn_err = self._spawn(args)
+            if spawn_err is not None:
+                return self._reject(f"Eval launch failed: {spawn_err}")
+            entry["proc"] = proc
+            self._eval_active[run_name] = entry
+            log.info("Launched eval %s (pid %d): %s on %s", run_name, proc.pid,
+                     entry["checkpoint"], stage)
+            self._audit("eval", run_name, actor, source="server", detail=f"stage={stage}")
+            await self._bc.broadcast(self.eval_status_msg())
+            return {"ok": True, "message": "launched", "run_name": run_name}
+
+    async def stop_eval(self, run_name: str | None = None, actor: str | None = None) -> dict:
+        """Stop the running eval drill (targeted SIGINT, never a broad kill)."""
+        if run_name is None:
+            entry = next(iter(self._eval_active.values()), None)
+        else:
+            entry = self._eval_active.get(run_name)
+        if entry is None:
+            return {"ok": True, "message": "No active evaluation."}
+        proc = entry.get("proc")
+        if proc is None or proc.poll() is not None:
+            return {"ok": True, "message": "No active evaluation."}
+        entry["state"] = "stopping"
+        self._audit("eval_stop", entry["run_name"], actor, source="server")
+        await self._bc.broadcast(self.eval_status_msg())
+        await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
+        return {"ok": True, "message": "stopping"}
+
     # ── subprocess helpers ─────────────────────────────────────────────────────
     def _ingest_url(self, run_name: str) -> str:
         return (
@@ -816,6 +924,21 @@ class JobManager:
                 await self._bc.broadcast(self.active_runs_msg())
                 await self._bc.broadcast(self.runs_msg())  # new checkpoints are now resumable
                 await self._bc.broadcast(self.models_msg())  # admin panel: refreshed metadata
+
+            # Reap finished eval drills (their own lane). Short-lived: they exit when the
+            # N episodes finish or on a stop SIGINT. No checkpoints/runs to refresh.
+            eval_exited: list[tuple[str, int | None]] = []
+            for run_name, entry in list(self._eval_active.items()):
+                proc = entry.get("proc")
+                if proc is not None and proc.poll() is not None:
+                    entry["proc"] = None
+                    del self._eval_active[run_name]
+                    eval_exited.append((run_name, proc.returncode))
+            if eval_exited:
+                for run_name, code in eval_exited:
+                    log.info("Eval %s exited with code %s", run_name, code)
+                    await self._bc.broadcast({"type": "run_exited", "run": run_name, "code": code})
+                await self._bc.broadcast(self.eval_status_msg())
 
             # Reap game rooms nobody is playing or watching anymore: drop the room first so
             # it isn't re-reaped next tick, then stop the match (its exit is handled above).

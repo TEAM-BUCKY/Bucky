@@ -68,6 +68,48 @@ export interface SimFrame {
 	run?: string;
 }
 
+/** A live frame from an evaluation drill. Distinct from {@link SimFrame} (type `eval_step`,
+ * not `step`) so it can never disturb the training viewer that shares the same stream. */
+export interface EvalStepFrame {
+	type: 'eval_step';
+	mode?: 'train' | 'play';
+	robot_pos: [number, number];
+	robot_heading: number;
+	robot2_pos?: [number, number];
+	robot2_heading?: number;
+	ball_pos: [number, number];
+	/** Instantaneous reward terms this step. */
+	reward_terms: RewardTerms;
+	reward_total: number;
+	/** Per-term running total for the current episode (the "build-up"). */
+	reward_cumulative: RewardTerms;
+	obs: number[];
+	episode: number;
+	step: number;
+	total_return: number;
+	episodes_total: number;
+	run?: string;
+	device?: string;
+}
+
+/** The N-episode aggregate emitted once at the end of an evaluation drill. */
+export interface EvalSummary {
+	type: 'eval_summary';
+	checkpoint: string;
+	stage: string;
+	n_episodes: number;
+	deterministic: boolean;
+	opponent?: string;
+	return_mean: number;
+	return_std: number;
+	success_rate: number;
+	per_term_mean: Record<string, number>;
+	per_term_std: Record<string, number>;
+	episode_returns: number[];
+	run?: string;
+	device?: string;
+}
+
 export type TrainingState =
 	| 'unknown'
 	| 'idle'
@@ -351,6 +393,22 @@ class SimulationState {
 	/** Last error from a game create/join/leave action, surfaced in the lobby. */
 	gameError = $state<string | null>(null);
 
+	// ── evaluation tool (/eval page) ───────────────────────────────────────────
+	/** The eval run this page launched; the /eval view filters the stream to it so a
+	 * concurrent training run's frames never leak in (and eval frames never touch /viz). */
+	evalRun = $state<string | null>(null);
+	/** Latest eval step frame for {@link evalRun}. */
+	evalFrame = $state<EvalStepFrame | null>(null);
+	/** The N-episode aggregate, set when the drill finishes. */
+	evalSummary = $state<EvalSummary | null>(null);
+	/** Server-reported eval lifecycle ({phase, running}). */
+	evalStatus = $state<{ phase?: string; running: boolean }>({ running: false });
+	/** Cumulative episode-return trace for the current episode (for the build-up chart). */
+	evalCumulativeHistory = $state<MetricPoint[]>([]);
+	/** Last error from a start/stop eval action. */
+	evalError = $state<string | null>(null);
+	private _evalEpisode = -1;
+
 	private _password = '';
 	private ws: WebSocket | null = null;
 	private _lastEpisode = 0;
@@ -558,6 +616,66 @@ class SimulationState {
 			seed: config.seed,
 			manual_red: config.manualRed ?? false
 		});
+	}
+
+	/** Launch an evaluation drill. Returns the eval run name (so the page can filter the
+	 * stream to it), or null on failure. Runs in the server's separate eval lane. */
+	async startEval(config: {
+		run: string;
+		checkpoint: string;
+		stage: string;
+		nEpisodes: number;
+		seed: number;
+		deterministic: boolean;
+	}): Promise<string | null> {
+		if (!this.hasCredentials) {
+			this.evalError = 'Log in to run evaluations.';
+			return null;
+		}
+		// Reset the view for the new run before frames start arriving.
+		this.evalSummary = null;
+		this.evalFrame = null;
+		this.evalCumulativeHistory = [];
+		this._evalEpisode = -1;
+		const { httpBase } = apiBases();
+		try {
+			const res = await fetch(httpBase + '/eval', {
+				method: 'POST',
+				...this._authInit({ 'Content-Type': 'application/json' }),
+				body: JSON.stringify({
+					run: config.run,
+					checkpoint: config.checkpoint,
+					stage: config.stage,
+					n_episodes: config.nEpisodes,
+					seed: config.seed,
+					deterministic: config.deterministic
+				})
+			});
+			if (!res.ok) {
+				let detail = `Eval failed (${res.status})`;
+				try {
+					const j = await res.json();
+					if (j?.detail) detail = String(j.detail);
+				} catch {
+					/* non-JSON error body */
+				}
+				this.evalError = detail;
+				return null;
+			}
+			const j = await res.json();
+			this.evalError = null;
+			this.evalRun = (j?.run_name as string) ?? null;
+			this.evalStatus = { phase: 'launching', running: true };
+			return this.evalRun;
+		} catch {
+			this.evalError = 'Cannot reach the server.';
+			return null;
+		}
+	}
+
+	/** Stop the running evaluation drill (targeted SIGINT on the server). */
+	async stopEval(): Promise<void> {
+		await this._control('/eval/stop');
 	}
 
 	/** Run name of the currently-streaming manual (human-controlled) match, or null. */
@@ -1046,7 +1164,38 @@ class SimulationState {
 					this.status = { ...this.status, trainer_connected: data.trainer_connected };
 				}
 				break;
+			case 'eval_step':
+				this._onEvalStep(data as unknown as EvalStepFrame);
+				break;
+			case 'eval_summary': {
+				const s = data as unknown as EvalSummary;
+				if (!this.evalRun || s.run === this.evalRun) this.evalSummary = s;
+				break;
+			}
+			case 'eval_status': {
+				const ev = data.eval as { run_name?: string; phase?: string } | null;
+				this.evalStatus = { phase: ev?.phase, running: !!ev };
+				// Recover an eval already running when this page loaded (e.g. after a reload),
+				// so the stream filter locks onto it.
+				if (ev?.run_name && !this.evalRun) this.evalRun = ev.run_name;
+				break;
+			}
 		}
+	}
+
+	private _onEvalStep(data: EvalStepFrame) {
+		// Only follow the eval run this page launched, so a concurrent training run's frames
+		// never leak into the eval viewer (and these frames never touch `frame`/`episodeReturns`).
+		if (this.evalRun && data.run !== this.evalRun) return;
+		this.evalFrame = data;
+		if (data.episode !== this._evalEpisode) {
+			this.evalCumulativeHistory = []; // new episode → restart the build-up trace
+			this._evalEpisode = data.episode;
+		}
+		this.evalCumulativeHistory = [
+			...this.evalCumulativeHistory.slice(-499),
+			{ x: data.step, y: data.total_return }
+		];
 	}
 
 	private _onStep(data: SimFrame) {
