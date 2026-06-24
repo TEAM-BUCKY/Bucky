@@ -828,15 +828,25 @@ class JobManager:
         await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
         return {"ok": True, "message": "stopping"}
 
-    async def set_eval_speed(self, speed: float, run_name: str | None = None) -> dict:
-        """Live-adjust the running eval's playback speed (forwarded over its control sink)."""
+    async def eval_control(self, control: dict, run_name: str | None = None) -> dict:
+        """Live transport for the running eval — playback ``speed``, ``paused``, and single-``step``
+        — forwarded over its control sink (the same channel the match uses)."""
         if run_name is None:
             entry = next(iter(self._eval_active.values()), None)
         else:
             entry = self._eval_active.get(run_name)
         if entry is None:
             return {"ok": False, "message": "No active evaluation."}
-        return await self.push_control(entry["run_name"], {"speed": float(speed)})
+        msg: dict = {}
+        if "speed" in control and control["speed"] is not None:
+            msg["speed"] = float(control["speed"])
+        if "paused" in control and control["paused"] is not None:
+            msg["paused"] = bool(control["paused"])
+        if "step" in control and control["step"] is not None:
+            msg["step"] = int(control["step"])
+        if not msg:
+            return {"ok": False, "message": "Nothing to send."}
+        return await self.push_control(entry["run_name"], msg)
 
     # ── subprocess helpers ─────────────────────────────────────────────────────
     def _ingest_url(self, run_name: str) -> str:

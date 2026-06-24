@@ -7,7 +7,7 @@
 	import EvalConfigPanel from '$lib/components/eval/EvalConfigPanel.svelte';
 	import CumulativeRewardPanel from '$lib/components/eval/CumulativeRewardPanel.svelte';
 	import EvalSummaryTable from '$lib/components/eval/EvalSummaryTable.svelte';
-	import SpeedControl from '$lib/components/eval/SpeedControl.svelte';
+	import EvalTransport from '$lib/components/eval/EvalTransport.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { ChartLine, Boxes, Gamepad2 } from '@lucide/svelte';
@@ -17,11 +17,14 @@
 		return () => simulation.disconnect();
 	});
 
+	// The shown frame is scrubbing-aware (the playhead), not necessarily the live tail.
+	const view = $derived(simulation.evalView);
+
 	// Physics (m) → field (mm), same transform as the training viewer: screen X = physics y,
 	// screen Y = physics x, heading (pi/2 - h). Robot B (self-play) renders as an enemy.
 	const SCALE = 1000;
 	const fieldData = $derived.by(() => {
-		const f = simulation.evalFrame;
+		const f = view;
 		if (!f) return { allies: [], enemies: [], ball: undefined };
 		const allies = [
 			{ x: f.robot_pos[1] * SCALE, y: f.robot_pos[0] * SCALE, theta: Math.PI / 2 - f.robot_heading }
@@ -34,6 +37,7 @@
 	});
 
 	const running = $derived(simulation.evalStatus.running);
+	const showTransport = $derived(running || simulation.evalFrames.length > 0);
 	const conn = $derived.by(() => {
 		if (simulation.connected) return { label: 'Connected', color: '#34d399' };
 		return { label: 'Reconnecting…', color: '#f87171' };
@@ -77,43 +81,43 @@
 		</Card.Root>
 
 		<div class="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)_22rem]">
+			<!-- left: configure + aggregate -->
 			<div class="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
 				<EvalConfigPanel />
 				<EvalSummaryTable summary={simulation.evalSummary} />
 			</div>
 
-			<div class="flex min-w-0 flex-col gap-4 lg:min-h-0">
+			<!-- center: field with transport overlay + live reward terms -->
+			<div class="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
 				<Card.Root class="relative mx-auto flex aspect-[303/242] w-full max-w-2xl shrink-0 items-center justify-center p-3">
-					<div class="flex h-full w-full items-center justify-center">
+					{#if showTransport}
+						<div class="absolute inset-x-3 top-3 z-10">
+							<EvalTransport />
+						</div>
+					{/if}
+					<div class="flex h-full w-full items-center justify-center pt-10">
 						<SoccerField
 							fit
 							allies={fieldData.allies}
 							enemies={fieldData.enemies}
 							ball={fieldData.ball}
-							showBall={!!simulation.evalFrame}
+							showBall={!!view}
 							rotation={90}
 							class="border-0"
 						/>
 					</div>
 				</Card.Root>
-				<Card.Root class="shrink-0">
-					<Card.Content class="px-4 py-2.5">
-						<SpeedControl />
-					</Card.Content>
-				</Card.Root>
-				<RewardBreakdown
-					terms={simulation.evalFrame?.reward_terms ?? null}
-					total={simulation.evalFrame?.reward_total ?? null}
-				/>
+				<RewardBreakdown terms={view?.reward_terms ?? null} total={view?.reward_total ?? null} />
 			</div>
 
+			<!-- right: cumulative build-up -->
 			<div class="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
 				<CumulativeRewardPanel
-					cumulative={simulation.evalFrame?.reward_cumulative ?? null}
-					total={simulation.evalFrame?.total_return ?? null}
+					cumulative={view?.reward_cumulative ?? null}
+					total={view?.total_return ?? null}
 					history={simulation.evalCumulativeHistory}
-					episode={simulation.evalFrame?.episode ?? null}
-					step={simulation.evalFrame?.step ?? null}
+					episode={view?.episode ?? null}
+					step={view?.step ?? null}
 				/>
 			</div>
 		</div>

@@ -118,9 +118,11 @@ class EvalRequest(BaseModel):
     deterministic: bool = True
 
 
-class EvalSpeedRequest(BaseModel):
-    # Live playback-speed multiplier for the running eval (1.0 = real time).
-    speed: float
+class EvalControlRequest(BaseModel):
+    # Live transport for the running eval: playback speed, pause/resume, single-step.
+    speed: Optional[float] = None
+    paused: Optional[bool] = None
+    step: Optional[int] = None
 
 
 class ControlRequest(BaseModel):
@@ -485,9 +487,9 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     async def stop_eval(_user: str = Depends(require_control)) -> dict:
         return await manager.stop_eval(actor=_user)
 
-    @router.post("/eval/speed")
-    async def set_eval_speed(req: EvalSpeedRequest, _user: str = Depends(require_control)) -> dict:
-        return await manager.set_eval_speed(req.speed)
+    @router.post("/eval/control")
+    async def eval_control(req: EvalControlRequest, _user: str = Depends(require_control)) -> dict:
+        return await manager.eval_control(req.model_dump())
 
     @router.post("/control")
     async def control_match(req: ControlRequest, _user: str = Depends(require_control)) -> dict:

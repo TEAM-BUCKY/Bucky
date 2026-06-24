@@ -138,17 +138,25 @@ def main() -> None:
         stream = StreamClient(args.stream_url)
         stream.start()
 
-    # Live playback speed: a thread-safe holder fed by the hub's control sink so the browser can
-    # speed up / slow down the rollout while it plays. The receiver thread only ever writes the
-    # float; the main loop reads it each step to scale the per-step delay.
-    speed_box = {"v": _clamp_speed(args.speed)}
+    # Live transport: a thread-safe holder fed by the hub's control sink so the browser can drive
+    # playback while it watches — change speed, pause/resume, or single-step. The receiver thread
+    # only writes; the main loop reads it each step (scale the delay, gate on pause / step credits).
+    ctl = {"speed": _clamp_speed(args.speed), "paused": False, "step": 0}
     control = None
     if args.control_url:
         from bucky.stream_client import JsonRecvClient
 
         def on_control(msg: dict) -> None:
             if "speed" in msg:
-                speed_box["v"] = _clamp_speed(msg.get("speed"))
+                ctl["speed"] = _clamp_speed(msg.get("speed"))
+            if "paused" in msg:
+                ctl["paused"] = bool(msg.get("paused"))
+            if "step" in msg:
+                try:
+                    ctl["step"] += max(0, int(msg.get("step")))
+                except (TypeError, ValueError):
+                    pass
+                ctl["paused"] = True  # single-stepping implies a paused rollout
 
         control = JsonRecvClient(args.control_url, on_control)
         control.start()
@@ -245,6 +253,14 @@ def main() -> None:
             goals_for = goals_against = 0
 
             while not done:
+                # Transport gate: hold here while paused (the rollout freezes — no frames stream)
+                # until the browser resumes or grants a single-step credit. Only when paced live.
+                if args.realtime:
+                    while ctl["paused"] and ctl["step"] <= 0:
+                        time.sleep(0.02)
+                    if ctl["step"] > 0:
+                        ctl["step"] -= 1  # consume one credit; stay paused for the next frame
+
                 if self_play:
                     action = act(obs)
                     obs, reward, terminated, truncated, info = env.step(action)
@@ -295,7 +311,7 @@ def main() -> None:
 
                 if args.realtime:
                     # Pace to the physics clock, scaled by the live speed multiplier.
-                    next_t += period / speed_box["v"]
+                    next_t += period / ctl["speed"]
                     delay = next_t - time.perf_counter()
                     if delay > 0:
                         time.sleep(delay)

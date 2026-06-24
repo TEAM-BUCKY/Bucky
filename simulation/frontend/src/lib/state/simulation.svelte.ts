@@ -315,6 +315,8 @@ export interface ActiveRun {
 }
 
 const RETURNS_CAP = 50;
+/** How many eval frames to keep for scrubbing (~2 min at 50 fps). */
+const EVAL_BUFFER_CAP = 6000;
 const METRIC_CAP = 400;
 const STALE_MS = 5000;
 const CREDS_KEY = 'bucky.creds';
@@ -397,19 +399,47 @@ class SimulationState {
 	/** The eval run this page launched; the /eval view filters the stream to it so a
 	 * concurrent training run's frames never leak in (and eval frames never touch /viz). */
 	evalRun = $state<string | null>(null);
-	/** Latest eval step frame for {@link evalRun}. */
+	/** Latest eval step frame for {@link evalRun} (the live tail). */
 	evalFrame = $state<EvalStepFrame | null>(null);
+	/** Rolling buffer of recent eval frames, so playback can be paused and scrubbed/stepped
+	 * (frame-by-frame debugging) through history while the rollout is frozen. */
+	evalFrames = $state<EvalStepFrame[]>([]);
+	/** Index into {@link evalFrames} of the frame currently shown (the playhead). */
+	evalCursor = $state(-1);
+	/** True = following the live tail; false = paused (the server-side rollout is frozen too). */
+	evalPlaying = $state(true);
 	/** The N-episode aggregate, set when the drill finishes. */
 	evalSummary = $state<EvalSummary | null>(null);
 	/** Server-reported eval lifecycle ({phase, running}). */
 	evalStatus = $state<{ phase?: string; running: boolean }>({ running: false });
-	/** Cumulative episode-return trace for the current episode (for the build-up chart). */
-	evalCumulativeHistory = $state<MetricPoint[]>([]);
 	/** Last error from a start/stop eval action. */
 	evalError = $state<string | null>(null);
 	/** Live playback-speed multiplier for the running eval (1.0 = real time). */
 	evalSpeed = $state(1);
-	private _evalEpisode = -1;
+	/** A single-step was requested; advance the playhead onto the next frame that arrives. */
+	private _evalPendingStep = false;
+
+	/** The eval frame currently shown (the playhead), scrubbing-aware. */
+	get evalView(): EvalStepFrame | null {
+		return this.evalFrames[this.evalCursor] ?? null;
+	}
+
+	/** Whether the playhead sits on the most recent buffered frame. */
+	get evalAtLiveEdge(): boolean {
+		return this.evalCursor >= this.evalFrames.length - 1;
+	}
+
+	/** Cumulative return trace for the shown frame's episode, up to the playhead. */
+	get evalCumulativeHistory(): MetricPoint[] {
+		const cur = this.evalView;
+		if (!cur) return [];
+		const out: MetricPoint[] = [];
+		for (let i = 0; i <= this.evalCursor && i < this.evalFrames.length; i++) {
+			const f = this.evalFrames[i];
+			if (f.episode === cur.episode) out.push({ x: f.step, y: f.total_return });
+		}
+		return out;
+	}
 
 	private _password = '';
 	private ws: WebSocket | null = null;
@@ -637,9 +667,11 @@ class SimulationState {
 		// Reset the view for the new run before frames start arriving.
 		this.evalSummary = null;
 		this.evalFrame = null;
-		this.evalCumulativeHistory = [];
+		this.evalFrames = [];
+		this.evalCursor = -1;
+		this.evalPlaying = true;
 		this.evalSpeed = 1;
-		this._evalEpisode = -1;
+		this._evalPendingStep = false;
 		const { httpBase } = apiBases();
 		try {
 			const res = await fetch(httpBase + '/eval', {
@@ -681,20 +713,67 @@ class SimulationState {
 		await this._control('/eval/stop');
 	}
 
-	/** Live-adjust the running eval's playback speed (1.0 = real time). Best-effort. */
-	async setEvalSpeed(speed: number): Promise<void> {
-		this.evalSpeed = speed;
+	/** Send a live transport command to the running eval (best-effort, fire-and-forget). */
+	private async _evalControl(body: { speed?: number; paused?: boolean; step?: number }): Promise<void> {
 		if (!this.hasCredentials) return;
 		const { httpBase } = apiBases();
 		try {
-			await fetch(httpBase + '/eval/speed', {
+			await fetch(httpBase + '/eval/control', {
 				method: 'POST',
 				...this._authInit({ 'Content-Type': 'application/json' }),
-				body: JSON.stringify({ speed })
+				body: JSON.stringify(body)
 			});
 		} catch {
-			/* speed control is best-effort; ignore transient errors */
+			/* transport is best-effort; ignore transient errors */
 		}
+	}
+
+	/** Live-adjust the running eval's playback speed (1.0 = real time). */
+	async setEvalSpeed(speed: number): Promise<void> {
+		this.evalSpeed = speed;
+		await this._evalControl({ speed });
+	}
+
+	/** Play / pause the rollout. Pausing freezes the server-side sim; playing snaps the
+	 * playhead back to the live tail and resumes streaming. */
+	async setEvalPlaying(playing: boolean): Promise<void> {
+		this.evalPlaying = playing;
+		if (playing) this.evalCursor = this.evalFrames.length - 1;
+		await this._evalControl({ paused: !playing });
+	}
+
+	/** Pause and move the playhead one frame back through the buffer. */
+	evalStepBack(): void {
+		if (this.evalPlaying) this.setEvalPlaying(false);
+		this.evalCursor = Math.max(0, this.evalCursor - 1);
+	}
+
+	/** Step one frame forward: within the buffer if scrubbed back, else advance the frozen
+	 * sim by exactly one frame (true frame-by-frame debugging). */
+	async evalStepForward(): Promise<void> {
+		if (this.evalPlaying) await this.setEvalPlaying(false);
+		if (this.evalCursor < this.evalFrames.length - 1) {
+			this.evalCursor += 1;
+		} else {
+			this._evalPendingStep = true;
+			await this._evalControl({ step: 1 });
+		}
+	}
+
+	/** Pause and jump the playhead to the first buffered frame of the shown episode. */
+	evalRewind(): void {
+		if (this.evalPlaying) this.setEvalPlaying(false);
+		const cur = this.evalView;
+		if (!cur) return;
+		let i = this.evalCursor;
+		while (i > 0 && this.evalFrames[i - 1]?.episode === cur.episode) i--;
+		this.evalCursor = i;
+	}
+
+	/** Pause and move the playhead to an absolute buffer index (scrubber drag). */
+	evalSeek(index: number): void {
+		if (this.evalPlaying) this.setEvalPlaying(false);
+		this.evalCursor = Math.max(0, Math.min(this.evalFrames.length - 1, Math.round(index)));
 	}
 
 	/** Run name of the currently-streaming manual (human-controlled) match, or null. */
@@ -1207,14 +1286,15 @@ class SimulationState {
 		// never leak into the eval viewer (and these frames never touch `frame`/`episodeReturns`).
 		if (this.evalRun && data.run !== this.evalRun) return;
 		this.evalFrame = data;
-		if (data.episode !== this._evalEpisode) {
-			this.evalCumulativeHistory = []; // new episode → restart the build-up trace
-			this._evalEpisode = data.episode;
+		const buf = [...this.evalFrames, data];
+		if (buf.length > EVAL_BUFFER_CAP) buf.splice(0, buf.length - EVAL_BUFFER_CAP);
+		this.evalFrames = buf;
+		// Advance the playhead to the new frame when playing, or when fulfilling a single-step.
+		// While paused-and-scrubbing the rollout is frozen, so no frames arrive to move it.
+		if (this.evalPlaying || this._evalPendingStep) {
+			this.evalCursor = buf.length - 1;
+			this._evalPendingStep = false;
 		}
-		this.evalCumulativeHistory = [
-			...this.evalCumulativeHistory.slice(-499),
-			{ x: data.step, y: data.total_return }
-		];
 	}
 
 	private _onStep(data: SimFrame) {

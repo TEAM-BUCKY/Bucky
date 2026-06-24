@@ -81,6 +81,12 @@ def test_eval_rejects_bad_stage_and_missing_checkpoint(manager):
     assert not missing["ok"] and "not found" in missing["message"].lower()
 
 
+def test_eval_control_no_active_is_rejected(manager):
+    # Transport control with nothing running is a clean rejection, not a crash.
+    res = asyncio.run(manager.eval_control({"paused": True}))
+    assert not res["ok"] and "No active evaluation" in res["message"]
+
+
 def test_stop_eval(manager, monkeypatch):
     monkeypatch.setattr(manager, "_terminate", lambda proc: None)
     run, ckpt = _make_ckpt(manager)
