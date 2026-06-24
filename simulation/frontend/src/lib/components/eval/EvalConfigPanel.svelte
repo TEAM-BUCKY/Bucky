@@ -2,6 +2,10 @@
 	import { simulation } from '$lib/state/simulation.svelte.js';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import Combobox from '$lib/components/ui/combobox/Combobox.svelte';
 	import { Play, Square } from '@lucide/svelte';
 
 	// Drills = curriculum stages, each a concrete eval scenario.
@@ -15,12 +19,15 @@
 	let run = $state('');
 	let checkpoint = $state('');
 	let stage = $state(DRILLS[0].value);
-	let nEpisodes = $state(10);
-	let seed = $state(999);
+	let nEpisodes = $state('10');
+	let seed = $state('999');
 	let deterministic = $state(true);
 
-	// Keep the checkpoint valid when the run changes; default to a sensible file.
+	const runItems = $derived(simulation.runs.map((r) => ({ value: r.run, label: r.run })));
 	const checkpoints = $derived(simulation.runs.find((r) => r.run === run)?.checkpoints ?? []);
+	const checkpointItems = $derived(checkpoints.map((c) => ({ value: c, label: c })));
+
+	// Keep the checkpoint valid when the run changes; default to a sensible file.
 	$effect(() => {
 		if (run && !checkpoints.includes(checkpoint)) {
 			checkpoint =
@@ -35,7 +42,14 @@
 	const canStart = $derived(!!run && !!checkpoint && !running && simulation.hasCredentials);
 
 	async function start() {
-		await simulation.startEval({ run, checkpoint, stage, nEpisodes, seed, deterministic });
+		await simulation.startEval({
+			run,
+			checkpoint,
+			stage,
+			nEpisodes: Math.max(1, Math.min(100, Number(nEpisodes) || 10)),
+			seed: Number(seed) || 0,
+			deterministic
+		});
 	}
 </script>
 
@@ -46,73 +60,40 @@
 		</Card.Title>
 	</Card.Header>
 	<Card.Content class="flex flex-col gap-3">
-		<label class="flex flex-col gap-1">
-			<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Model</span>
-			<select
-				bind:value={run}
-				disabled={running}
-				class="h-8 rounded-md border border-border bg-background/60 px-2 font-mono text-xs outline-none"
-			>
-				<option value="" disabled>Select a run…</option>
-				{#each simulation.runs as r (r.run)}
-					<option value={r.run}>{r.run}</option>
-				{/each}
-			</select>
-		</label>
-
-		<label class="flex flex-col gap-1">
-			<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</span>
-			<select
-				bind:value={checkpoint}
-				disabled={running || !run}
-				class="h-8 rounded-md border border-border bg-background/60 px-2 font-mono text-xs outline-none"
-			>
-				{#each checkpoints as c (c)}
-					<option value={c}>{c}</option>
-				{/each}
-			</select>
-		</label>
-
-		<label class="flex flex-col gap-1">
-			<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Drill</span>
-			<select
-				bind:value={stage}
-				disabled={running}
-				class="h-8 rounded-md border border-border bg-background/60 px-2 font-mono text-xs outline-none"
-			>
-				{#each DRILLS as d (d.value)}
-					<option value={d.value}>{d.label}</option>
-				{/each}
-			</select>
-		</label>
-
-		<div class="flex gap-3">
-			<label class="flex flex-1 flex-col gap-1">
-				<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Episodes</span>
-				<input
-					type="number"
-					min="1"
-					max="100"
-					bind:value={nEpisodes}
-					disabled={running}
-					class="h-8 rounded-md border border-border bg-background/60 px-2 font-mono text-xs tabular-nums outline-none"
-				/>
-			</label>
-			<label class="flex flex-1 flex-col gap-1">
-				<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Seed</span>
-				<input
-					type="number"
-					bind:value={seed}
-					disabled={running}
-					class="h-8 rounded-md border border-border bg-background/60 px-2 font-mono text-xs tabular-nums outline-none"
-				/>
-			</label>
+		<div class="flex flex-col gap-1.5">
+			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Model</Label>
+			<Combobox bind:value={run} items={runItems} size="sm" placeholder="Select a run…"
+				searchPlaceholder="Search runs…" disabled={running} />
 		</div>
 
-		<label class="flex items-center gap-2">
-			<input type="checkbox" bind:checked={deterministic} disabled={running} />
-			<span class="font-mono text-[11px] text-muted-foreground">Deterministic policy</span>
-		</label>
+		<div class="flex flex-col gap-1.5">
+			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</Label>
+			<Combobox bind:value={checkpoint} items={checkpointItems} size="sm" placeholder="Select a checkpoint…"
+				searchPlaceholder="Search checkpoints…" disabled={running || !run} />
+		</div>
+
+		<div class="flex flex-col gap-1.5">
+			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Drill</Label>
+			<Combobox bind:value={stage} items={DRILLS} size="sm" disabled={running} />
+		</div>
+
+		<div class="flex gap-3">
+			<div class="flex flex-1 flex-col gap-1.5">
+				<Label for="eval-eps" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Episodes</Label>
+				<Input id="eval-eps" type="number" min="1" max="100" bind:value={nEpisodes} disabled={running}
+					class="h-8 font-mono text-xs tabular-nums" />
+			</div>
+			<div class="flex flex-1 flex-col gap-1.5">
+				<Label for="eval-seed" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Seed</Label>
+				<Input id="eval-seed" type="number" bind:value={seed} disabled={running}
+					class="h-8 font-mono text-xs tabular-nums" />
+			</div>
+		</div>
+
+		<div class="flex items-center gap-2">
+			<Checkbox id="eval-det" bind:checked={deterministic} disabled={running} />
+			<Label for="eval-det" class="font-mono text-[11px] text-muted-foreground">Deterministic policy</Label>
+		</div>
 
 		{#if running}
 			<Button variant="destructive" size="sm" class="font-mono text-[11px]" onclick={() => simulation.stopEval()}>

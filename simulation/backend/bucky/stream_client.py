@@ -238,3 +238,78 @@ class ControlClient:
                 if mode in ("human", "ai"):
                     slot["mode"] = mode
                 slot["last_recv"] = time.monotonic()
+
+
+class JsonRecvClient:
+    """Receive-only WS client: runs ``on_message(dict)`` for each JSON message it receives.
+
+    A background daemon thread owns an asyncio loop that connects (auto-reconnect with backoff)
+    and forwards every parsed message to the callback. Used by the eval drill to receive live
+    control (e.g. a playback-speed change) from the hub over the same ``/control_sink`` path the
+    match uses. Mirrors :class:`ControlClient`'s connect/reconnect plumbing without its
+    match-specific per-side semantics."""
+
+    def __init__(self, url: str, on_message, headers: dict | None = None) -> None:
+        self._url = url
+        self._on_message = on_message
+        self._headers = headers or None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(lambda: None)
+
+    def _run(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._main())
+        finally:
+            self._loop.close()
+
+    async def _main(self) -> None:
+        try:
+            import websockets
+        except ImportError:
+            log.error("websockets not installed — pip install websockets")
+            return
+
+        def _open():
+            base = dict(ping_interval=20, ping_timeout=20)
+            if self._headers:
+                for kw in ("additional_headers", "extra_headers"):
+                    try:
+                        return websockets.connect(self._url, **{kw: self._headers}, **base)
+                    except TypeError:
+                        continue
+            return websockets.connect(self._url, **base)
+
+        backoff = 0.5
+        while not self._stop.is_set():
+            try:
+                async with _open() as ws:
+                    backoff = 0.5
+                    async for raw in ws:
+                        if self._stop.is_set():
+                            break
+                        try:
+                            msg = json.loads(raw)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        try:
+                            self._on_message(msg)
+                        except Exception:  # noqa: BLE001 — a bad callback must not kill the loop
+                            pass
+            except Exception as exc:  # noqa: BLE001 — connect failed or dropped
+                if self._stop.is_set():
+                    break
+                log.debug("JsonRecvClient disconnected (%s); retrying in %.1fs", exc, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)

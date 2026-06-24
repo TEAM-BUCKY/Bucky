@@ -52,6 +52,16 @@ GOAL_DRILLS = {Stage.PUSH_TO_EMPTY_GOAL.value, Stage.AIM_AND_KICK.value}
 SELF_PLAY_STAGES = {Stage.SELF_PLAY_1V1.value, Stage.SELF_PLAY_2V2.value}
 
 
+SPEED_MIN, SPEED_MAX = 0.1, 16.0
+
+
+def _clamp_speed(v) -> float:
+    try:
+        return float(min(SPEED_MAX, max(SPEED_MIN, float(v))))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _obs_dim(model) -> int:
     return int(model.observation_space.shape[0])
 
@@ -108,6 +118,10 @@ def main() -> None:
                         help="ws:// URL of the viz hub ingest endpoint (omit to run silent)")
     parser.add_argument("--opponent", default=None,
                         help="Self-play only: path to an opponent_snapshot.npz")
+    parser.add_argument("--control-url", default=None,
+                        help="ws:// URL of the hub control-sink endpoint (live playback speed)")
+    parser.add_argument("--speed", type=float, default=1.0,
+                        help="Initial playback speed multiplier (1.0 = real time)")
     parser.add_argument("--deterministic", dest="deterministic", action="store_true", default=True)
     parser.add_argument("--no-deterministic", dest="deterministic", action="store_false")
     parser.add_argument("--every", type=int, default=1,
@@ -123,6 +137,21 @@ def main() -> None:
         from bucky.stream_client import StreamClient
         stream = StreamClient(args.stream_url)
         stream.start()
+
+    # Live playback speed: a thread-safe holder fed by the hub's control sink so the browser can
+    # speed up / slow down the rollout while it plays. The receiver thread only ever writes the
+    # float; the main loop reads it each step to scale the per-step delay.
+    speed_box = {"v": _clamp_speed(args.speed)}
+    control = None
+    if args.control_url:
+        from bucky.stream_client import JsonRecvClient
+
+        def on_control(msg: dict) -> None:
+            if "speed" in msg:
+                speed_box["v"] = _clamp_speed(msg.get("speed"))
+
+        control = JsonRecvClient(args.control_url, on_control)
+        control.start()
 
     def fail(message: str) -> None:
         print(f"eval_drill.py: {message}", file=sys.stderr)
@@ -265,12 +294,13 @@ def main() -> None:
                         stream.send(frame)
 
                 if args.realtime:
-                    next_t += period
+                    # Pace to the physics clock, scaled by the live speed multiplier.
+                    next_t += period / speed_box["v"]
                     delay = next_t - time.perf_counter()
                     if delay > 0:
                         time.sleep(delay)
                     else:
-                        next_t = time.perf_counter()
+                        next_t = time.perf_counter()  # fell behind; resync the clock
 
             # episode bookkeeping
             returns.append(ep_return)
@@ -313,6 +343,8 @@ def main() -> None:
               f"success={successes}/{n}")
 
     env.close()
+    if control:
+        control.stop()
     if stream:
         phase = "stopped" if interrupted else "done"
         stream.send({"type": "trainer_status", "phase": phase, "run_type": "eval"})

@@ -790,6 +790,7 @@ class JobManager:
                 "--n-episodes", str(n_episodes),
                 "--seed", str(seed),
                 "--stream-url", self._ingest_url(run_name),
+                "--control-url", self._control_url(run_name),  # live playback speed
                 "--deterministic" if deterministic else "--no-deterministic",
             ]
             entry = {
@@ -826,6 +827,16 @@ class JobManager:
         await self._bc.broadcast(self.eval_status_msg())
         await asyncio.get_running_loop().run_in_executor(None, self._terminate, proc)
         return {"ok": True, "message": "stopping"}
+
+    async def set_eval_speed(self, speed: float, run_name: str | None = None) -> dict:
+        """Live-adjust the running eval's playback speed (forwarded over its control sink)."""
+        if run_name is None:
+            entry = next(iter(self._eval_active.values()), None)
+        else:
+            entry = self._eval_active.get(run_name)
+        if entry is None:
+            return {"ok": False, "message": "No active evaluation."}
+        return await self.push_control(entry["run_name"], {"speed": float(speed)})
 
     # ── subprocess helpers ─────────────────────────────────────────────────────
     def _ingest_url(self, run_name: str) -> str:

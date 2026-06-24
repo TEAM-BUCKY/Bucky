@@ -407,6 +407,8 @@ class SimulationState {
 	evalCumulativeHistory = $state<MetricPoint[]>([]);
 	/** Last error from a start/stop eval action. */
 	evalError = $state<string | null>(null);
+	/** Live playback-speed multiplier for the running eval (1.0 = real time). */
+	evalSpeed = $state(1);
 	private _evalEpisode = -1;
 
 	private _password = '';
@@ -636,6 +638,7 @@ class SimulationState {
 		this.evalSummary = null;
 		this.evalFrame = null;
 		this.evalCumulativeHistory = [];
+		this.evalSpeed = 1;
 		this._evalEpisode = -1;
 		const { httpBase } = apiBases();
 		try {
@@ -676,6 +679,22 @@ class SimulationState {
 	/** Stop the running evaluation drill (targeted SIGINT on the server). */
 	async stopEval(): Promise<void> {
 		await this._control('/eval/stop');
+	}
+
+	/** Live-adjust the running eval's playback speed (1.0 = real time). Best-effort. */
+	async setEvalSpeed(speed: number): Promise<void> {
+		this.evalSpeed = speed;
+		if (!this.hasCredentials) return;
+		const { httpBase } = apiBases();
+		try {
+			await fetch(httpBase + '/eval/speed', {
+				method: 'POST',
+				...this._authInit({ 'Content-Type': 'application/json' }),
+				body: JSON.stringify({ speed })
+			});
+		} catch {
+			/* speed control is best-effort; ignore transient errors */
+		}
 	}
 
 	/** Run name of the currently-streaming manual (human-controlled) match, or null. */

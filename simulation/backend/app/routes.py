@@ -118,6 +118,11 @@ class EvalRequest(BaseModel):
     deterministic: bool = True
 
 
+class EvalSpeedRequest(BaseModel):
+    # Live playback-speed multiplier for the running eval (1.0 = real time).
+    speed: float
+
+
 class ControlRequest(BaseModel):
     # Manual control for a play match's red robot. ``run`` is the match run name.
     run: str
@@ -479,6 +484,10 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     @router.post("/eval/stop")
     async def stop_eval(_user: str = Depends(require_control)) -> dict:
         return await manager.stop_eval(actor=_user)
+
+    @router.post("/eval/speed")
+    async def set_eval_speed(req: EvalSpeedRequest, _user: str = Depends(require_control)) -> dict:
+        return await manager.set_eval_speed(req.speed)
 
     @router.post("/control")
     async def control_match(req: ControlRequest, _user: str = Depends(require_control)) -> dict:

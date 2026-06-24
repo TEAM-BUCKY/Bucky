@@ -7,6 +7,7 @@
 	import EvalConfigPanel from '$lib/components/eval/EvalConfigPanel.svelte';
 	import CumulativeRewardPanel from '$lib/components/eval/CumulativeRewardPanel.svelte';
 	import EvalSummaryTable from '$lib/components/eval/EvalSummaryTable.svelte';
+	import SpeedControl from '$lib/components/eval/SpeedControl.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { ChartLine, Boxes, Gamepad2 } from '@lucide/svelte';
@@ -94,6 +95,11 @@
 							class="border-0"
 						/>
 					</div>
+				</Card.Root>
+				<Card.Root class="shrink-0">
+					<Card.Content class="px-4 py-2.5">
+						<SpeedControl />
+					</Card.Content>
 				</Card.Root>
 				<RewardBreakdown
 					terms={simulation.evalFrame?.reward_terms ?? null}
