@@ -66,66 +66,42 @@ class RewardConfig:
     w_approach: float = 2.5
     w_ball_to_goal: float = 5.0
 
-    w_possession: float = 5.0
-    # Front-alignment was the dominant *camping* hot-spot (a v33 rollout farmed ~+1068/ep by
-    # hovering behind the ball without ever kicking). Cut the weight and fade it with dwell time
-    # (see below) so it pays as a setup burst during the approach but not as sustained income.
-    w_front_align: float = 4.0
-    # Both possession and front-alignment are faded to ~0 over this many steps of *dwelling near
-    # the ball* (within ALIGN_RADIUS, facing it). Capturing/lining-up still pays, but camping does
-    # not — pushing the policy to act (kick/drive). The env supplies the dwell count via
-    # ``info["dwell_steps"]``.
+    w_possession: float = 4.0
+    w_front_align: float = 8.0
+
     possession_decay_steps: float = 40.0
 
     w_goal: float = 55.0
     w_goal_against: float = -100.0
-    # Heavy per-step penalty for the robot driving inside a goal box (rules: robots stay out of
-    # goals). The goal walls are solid (physics ``_resolve_robot_goal``); this discourages even
-    # poking into the open mouth.
     w_in_goal: float = -4.0
-    # Look-ahead "inevitable goal" bonus: when a kick launches a ball whose forward rollout scores
-    # (env ``predict_goal_by_rollout``), pay goal-level credit immediately at the kick, closing the
-    # kick→goal loop against the possession hot-spot. Horizon caps the rollout (~1.5 s at 50 Hz).
     w_predicted_goal: float = 55.0
     predicted_goal_horizon_steps: int = 75
 
-    w_out_of_bounds: float = -50.0        # robot fully out → 30 s suspension (rules §4.9)
-    w_lack_of_progress: float = -5.0      # ball stuck between robots (rules §4.6)
-    w_defective: float = -25.0            # removed as defective (rules §4.7)
-    w_spin: float = -0.3                  # was -1.0: noisy ω exploration was over-penalised early
+    w_out_of_bounds: float = -50.0
+    w_lack_of_progress: float = -5.0
+    w_defective: float = -25.0
+    w_spin: float = -0.3
 
-    # Per-step penalty while the ball sits out of bounds (in the relocation grace window) —
-    # chasing / re-kicking it only drives it further out. Scaled by how far past the line it is.
-    # Was -0.5: at that weight it summed to ~-300..-500/ep (the ball is out a large fraction of a
-    # chaotic episode) and drowned the learning signal. Kept small so it nudges, not dominates.
     w_play_oob_ball: float = -0.15
-    # Per-step nudge when idling away from the ball (ball still, robot still, no possession).
     w_stuck: float = -0.1
 
-    # Skilled-play terms (kicker + opponent-aware; see bucky.play_events).
-    w_steal: float = 10.0                  # capture ball from enemy, × field-position gradient
-    w_blocked_shot: float = 15            # block an enemy shot on our goal
-    w_kick_goal: float = 12.0             # bonus: goal scored from a kick (vs dribbling it in)
-    w_bank_shot: float = 6.0              # bonus: goal scored off a wall bounce
-    w_risky_shot: float = 2.0             # kick threaded *past* (clearing) the opponent toward goal
-    # These three punish *failed* kicks. At their old magnitudes (−20/−10/−40) a robot that can't
-    # yet aim is so heavily punished for trying that it learns never to kick. Softened so kick
-    # exploration survives long enough to improve (still net-negative, just not crushing).
-    w_kick_lost: float = -8.0             # giving the enemy the ball: our kicked ball captured by enemy
-    w_kick_at_opponent: float = -5.0      # firing the ball straight into the opponent (a give-away)
-    w_shot_out_of_bounds: float = -12.0   # blasting our kicked ball out of play (was -40)
+    w_steal: float = 10.0
+    w_blocked_shot: float = 15
+    w_kick_goal: float = 12.0
+    w_bank_shot: float = 6.0
+    w_risky_shot: float = 2.0
+    w_kick_lost: float = -8.0
+    w_kick_at_opponent: float = -5.0
+    w_shot_out_of_bounds: float = -12.0
 
-    # Small flat bonus for an *on-target, in-play* kick (gated by _shot_enters_goal_mouth, so it
-    # can't be farmed by blasting the ball anywhere). Turned on now that the front_alignment
-    # camping income is removed, to give the kicker a positive nudge to fire.
     w_kick_attempt: float = 0.5
-    w_kick_power_to_goal: float = 4     # × cos(ball velocity, ball→goal) for on-target shots (was 2)
+    w_kick_power_to_goal: float = 4
 
-    w_shot_on_goal: float = 2.5           # × (ball velocity component toward goal), when ball is fast & free
+    w_shot_on_goal: float = 2.5
 
     w_speed: float = 0.1
 
-    w_time: float = -0.02
+    w_time: float = -0.05
     w_action_smooth: float = -0.02
 
     @classmethod

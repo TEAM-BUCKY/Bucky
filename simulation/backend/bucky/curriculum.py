@@ -86,8 +86,6 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         goal_present=True,
         spawn_mode="kick_blend",         # robot behind a scattered ball, close↔mid distance
         active_reward_terms=[
-            # Aiming/kicking drill: reward getting behind the ball and firing it on target. No
-            # "possession" term (we want shots, not camping); the kick/goal terms dominate.
             "approach", "speed", "ball_to_goal", "front_alignment",
             "goal", "predicted_goal", "in_goal",
             "kick_attempt", "kick_power_to_goal", "shot_on_goal", "kick_goal", "bank_shot",
