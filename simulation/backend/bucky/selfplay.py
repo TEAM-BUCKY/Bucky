@@ -9,7 +9,13 @@ to the 23-dim single-agent observation → a 27-dim opponent-aware observation.
 from __future__ import annotations
 import numpy as np
 
-from bucky.obs import LEGACY_OBS_DIM, OBS_DIM, PRE_KICK_PRED_OBS_DIM, build_observation
+from bucky.obs import (
+    LEGACY_OBS_DIM,
+    OBS_DIM,
+    PRE_GOAL_REL_OBS_DIM,
+    PRE_KICK_PRED_OBS_DIM,
+    build_observation,
+)
 from bucky.physics.backend import PhysicsState
 from bucky.physics.python_backend import ARENA_HALF_X, ARENA_HALF_Y, ROBOT_RADIUS
 
@@ -20,20 +26,23 @@ MAX_SONAR_RANGE = 1.5               # metres; beyond this a beam reads "clear" (
 _SONAR_NOISE_STD = 0.02             # metres, when domain randomization is on
 _SONAR_DROPOUT_P = 0.05             # chance a beam misses (reads clear)
 
-SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 23 base + 4 sonar = 27
+SELF_PLAY_OBS_DIM = OBS_DIM + 4     # 39 base + 4 sonar = 43
 
 # ── backward compatibility: drive older, narrower policies in a current match ─────────────
 # The current opponent-aware obs is laid out [base (OBS_DIM) | sonar (4)], and the base grew by
 # appending blocks: [pre-boundary base (LEGACY_OBS_DIM) | ball-boundary block | kick-prediction
-# block]. Each block was inserted *before* the sonar tail, so an older policy's obs is reconstructed
-# by keeping the prefix of the base it knew plus the (unchanged) sonar tail and dropping the blocks
-# added after it. Map each supported legacy width → the current-obs indices that rebuild it.
+# block | ball→goal block]. Each block was inserted *before* the sonar tail, so an older policy's
+# obs is reconstructed by keeping the prefix of the base it knew plus the (unchanged) sonar tail and
+# dropping the blocks added after it. Map each supported legacy width → the current-obs indices that
+# rebuild it.
 _SONAR_TAIL = np.arange(OBS_DIM, SELF_PLAY_OBS_DIM)   # the 4 sonar dims, now at [OBS_DIM:OBS_DIM+4]
 _LEGACY_OBS_INDICES: dict[int, np.ndarray] = {
     LEGACY_OBS_DIM + 4: np.concatenate([            # 22-dim: [base18 | sonar4]
         np.arange(LEGACY_OBS_DIM), _SONAR_TAIL]),
     PRE_KICK_PRED_OBS_DIM + 4: np.concatenate([     # 27-dim: [base23 (pre-kick-pred) | sonar4]
         np.arange(PRE_KICK_PRED_OBS_DIM), _SONAR_TAIL]),
+    PRE_GOAL_REL_OBS_DIM + 4: np.concatenate([      # 39-dim: [base35 (pre-ball→goal) | sonar4]
+        np.arange(PRE_GOAL_REL_OBS_DIM), _SONAR_TAIL]),
 }
 # Observation widths a match can run: the native one plus any we can project down to.
 MATCH_COMPATIBLE_OBS_DIMS = frozenset({SELF_PLAY_OBS_DIM, *_LEGACY_OBS_INDICES})

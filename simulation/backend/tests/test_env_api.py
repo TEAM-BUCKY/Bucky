@@ -4,6 +4,7 @@ import gymnasium as gym
 from gymnasium.utils.env_checker import check_env
 from bucky.envs.bucky_single import BuckySingleEnv
 from bucky.curriculum import Stage
+from bucky.obs import OBS_DIM
 
 @pytest.fixture
 def env():
@@ -49,5 +50,5 @@ def test_reward_info_keys(env):
 def test_push_to_goal_stage():
     env = BuckySingleEnv(stage=Stage.PUSH_TO_EMPTY_GOAL, domain_rand=False)
     obs, _ = env.reset(seed=0)
-    assert obs.shape == (18,)
+    assert obs.shape == (OBS_DIM,)
     env.close()

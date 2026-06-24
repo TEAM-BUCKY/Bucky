@@ -68,6 +68,47 @@ def test_ball_still_scores_through_mouth(physics):
     assert info["goal_scored"]
 
 
+def test_slow_ball_scores_via_occupancy(physics):
+    """Regression: a slow ball that crawls behind the goal line over several steps must score
+    (occupancy), not stall in the box uncounted then rattle back out."""
+    physics._robot_pos = np.array([-0.5, 0.0])
+    physics._ball_pos = np.array([0.86, 0.0])
+    physics._ball_vel = np.array([0.5, 0.0])
+    scored = False
+    for _ in range(20):
+        _, info = physics.step(0.0, 0.0, 0.0)
+        if info["goal_scored"]:
+            scored = True
+            break
+    assert scored
+
+
+def test_goal_bound_ball_cannot_fly_through_back_wall(physics):
+    """Regression: the arena back wall is solid behind the mouth, so a goal-bound ball is stopped
+    in the net (|x| ≤ ARENA_HALF_X) instead of glitching through and out the back."""
+    from bucky.game.field import BALL_RADIUS
+    physics._robot_pos = np.array([-0.5, 0.0])
+    physics._ball_pos = np.array([0.90, 0.0])
+    physics._ball_vel = np.array([3.5, 0.0])
+    max_x = 0.0
+    for _ in range(80):
+        state, _ = physics.step(0.0, 0.0, 0.0)
+        max_x = max(max_x, abs(state.ball_pos[0]))
+    assert max_x <= ARENA_HALF_X - BALL_RADIUS + 1e-6
+
+
+def test_ball_does_not_score_from_the_side(physics):
+    """A ball loose behind the goal line, outside the mouth, that slips toward the box must bounce
+    off the solid side wall and never be counted (no goal from the side)."""
+    physics._robot_pos = np.array([-0.5, 0.0])
+    physics._ball_pos = np.array([1.0, 0.30])    # behind +x line, outside the mouth
+    physics._ball_vel = np.array([0.0, -5.0])    # fast lateral toward the mouth
+    for _ in range(40):
+        _, info = physics.step(0.0, 0.0, 0.0)
+        assert not info["goal_scored"]
+        assert abs(physics._ball_pos[1]) >= GOAL_HALF_WIDTH - 1e-6
+
+
 # ── In-goal penalty (reward) ─────────────────────────────────────────────────
 
 def _state(robot_pos, ball_pos, heading=0.0, ball_vel=(0.0, 0.0), robot_vel=(0.0, 0.0)):

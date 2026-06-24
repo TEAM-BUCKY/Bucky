@@ -31,6 +31,7 @@ from bucky.game.field import (
     PENALTY_DEPTH,
     ROBOT_RADIUS,
     ball_out_of_play,
+    is_goal,
 )
 from bucky.physics.backend import PhysicsBackend, PhysicsState
 
@@ -113,6 +114,21 @@ def _crosses_goal(prev_x: float, prev_y: float, x: float, y: float, sign: int) -
     return abs(y_cross) < GOAL_WIDTH / 2
 
 
+def _goal_scored(prev_x: float, prev_y: float, x: float, y: float, sign: int) -> bool:
+    """True if the ball scored in the ``sign`` goal (+1 → +x, -1 → -x).
+
+    Combines two robust tests: the ball now *occupies* the goal box (``field.is_goal`` — catches a
+    ball that ends a step behind the line in the mouth, including slow multi-step or diagonal
+    entries the single-step crossing test alone would miss), OR it *crossed* the goal line through
+    the mouth this step (``_crosses_goal`` — the exact-crossing belt-and-braces). Because the goal
+    posts, side walls and back wall are all solid for the ball, the box is only reachable through the
+    mouth, so occupancy can never be a "goal from the side".
+    """
+    plus_x, minus_x = is_goal((x, y))
+    occupied = plus_x if sign > 0 else minus_x
+    return bool(occupied) or _crosses_goal(prev_x, prev_y, x, y, sign)
+
+
 # ── Goal box (solid for the robot) ───────────────────────────────────────────
 # The goal is a box recessed behind each goal line. Its mouth (the GOAL_WIDTH opening at
 # x = ±HALF_W between the posts) is open so a robot may poke in, but the two side walls running
@@ -152,6 +168,33 @@ def _resolve_robot_goal(pos):
     return out
 
 
+def _bounce_ball_goal_walls(ball_pos, ball_vel, prev_x: float, prev_y: float):
+    """Bounce the ball off the solid goal side walls, returning new ``(pos, vel, bounced)``.
+
+    The side walls are the horizontal segments at y = ±GOAL_HALF_WIDTH running from each goalpost
+    (x = ±HALF_W) back to the arena wall (x = ±ARENA_HALF_X). The test is swept in y using the
+    start-of-step ``prev_y`` so a fast ball crossing the thin wall in one step (its per-step travel
+    can exceed the wall thickness) still bounces instead of tunnelling through. The ball is pushed
+    back to whichever side it came from and its y-velocity is reflected with restitution.
+    """
+    bounced = False
+    for a, b in _GOAL_SIDE_WALLS:
+        wall_y = float(a[1])                       # both endpoints share y (= ±GOAL_HALF_WIDTH)
+        x_lo, x_hi = sorted((float(a[0]), float(b[0])))
+        if not (x_lo - BALL_RADIUS <= ball_pos[0] <= x_hi + BALL_RADIUS):
+            continue
+        crossed = (prev_y - wall_y) * (ball_pos[1] - wall_y) < 0.0   # straddled the wall (swept)
+        near = abs(ball_pos[1] - wall_y) < BALL_RADIUS               # resting against it
+        if not (crossed or near):
+            continue
+        sgn = 1.0 if prev_y >= wall_y else -1.0                      # side the ball came from
+        ball_pos[1] = wall_y + sgn * BALL_RADIUS
+        if ball_vel[1] * sgn < 0.0:                                  # moving into the wall
+            ball_vel[1] = -ball_vel[1] * BALL_RESTITUTION
+        bounced = True
+    return ball_pos, ball_vel, bounced
+
+
 def _resolve_ball_walls_pure(ball_pos, ball_vel, prev_x: float, prev_y: float):
     """Pure ball↔wall resolution (arena walls + goal side walls), returning new (pos, vel, bounced).
 
@@ -163,27 +206,28 @@ def _resolve_ball_walls_pure(ball_pos, ball_vel, prev_x: float, prev_y: float):
     ball_vel = np.array(ball_vel, dtype=float)
     bounced = False
     hx, hy = ARENA_HALF_X - BALL_RADIUS, ARENA_HALF_Y - BALL_RADIUS
-    ghw = GOAL_WIDTH / 2
-    in_goal_y = abs(ball_pos[1]) < ghw
-    if not in_goal_y:
-        if ball_pos[0] < -hx:
-            ball_pos[0] = -hx
-            ball_vel[0] = abs(ball_vel[0]) * BALL_RESTITUTION
-            bounced = True
-        elif ball_pos[0] > hx:
-            ball_pos[0] = hx
-            ball_vel[0] = -abs(ball_vel[0]) * BALL_RESTITUTION
-            bounced = True
+    # Arena back wall (x). Solid everywhere — including behind the goal mouth, where it is the
+    # recessed back of the net. The goal *line* at x = ±HALF_W is not a wall (nothing clamps
+    # there), so the ball still passes freely through the mouth; only the back of the goal stops it.
+    if ball_pos[0] < -hx:
+        ball_pos[0] = -hx
+        ball_vel[0] = abs(ball_vel[0]) * BALL_RESTITUTION
+        bounced = True
+    elif ball_pos[0] > hx:
+        ball_pos[0] = hx
+        ball_vel[0] = -abs(ball_vel[0]) * BALL_RESTITUTION
+        bounced = True
     if abs(ball_pos[1]) > hy:
         ball_vel[1] *= -BALL_RESTITUTION
         ball_pos[1] = np.sign(ball_pos[1]) * hy
         bounced = True
-    side = ghw + BALL_RADIUS
-    if abs(prev_x) > HALF_W and abs(prev_y) >= ghw and abs(ball_pos[1]) < side:
-        sgn = np.sign(prev_y) or 1.0
-        ball_pos[1] = sgn * side
-        ball_vel[1] = sgn * abs(ball_vel[1]) * BALL_RESTITUTION
-        bounced = True
+    # Solid goal side walls (the horizontal walls at y = ±GOAL_HALF_WIDTH running from each
+    # goalpost back to the arena wall). Bouncing the ball off them means the goal box can only be
+    # entered through the mouth opening, so a ball never slips beside a post into the strip and an
+    # occupancy-based goal test can't be fooled by a "goal from the side". Swept in y (via prev_y)
+    # so a fast ball can't tunnel through the thin wall in a single step.
+    ball_pos, ball_vel, hit = _bounce_ball_goal_walls(ball_pos, ball_vel, prev_x, prev_y)
+    bounced = bounced or hit
     return ball_pos, ball_vel, bounced
 
 
@@ -211,7 +255,7 @@ def predict_goal_by_rollout(ball_pos, ball_vel, attack_sign: int = 1, dt: float 
         pos, vel, _ = _resolve_ball_walls_pure(pos, vel, prev_x, prev_y)
         if opp is not None and float(np.linalg.norm(pos - opp)) < COLLISION_DIST:
             intercepted = True
-        if _crosses_goal(prev_x, prev_y, float(pos[0]), float(pos[1]), attack_sign):
+        if _goal_scored(prev_x, prev_y, float(pos[0]), float(pos[1]), attack_sign):
             return True, i, intercepted
         if ball_out_of_play(pos):
             return False, i, intercepted
@@ -367,13 +411,13 @@ class PyPhysics(PhysicsBackend):
         return bounced
 
     def _check_goal(self, prev_x: float, prev_y: float) -> bool:
-        # Goal = the ball *crossing* a goal line through the mouth this step (y interpolated at the
-        # crossing, so a shot that exits the mouth edge after crossing still scores). Testing the
-        # crossing (not just "is the ball in the strip") rejects a goal from the side — a ball that
-        # slipped laterally past a side wall into the strip never crossed the line from the field.
+        # Goal = the ball occupying the goal box, or crossing a goal line through the mouth this
+        # step (see _goal_scored). Tested on the *post-wall* ball position: solid posts/side/back
+        # walls only let the ball into the box through the mouth, so a ball that slipped in from the
+        # side has already been bounced back out of the strip and never counts (no goal from side).
         bx, by = float(self._ball_pos[0]), float(self._ball_pos[1])
-        return (_crosses_goal(prev_x, prev_y, bx, by, 1) or
-                _crosses_goal(prev_x, prev_y, bx, by, -1))
+        return (_goal_scored(prev_x, prev_y, bx, by, 1) or
+                _goal_scored(prev_x, prev_y, bx, by, -1))
 
     def _check_ball_out(self, goal: bool) -> bool:
         """Ball has left the white-line field into the outer band (and isn't a goal)."""
@@ -555,14 +599,14 @@ class TwoRobotPhysics:
         if not self._b_removed:
             self._b_pos = _resolve_robot_goal(self._clamp_robot(self._b_pos))
 
-        # A goal is the ball *crossing* a goal line through the mouth this step (y interpolated at
-        # the crossing, so a fast/diagonal shot that exits the mouth edge after crossing the line
-        # still scores rather than being mis-counted as out). Requiring a crossing from the field
-        # side rejects a goal from the side — a ball that slipped laterally past a side wall into
-        # the strip never crossed the line from the field, so it never scores.
+        # A goal is the ball occupying a goal box, or crossing a goal line through the mouth this
+        # step (see _goal_scored — occupancy catches multi-step / diagonal entries, the swept
+        # crossing the exact-crossing step). Tested on the post-wall position: solid posts/side/back
+        # walls only let the ball into the box through the mouth, so a ball that slipped in from the
+        # side has already been bounced back out and never counts as a goal from the side.
         bx, by = float(self._ball_pos[0]), float(self._ball_pos[1])
-        goal_a = _crosses_goal(prev_bx, prev_by, bx, by, 1)
-        goal_b = _crosses_goal(prev_bx, prev_by, bx, by, -1)
+        goal_a = _goal_scored(prev_bx, prev_by, bx, by, 1)
+        goal_b = _goal_scored(prev_bx, prev_by, bx, by, -1)
         past_line = bool(abs(self._ball_pos[0]) > FIELD_W / 2 or abs(self._ball_pos[1]) > FIELD_H / 2)
         return {
             "goal_a": goal_a,

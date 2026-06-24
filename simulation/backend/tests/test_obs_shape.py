@@ -10,7 +10,7 @@ def state():
     return p.reset(seed=0)
 
 def test_obs_dim_constant():
-    assert OBS_DIM == 35
+    assert OBS_DIM == 39
 
 
 def _place(physics, robot_pos, heading, ball_pos, ball_vel=(0.0, 0.0)):
@@ -69,6 +69,20 @@ def test_obs_kick_prediction_block_on_target():
     assert first[0] == 1.0 and first[1] == 0.0 and first[2] == 0.0      # 1st contact = goal
     assert first[5] > 0.0                                                # positive distance to it
     assert np.all(second == 0.0)                                         # goal is terminal
+
+
+def test_obs_ball_to_goal_block():
+    # Robot at origin facing +x (R = identity), so the ball→goal vectors are world-frame
+    # displacements from the ball to each goal, normalized by the field diagonal.
+    p = PyPhysics(); p.reset(seed=0)
+    obs = build_observation(_place(p, [0.0, 0.0], 0.0, [0.5, 0.1]))
+    diag = (field.FIELD_W ** 2 + field.FIELD_H ** 2) ** 0.5
+    opp = np.array([field.HALF_W - 0.5, 0.0 - 0.1]) / diag    # ball→enemy goal (+x)
+    own = np.array([-field.HALF_W - 0.5, 0.0 - 0.1]) / diag   # ball→own goal (−x)
+    assert np.allclose(obs[35:37], opp, atol=1e-6)
+    assert np.allclose(obs[37:39], own, atol=1e-6)
+    # Enemy goal is ahead (+x) and own goal behind (−x) of a ball in the attacking half.
+    assert obs[35] > 0.0 and obs[37] < 0.0
 
 
 def test_obs_shape(state):

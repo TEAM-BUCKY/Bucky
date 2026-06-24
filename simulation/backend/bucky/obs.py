@@ -18,6 +18,10 @@ Layout (total 23 dims):
   [23:35] kick_prediction — for the 1st then 2nd thing a kick fired now would hit:
           [is_goal, is_robot, is_wall, impact_x, impact_y, dist] (robot frame, normalized).
           See bucky.kick_predict. is_robot needs an opponent; single-agent stages pass none.
+  [35:39] ball→goal vectors — robot-frame, FIELD_DIAG-normalized displacement from the ball to the
+          enemy goal (35:37) and to the own goal (37:39). Encodes direction + distance to each goal
+          and pins the ball's absolute field location (else only weakly inferable).
+Total: 39 dims (was 35 before the ball→goal block was appended).
 """
 from __future__ import annotations
 
@@ -38,12 +42,20 @@ _MAX_OMEGA = 58.18
 # so robot/ball velocity observations span ~[-1, 1] instead of clipping.
 _MAX_VEL = 5.236
 
-# 23 base + 12 kick-prediction features (bucky.kick_predict) = 35.
-OBS_DIM: int = 35
+# 23 base + 12 kick-prediction + 4 ball→goal features = 39.
+OBS_DIM: int = 39
 
-# The kick-prediction block — indices [23:35] — was appended last. Width before it (the
-# pre-kick-pred base) is OBS_DIM - N_KICK_PRED_FEATURES = 23, the layout pre-kick-pred policies saw.
-PRE_KICK_PRED_OBS_DIM: int = OBS_DIM - N_KICK_PRED_FEATURES   # 23
+# The ball→goal block — indices [35:39]: ball→enemy-goal (x, y) and ball→own-goal (x, y),
+# robot-frame and FIELD_DIAG-normalized — was appended last (after the kick-prediction block).
+# Kept as a named constant so the self-play layer can project the current obs back to the older
+# 35-dim base for backward-compatible match play.
+N_GOAL_REL_FEATURES: int = 4
+# Base width before the ball→goal block (everything up to and including kick-prediction).
+PRE_GOAL_REL_OBS_DIM: int = OBS_DIM - N_GOAL_REL_FEATURES     # 35
+
+# The kick-prediction block — indices [23:35]. Width before it (the pre-kick-pred base) is 23,
+# the layout pre-kick-pred policies saw — both later blocks (kick-pred, ball→goal) sit after it.
+PRE_KICK_PRED_OBS_DIM: int = OBS_DIM - N_GOAL_REL_FEATURES - N_KICK_PRED_FEATURES   # 23
 
 # The ball-boundary block — indices [18:23]: ball_line_dist, ball_vel_toward_line, respawn_rel
 # (x, y), ball_out_flag — was appended before the kick-prediction block (ball-vs-boundary
@@ -96,6 +108,7 @@ def build_observation(
 
     # Heading to opponent goal
     opp_goal = np.array([_FIELD_W / 2, 0.0])
+    own_goal = np.array([-_FIELD_W / 2, 0.0])
     heading_to_goal = np.arctan2(opp_goal[1] - state.robot_pos[1],
                                  opp_goal[0] - state.robot_pos[0])
     heading_to_goal -= (state.robot_heading + heading_drift)
@@ -148,6 +161,17 @@ def build_observation(
         opponent_pos=opponent_pos, field_diag=_FIELD_DIAG,
     )
 
+    # Ball position relative to each goal: robot-frame, FIELD_DIAG-normalized displacement from the
+    # ball to the enemy goal and to the own goal. Gives the policy the ball's standing relative to
+    # both goals (how close to scoring / how exposed at the back) and, via two fixed anchors, the
+    # ball's absolute field location. Ground-truth geometry (a coarse spatial cue, not a sensor).
+    ball_to_opp_goal = (R @ (opp_goal - state.ball_pos)) / _FIELD_DIAG
+    ball_to_own_goal = (R @ (own_goal - state.ball_pos)) / _FIELD_DIAG
+    goal_rel = np.array([
+        ball_to_opp_goal[0], ball_to_opp_goal[1],
+        ball_to_own_goal[0], ball_to_own_goal[1],
+    ], dtype=np.float32)
+
     obs = np.array([
         np.sin(bearing),
         np.cos(bearing),
@@ -172,4 +196,4 @@ def build_observation(
         ball_out_flag,
     ], dtype=np.float32)
 
-    return np.concatenate([obs, kick_pred]).astype(np.float32)
+    return np.concatenate([obs, kick_pred, goal_rel]).astype(np.float32)

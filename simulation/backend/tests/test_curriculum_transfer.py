@@ -101,11 +101,12 @@ def test_push_stage_includes_goal_and_kick_terms():
 
 
 def test_obs_expansion_transfer_preserves_shared_weights(tmp_path):
-    """A 35-dim single-agent policy transfers into a 39-dim self-play policy: shared input columns
-    are copied verbatim, the new sonar columns are left at init, and the model still runs."""
+    """A single-agent policy (OBS_DIM cols) transfers into a self-play policy (SELF_PLAY_OBS_DIM
+    cols): shared input columns are copied verbatim, the new sonar columns are left at init, and
+    the model still runs."""
     from stable_baselines3 import PPO
     from bucky.envs.bucky_selfplay import BuckySelfPlayEnv
-    from bucky.selfplay import transfer_weights_expand_obs
+    from bucky.selfplay import SELF_PLAY_OBS_DIM, transfer_weights_expand_obs
 
     single = BuckySingleEnv(stage=Stage.PUSH_TO_EMPTY_GOAL, domain_rand=False)
     old = PPO("MlpPolicy", single, policy_kwargs={"net_arch": [64, 64]}, device="cpu")
@@ -117,18 +118,18 @@ def test_obs_expansion_transfer_preserves_shared_weights(tmp_path):
 
     # Capture the first-layer weights pre-transfer to verify the overlap copy.
     key = "mlp_extractor.policy_net.0.weight"
-    old_w = old.policy.state_dict()[key].clone()         # [64, 35]
-    new_w_before = new.policy.state_dict()[key].clone()  # [64, 39]
-    assert old_w.shape[1] == 35 and new_w_before.shape[1] == 39
+    old_w = old.policy.state_dict()[key].clone()         # [64, OBS_DIM]
+    new_w_before = new.policy.state_dict()[key].clone()  # [64, SELF_PLAY_OBS_DIM]
+    assert old_w.shape[1] == OBS_DIM and new_w_before.shape[1] == SELF_PLAY_OBS_DIM
 
     copied, padded = transfer_weights_expand_obs(new, str(old_path), device="cpu")
     assert padded >= 1            # first layer(s) expanded
     assert copied >= 1            # deeper layers copied verbatim
 
     new_w_after = new.policy.state_dict()[key]
-    # Overlapping 35 input columns now equal the old weights; the 4 new columns are untouched.
-    assert np.allclose(new_w_after[:, :35].cpu().numpy(), old_w.cpu().numpy())
-    assert np.allclose(new_w_after[:, 35:].cpu().numpy(), new_w_before[:, 35:].cpu().numpy())
+    # Overlapping OBS_DIM input columns now equal the old weights; the new columns are untouched.
+    assert np.allclose(new_w_after[:, :OBS_DIM].cpu().numpy(), old_w.cpu().numpy())
+    assert np.allclose(new_w_after[:, OBS_DIM:].cpu().numpy(), new_w_before[:, OBS_DIM:].cpu().numpy())
 
     # And the transferred model still produces a valid action for a real self-play observation.
     obs, _ = selfplay.reset(seed=0)
