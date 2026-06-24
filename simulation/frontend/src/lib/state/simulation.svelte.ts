@@ -68,6 +68,16 @@ export interface SimFrame {
 	run?: string;
 }
 
+/** A ground-truth physics state (world frame) — a reward-fn state argument (s0 / s1). */
+export interface PhysicsStateView {
+	robot_pos: [number, number];
+	robot_vel: [number, number];
+	robot_heading: number;
+	robot_omega: number;
+	ball_pos: [number, number];
+	ball_vel: [number, number];
+}
+
 /** A live frame from an evaluation drill. Distinct from {@link SimFrame} (type `eval_step`,
  * not `step`) so it can never disturb the training viewer that shares the same stream. */
 export interface EvalStepFrame {
@@ -83,6 +93,15 @@ export interface EvalStepFrame {
 	reward_total: number;
 	/** Per-term running total for the current episode (the "build-up"). */
 	reward_cumulative: RewardTerms;
+	/** The signals the reward function received this step (flags / play-events) — for debugging. */
+	reward_inputs?: Record<string, number | boolean | string[]>;
+	/** The remaining reward-fn arguments: the ground-truth states s0/s1 and the action pair. */
+	reward_states?: {
+		s0: PhysicsStateView;
+		s1: PhysicsStateView;
+		action: number[];
+		prev_action: number[];
+	};
 	obs: number[];
 	episode: number;
 	step: number;

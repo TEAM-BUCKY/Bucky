@@ -239,35 +239,33 @@ def compute_rewards(
     d_ball_goal_0 = float(np.linalg.norm(s0.ball_pos - OPP_GOAL))
     d_ball_goal_1 = float(np.linalg.norm(s1.ball_pos - OPP_GOAL))
     ball_to_goal = config.w_ball_to_goal * (d_ball_goal_0 - d_ball_goal_1)
-    # While the ball is out, keep only the penalty side (don't reward shoving an out ball goalward).
     terms.ball_to_goal = min(0.0, ball_to_goal) if ball_out_raw else ball_to_goal
 
     if d_robot_ball_1 < CAPTURE_RADIUS and not ball_out_raw:
         heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
         if np.dot(heading_vec, s1.ball_pos - s1.robot_pos) > 0:
-            # Decaying capture bonus: fades to ~0 as the robot dwells near the ball, so camping
-            # stops paying (see dwell_decay above).
             terms.possession = config.w_possession * dwell_decay
         else:
             # Facing away with the ball in the capture zone is still a flat penalty (no decay).
             terms.possession = -config.w_possession
 
-    # Reward setting up to catch the ball and drive it at the enemy goal: the
-    # robot's front (where the catch zone is) must face the ball so it can catch
-    # it, AND the robot must be behind the ball (on the side away from the goal)
-    # so that catching and driving forward sends the ball toward the goal.
-    # Faded in by proximity.
     to_goal = OPP_GOAL - s1.ball_pos
     to_goal_dist = float(np.linalg.norm(to_goal))
     if to_goal_dist > 1e-6 and d_robot_ball_1 > 1e-6 and not ball_out_raw:
         goal_dir = to_goal / to_goal_dist
         approach_dir = (s1.ball_pos - s1.robot_pos) / d_robot_ball_1
         heading_vec = np.array([np.cos(s1.robot_heading), np.sin(s1.robot_heading)])
-        face_ball = float(np.dot(heading_vec, approach_dir))  # front/catch zone toward ball
-        drive_pos = float(np.dot(approach_dir, goal_dir))     # behind ball -> can drive to goal
-        align = 0.5 * (face_ball + drive_pos)
+        face_ball = float(np.dot(heading_vec, approach_dir))
+        drive_pos = float(np.dot(approach_dir, goal_dir))
+
+        # Require BOTH: front aimed at the ball AND positioned behind it, and SQUARE the
+        # product so the reward falls off sharply with misalignment. A plain product is
+        # ~linear in cos(angle) and only reaches 0 at 90deg, so a near-orthogonal heading
+        # (e.g. 65-77deg off the goal, which shoots wide) still paid out heavily. Squaring
+        # crushes those marginal line-ups toward 0 while barely denting a true lineup, so the
+        # robot is only paid when it is genuinely set up to drive/kick the ball into the goal.
+        align = (max(0.0, face_ball) * max(0.0, drive_pos)) ** 2
         prox = max(0.0, 1.0 - d_robot_ball_1 / ALIGN_RADIUS)
-        # Faded by dwell time too, so it rewards *setting up* but not camping (the old hot-spot).
         terms.front_alignment = config.w_front_align * align * prox * dwell_decay
 
     if info.get("goal_scored", False):

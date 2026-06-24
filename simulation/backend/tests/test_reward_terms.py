@@ -70,14 +70,41 @@ def test_front_alignment_rewards_correct_setup(physics, config):
     terms = compute_rewards(s, s, config, info={})
     assert terms.front_alignment > 0.0
 
-def test_front_alignment_penalizes_wrong_side_and_rotation(physics, config):
+def test_front_alignment_zero_on_wrong_side(physics, config):
     # Robot on the goal (+x) side of the ball, front pointing away from the ball
-    # (toward the goal): can't catch it AND wrong side to drive it.
+    # (toward the goal): can't catch it AND wrong side to drive it. The clamped
+    # product earns nothing here (the facing-away *penalty* is owned by possession).
     ball = np.array([0.0, 0.0])
     robot = ball + np.array([0.1, 0.0])
     s = _place(physics, robot, 0.0, ball)
     terms = compute_rewards(s, s, config, info={})
-    assert terms.front_alignment < 0.0
+    assert terms.front_alignment == 0.0
+
+def test_front_alignment_zero_when_heading_off_axis(physics, config):
+    # Robot correctly behind the ball (-x side) so it could drive to goal, but its
+    # front points +y (heading = pi/2) — a kick would sail sideways, not at the goal.
+    # The product must collapse to ~0 (this fails under the old perpendicular
+    # convention AND under the old 0.5*(face+drive) averaging).
+    ball = np.array([0.0, 0.0])
+    robot = ball - np.array([0.1, 0.0])
+    s = _place(physics, robot, np.pi / 2, ball)
+    terms = compute_rewards(s, s, config, info={})
+    assert terms.front_alignment == pytest.approx(0.0, abs=1e-9)
+
+def test_front_alignment_small_for_wide_shot_setup(physics, config):
+    # Real farmed frame (eval ep2/step3): robot is behind the ball (drive_pos~0.98)
+    # but its heading is ~65 deg off the goal line and ~77 deg off the ball — a kick
+    # here sails wide. Before squaring the product this paid ~1.13 (w*0.215*prox);
+    # squaring the falloff must crush it to a token amount (~0.25 at dwell_decay=1).
+    robot = np.array([0.316, -0.019])
+    ball = np.array([0.444, 0.006])
+    s = _place(physics, robot, -1.156, ball)
+    terms = compute_rewards(s, s, config, info={})
+    assert 0.0 < terms.front_alignment < 0.35
+    # ...and a genuinely aimed line-up from the same range still pays well.
+    aimed = _place(physics, ball - np.array([0.10, 0.0]), 0.0, ball)
+    aimed_terms = compute_rewards(aimed, aimed, config, info={})
+    assert aimed_terms.front_alignment > 3.0 * terms.front_alignment
 
 def test_front_alignment_gated_by_proximity(physics, config):
     # Robot beyond ALIGN_RADIUS from the ball -> term fades to zero.

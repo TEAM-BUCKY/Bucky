@@ -80,6 +80,7 @@ class BuckySelfPlayEnv(gym.Env):
         self._opponent = None              # opponent for the current episode (picked in reset)
         self._opponent_pool: list = []     # rolling pool of frozen snapshots to sample from
         self._last_terms = RewardTerms()
+        self._last_reward_info: dict = {}
         self._dwell_steps = 0
         self._predicted_goal_guard = 0     # steps remaining to suppress a double-paid real goal
         if opponent_path:
@@ -219,6 +220,7 @@ class BuckySelfPlayEnv(gym.Env):
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info,
                                        action=action, prev_action=self._prev_action)
         self._last_terms = reward_terms
+        self._last_reward_info = reward_info  # the exact signals the reward fn saw (for debugging)
         reward = self._filter_reward(reward_terms)
         self._prev_action = action.copy()
 
@@ -251,6 +253,11 @@ class BuckySelfPlayEnv(gym.Env):
     @property
     def last_terms(self) -> RewardTerms:
         return self._last_terms
+
+    @property
+    def last_reward_info(self) -> dict:
+        """The signal dict the reward function saw this step (flags + play-events)."""
+        return self._last_reward_info
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def _opponent_action(self):

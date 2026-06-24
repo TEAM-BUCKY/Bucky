@@ -5,6 +5,10 @@
     import {simulation} from "$lib/state/simulation.svelte.ts";
     import LineChart from "$lib/components/LineChart.svelte";
 
+    // `close` is supplied by DialogContainer so bits-ui's dismissal (outside-click/Escape/X) resolves
+    // the DialogsState popup. Optional so the component still satisfies DialogsState's Component type.
+    let { close }: { close?: () => void } = $props();
+
     const CHARTS: { key: string; label: string; color: string }[] = [
         { key: 'rollout/ep_rew_mean', label: 'ep reward mean', color: '#34d399' },
         { key: 'train/loss', label: 'loss', color: '#f87171' },
@@ -18,7 +22,7 @@
     const activeCharts = $derived(CHARTS.filter((c) => (simulation.metrics[c.key]?.length ?? 0) > 0));
 </script>
 
-<Dialog.Root class="w-[50vw]" open={true}>
+<Dialog.Root open={true} onOpenChange={(o) => { if (!o) close?.(); }}>
     <Dialog.Content class="w-[50vw]">
         <Dialog.Header>
             <Dialog.Title class="font-mono text-xs font-semibold uppercase tracking-widest">

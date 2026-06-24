@@ -66,6 +66,39 @@ def _obs_dim(model) -> int:
     return int(model.observation_space.shape[0])
 
 
+def _state_dict(s) -> dict:
+    """A PhysicsState as plain rounded numbers (world frame) — a reward-fn state argument."""
+    def p(v):
+        return [round(float(v[0]), 4), round(float(v[1]), 4)]
+    return {
+        "robot_pos": p(s.robot_pos),
+        "robot_vel": p(s.robot_vel),
+        "robot_heading": round(float(s.robot_heading), 4),
+        "robot_omega": round(float(s.robot_omega), 4),
+        "ball_pos": p(s.ball_pos),
+        "ball_vel": p(s.ball_vel),
+    }
+
+
+def _reward_inputs(info: dict) -> dict:
+    """A JSON-safe view of the signals the reward function received this step.
+
+    Keeps scalar flags/values (rounding floats) and string event lists; drops the already-shown
+    ``reward_terms`` and anything non-scalar (arrays/objects) so the debug payload stays small.
+    """
+    out: dict = {}
+    for k, v in info.items():
+        if k == "reward_terms":
+            continue
+        if isinstance(v, (bool, np.bool_)):
+            out[k] = bool(v)
+        elif isinstance(v, (int, float, np.integer, np.floating)):
+            out[k] = round(float(v), 4)
+        elif isinstance(v, (list, tuple)) and v and all(isinstance(x, str) for x in v):
+            out[k] = list(v)
+    return out
+
+
 def _read_trained_stage(checkpoint: str) -> str | None:
     """The stage a checkpoint was trained on, from its sibling config.json / meta.json."""
     import json
@@ -251,6 +284,7 @@ def main() -> None:
             min_ball_dist = float("inf")
             scored = False
             goals_for = goals_against = 0
+            prev_action = np.zeros(4, dtype=np.float32)  # the reward fn's prev_action arg
 
             while not done:
                 # Transport gate: hold here while paused (the rollout freezes — no frames stream)
@@ -261,8 +295,11 @@ def main() -> None:
                     if ctl["step"] > 0:
                         ctl["step"] -= 1  # consume one credit; stay paused for the next frame
 
+                action = act(obs)
+                # The state the reward fn sees as s0 — the ground-truth physics state *before*
+                # this step (compute_rewards is called with state0 captured at the top of step()).
+                s0 = env.physics.state_a() if self_play else env._physics._make_state()
                 if self_play:
-                    action = act(obs)
                     obs, reward, terminated, truncated, info = env.step(action)
                     sa = env.physics.state_a()
                     sb = env.physics.state_b()
@@ -270,7 +307,6 @@ def main() -> None:
                     goals_for += int(bool(info.get("goal_a")))
                     goals_against += int(bool(info.get("goal_b")))
                 else:
-                    action = act(obs)
                     obs, reward, terminated, truncated, info = env.step(action)
                     state = captured["state"]
                     terms = captured["terms"]
@@ -288,6 +324,14 @@ def main() -> None:
                     cum[k] = cum.get(k, 0.0) + float(v)
 
                 if (step % every == 0) or done:
+                    # The exact signals the reward function saw this step (for the debug dialog).
+                    # Single env returns its reward-input dict as `info`; self-play exposes it.
+                    if self_play:
+                        rinfo = {**env.last_reward_info, "goal_a": info.get("goal_a"),
+                                 "goal_b": info.get("goal_b"),
+                                 "referee_events": info.get("referee_events")}
+                    else:
+                        rinfo = info
                     frame = {
                         "type": "eval_step",
                         "mode": "play" if self_play else "train",
@@ -297,6 +341,13 @@ def main() -> None:
                         "reward_terms": terms_d,
                         "reward_total": float(terms.total),
                         "reward_cumulative": dict(cum),
+                        "reward_inputs": _reward_inputs(rinfo),
+                        "reward_states": {
+                            "s0": _state_dict(s0),
+                            "s1": _state_dict(sa),
+                            "action": [round(float(x), 4) for x in np.asarray(action).reshape(-1)],
+                            "prev_action": [round(float(x), 4) for x in prev_action],
+                        },
                         "obs": [float(x) for x in np.asarray(obs).reshape(-1)],
                         "episode": ep,
                         "step": step,
@@ -308,6 +359,8 @@ def main() -> None:
                         frame["robot2_heading"] = float(sb.robot_heading)
                     if stream:
                         stream.send(frame)
+
+                prev_action = np.asarray(action, dtype=np.float32).reshape(-1)
 
                 if args.realtime:
                     # Pace to the physics clock, scaled by the live speed multiplier.

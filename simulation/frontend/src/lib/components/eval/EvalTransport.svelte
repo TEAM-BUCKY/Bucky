@@ -2,7 +2,10 @@
 	import { simulation } from '$lib/state/simulation.svelte.js';
 	import { Button } from '$lib/components/ui/button';
 	import { Slider } from '$lib/components/ui/slider';
-	import { SkipBack, ChevronLeft, ChevronRight, Play, Pause } from '@lucide/svelte';
+	import { SkipBack, ChevronLeft, ChevronRight, Play, Pause, ScanSearch, ChartLine } from '@lucide/svelte';
+	import DialogsState from '$lib/state/dialog.svelte.js';
+	import EvalDebugDialog from './EvalDebugDialog.svelte';
+	import RewardGraphDialog from './RewardGraphDialog.svelte';
 
 	const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
 
@@ -54,7 +57,7 @@
 			</span>
 		</div>
 
-		<!-- speed -->
+		<!-- speed + inspect -->
 		<div class="flex items-center gap-1">
 			{#each SPEEDS as s (s)}
 				<Button
@@ -67,6 +70,25 @@
 					{s}×
 				</Button>
 			{/each}
+			<Button
+				variant="ghost"
+				size="xs"
+				class="ml-1"
+				title="Reward graph — plot a term across the run, click to seek"
+				disabled={!frames.length}
+				onclick={() => DialogsState.open({ component: RewardGraphDialog, data: {} })}
+			>
+				<ChartLine class="size-3.5" />
+			</Button>
+			<Button
+				variant="ghost"
+				size="xs"
+				title="Inspect frame — observation + reward inputs"
+				disabled={!view}
+				onclick={() => DialogsState.open({ component: EvalDebugDialog, data: {} })}
+			>
+				<ScanSearch class="size-3.5" />
+			</Button>
 		</div>
 	</div>
 

@@ -2,16 +2,16 @@
 	import dialogs from '$lib/state/dialog.svelte.js';
 </script>
 
-{#if dialogs.popups.length > 0}
-	<div class="fixed inset-0 z-50 flex items-center justify-center">
-		<div
-			class="absolute inset-0 bg-black/50"
-			onclick={() => dialogs.popups.at(-1)?.close()}
-		></div>
-		{#each dialogs.popups as dialog (dialog.id)}
-			<div class="relative z-10">
-				<svelte:component this={dialog.component} {...dialog.data} />
-			</div>
-		{/each}
-	</div>
-{/if}
+<!--
+	Each dialog body renders its own bits-ui <Dialog.Root>, which portals an overlay + content to
+	<body> and owns dimming, focus-trap, Escape and outside-click dismissal. We pass each popup its
+	`close` callback so the dialog can route bits-ui's onOpenChange back to DialogsState. We do NOT
+	render a backdrop here — doing so would double-dim and sit beneath the portal, unable to receive
+	clicks (the original dismissal bug).
+-->
+{#each dialogs.popups as dialog (dialog.id)}
+	{@const Popup = dialog.component}
+	{#if Popup}
+		<Popup {...dialog.data} close={dialog.close} />
+	{/if}
+{/each}
