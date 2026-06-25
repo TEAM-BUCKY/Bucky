@@ -67,7 +67,7 @@ class RewardConfig:
     w_ball_to_goal: float = 5.0
 
     w_possession: float = 4.0
-    w_front_align: float = 8.0
+    w_front_align: float = 8.5
 
     possession_decay_steps: float = 40.0
 
@@ -258,13 +258,15 @@ def compute_rewards(
         face_ball = float(np.dot(heading_vec, approach_dir))
         drive_pos = float(np.dot(approach_dir, goal_dir))
 
-        # Require BOTH: front aimed at the ball AND positioned behind it, and SQUARE the
-        # product so the reward falls off sharply with misalignment. A plain product is
+        # Require BOTH: front aimed at the ball AND positioned behind it, and CUBE the
+        # product so the reward falls off very sharply with misalignment. A plain product is
         # ~linear in cos(angle) and only reaches 0 at 90deg, so a near-orthogonal heading
         # (e.g. 65-77deg off the goal, which shoots wide) still paid out heavily. Squaring
-        # crushes those marginal line-ups toward 0 while barely denting a true lineup, so the
+        # already crushed marginal line-ups; cubing crushes them harder still (e.g. a 0.8
+        # cos-product: 0.64 squared -> 0.51 cubed) while barely denting a true lineup, so the
         # robot is only paid when it is genuinely set up to drive/kick the ball into the goal.
-        align = (max(0.0, face_ball) * max(0.0, drive_pos)) ** 2
+        # (w_front_align bumped to 8.5 to restore the peak magnitude cubing slightly lowers.)
+        align = (max(0.0, face_ball) * max(0.0, drive_pos)) ** 3
         prox = max(0.0, 1.0 - d_robot_ball_1 / ALIGN_RADIUS)
         terms.front_alignment = config.w_front_align * align * prox * dwell_decay
 

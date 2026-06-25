@@ -86,8 +86,12 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         goal_present=True,
         spawn_mode="kick_blend",         # robot behind a scattered ball, close↔mid distance
         active_reward_terms=[
+            # NOTE: plain ``goal`` is intentionally omitted — in the kicking drill the only way to
+            # earn scoring credit is to fire the kicker. Scoring is paid by the kick-gated terms
+            # ``predicted_goal``/``kick_goal`` (both require info["kicked"]), so a dribbled-in goal
+            # earns ~nothing while a clean kick earns the full payout.
             "approach", "speed", "ball_to_goal", "front_alignment",
-            "goal", "predicted_goal", "in_goal",
+            "predicted_goal", "in_goal",
             "kick_attempt", "kick_power_to_goal", "shot_on_goal", "kick_goal", "bank_shot",
             "shot_out_of_bounds", "out_of_bounds", "lack_of_progress", "defective", "spin",
             "time_penalty", "action_smoothness", "play_oob_ball", "stuck",
