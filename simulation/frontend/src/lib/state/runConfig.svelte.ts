@@ -36,7 +36,7 @@ export const HP_FIELDS: { key: keyof Hyperparams; label: string; step: number }[
 	{ key: 'gamma', label: 'gamma', step: 0.001 },
 	{ key: 'gae_lambda', label: 'gae_lambda', step: 0.001 },
 	{ key: 'clip_range', label: 'clip range', step: 0.01 },
-	{ key: 'ent_coef', label: 'ent_coef', step: 0.001 },
+	{ key: 'ent_coef', label: 'ent_coef (0.01 = auto/per-stage)', step: 0.001 },
 	{ key: 'vf_coef', label: 'vf_coef', step: 0.05 },
 	{ key: 'max_grad_norm', label: 'max grad norm', step: 0.05 }
 ];

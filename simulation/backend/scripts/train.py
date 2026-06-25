@@ -227,6 +227,14 @@ def main() -> None:
         )
 
         stage_ent_coef = get_stage_config(stage).recommended_ent_coef
+        # Per-stage exploration: each curriculum stage carries its own recommended_ent_coef
+        # (e.g. AIM_AND_KICK 0.02, SELF_PLAY 0.025 — more exploration to commit to kicks / avoid
+        # a symmetric stalemate). The run config ALWAYS serializes a global ent_coef whose default
+        # is 0.01 (the SB3/frontend baseline), which previously shadowed those per-stage values.
+        # Treat that baseline as "auto" so the stage recommendation actually takes effect; any
+        # other value is an explicit user override applied uniformly to every stage.
+        cfg_ent = hp("ent_coef", None)
+        ent_coef = stage_ent_coef if cfg_ent in (None, 0.01) else cfg_ent
 
         def build_fresh_model():
             return PPO(
@@ -234,7 +242,7 @@ def main() -> None:
                 learning_rate=hp("learning_rate", 3e-4), n_steps=hp("n_steps", 1024),
                 batch_size=hp("batch_size", 512), n_epochs=hp("n_epochs", 10),
                 gamma=hp("gamma", 0.99), gae_lambda=hp("gae_lambda", 0.95),
-                clip_range=hp("clip_range", 0.2), ent_coef=hp("ent_coef", stage_ent_coef),
+                clip_range=hp("clip_range", 0.2), ent_coef=ent_coef,
                 vf_coef=hp("vf_coef", 0.5), max_grad_norm=hp("max_grad_norm", 0.5),
                 policy_kwargs={"net_arch": list(net_arch)}, device=device,
             )

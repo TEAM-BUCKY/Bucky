@@ -90,7 +90,7 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
             # earn scoring credit is to fire the kicker. Scoring is paid by the kick-gated terms
             # ``predicted_goal``/``kick_goal`` (both require info["kicked"]), so a dribbled-in goal
             # earns ~nothing while a clean kick earns the full payout.
-            "approach", "speed", "ball_to_goal", "front_alignment",
+            "approach", "speed", "ball_to_goal", "front_alignment", "front_misalign",
             "predicted_goal", "in_goal",
             "kick_attempt", "kick_power_to_goal", "shot_on_goal", "kick_goal", "bank_shot",
             "shot_out_of_bounds", "out_of_bounds", "lack_of_progress", "defective", "spin",
@@ -106,7 +106,12 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         ball_spawn_radius=0.5,
         goal_present=True,
         active_reward_terms=[
-            "approach", "speed", "ball_to_goal", "possession", "front_alignment", "goal", "goal_against",
+            # plain ``goal`` is omitted on purpose (``goal_against`` kept): exactly like
+            # AIM_AND_KICK, only kicked goals score here, so this long phase (45% of the budget,
+            # runs after the drill) can't re-teach dribbling and overwrite the kicker. The
+            # ``front_misalign`` penalty carries the aim/commit-to-kick pressure over from the drill.
+            "approach", "speed", "ball_to_goal", "possession", "front_alignment", "front_misalign",
+            "goal_against",
             "predicted_goal", "in_goal",
             "steal", "blocked_shot", "kick_attempt", "kick_power_to_goal", "shot_on_goal",
             "kick_goal", "bank_shot", "risky_shot", "kick_lost", "kick_at_opponent",

@@ -68,6 +68,9 @@ class RewardConfig:
 
     w_possession: float = 4.0
     w_front_align: float = 8.5
+    # Per-step penalty for loitering near the ball while NOT lined up to drive/kick it at the goal
+    # ("when aiming is possible, you should be aimed"). Scales with misalignment and closeness.
+    w_front_misalign: float = -2.0
 
     possession_decay_steps: float = 40.0
 
@@ -125,6 +128,7 @@ class RewardTerms:
 
     possession: float = 0.0
     front_alignment: float = 0.0
+    front_misalign: float = 0.0
 
     goal: float = 0.0
     goal_against: float = 0.0
@@ -156,7 +160,7 @@ class RewardTerms:
     @property
     def total(self) -> float:
         return (self.approach + self.speed + self.ball_to_goal + self.possession +
-                self.front_alignment + self.goal + self.goal_against +
+                self.front_alignment + self.front_misalign + self.goal + self.goal_against +
                 self.predicted_goal + self.in_goal +
                 self.out_of_bounds + self.lack_of_progress + self.defective +
                 self.spin + self.play_oob_ball + self.stuck +
@@ -173,6 +177,7 @@ class RewardTerms:
             "ball_to_goal": self.ball_to_goal,
             "possession": self.possession,
             "front_alignment": self.front_alignment,
+            "front_misalign": self.front_misalign,
             "goal": self.goal,
             "goal_against": self.goal_against,
             "predicted_goal": self.predicted_goal,
@@ -266,9 +271,18 @@ def compute_rewards(
         # cos-product: 0.64 squared -> 0.51 cubed) while barely denting a true lineup, so the
         # robot is only paid when it is genuinely set up to drive/kick the ball into the goal.
         # (w_front_align bumped to 8.5 to restore the peak magnitude cubing slightly lowers.)
-        align = (max(0.0, face_ball) * max(0.0, drive_pos)) ** 3
+        aligned = max(0.0, face_ball) * max(0.0, drive_pos)   # raw lineup quality, 1 = perfect
+        align = aligned ** 3
         prox = max(0.0, 1.0 - d_robot_ball_1 / ALIGN_RADIUS)
         terms.front_alignment = config.w_front_align * align * prox * dwell_decay
+
+        # Counterpart penalty: while the robot is near the ball (prox > 0) but NOT lined up to
+        # drive/kick it at the goal, dock points proportional to the misalignment (1 - aligned)
+        # and closeness. Uses the *raw* lineup quality (not cubed) so the penalty grows linearly
+        # with the angle, and deliberately carries NO dwell decay — a robot loitering on the ball
+        # while poorly aimed keeps paying, pushing it to either line up and commit (kick) or leave
+        # rather than hover half-aimed and shoot wide.
+        terms.front_misalign = config.w_front_misalign * (1.0 - aligned) * prox
 
     if info.get("goal_scored", False):
         terms.goal = config.w_goal
