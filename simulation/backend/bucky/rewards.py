@@ -100,7 +100,11 @@ class RewardConfig:
     w_kick_attempt: float = 0.5
     w_kick_power_to_goal: float = 4
 
-    w_shot_on_goal: float = 2.5
+    # Per-step on-target-shot shaping. Kept modest: it accumulates every step a struck ball is in
+    # flight, so over a 1500-step self-play episode even the now-accuracy-gated term can dwarf the
+    # terminal scoring reward (predicted_goal/kick_goal). Lowered 2.5→1.0 so scoring stays the
+    # dominant objective and the policy optimises goals, not time-on-target.
+    w_shot_on_goal: float = 1.0
 
     w_speed: float = 0.1
 
@@ -353,12 +357,17 @@ def compute_rewards(
             terms.kick_attempt = config.w_kick_attempt
             terms.kick_power_to_goal = config.w_kick_power_to_goal * max(0.0, cos_to_goal)
 
-    # Quick-shot shaping: reward a fast, *free* ball heading at the goal. Gated on the ball
-    # being out of the robot's capture radius (so a fast dribble doesn't count) and above a
-    # speed threshold (so only a struck shot counts). Only the goalward velocity component is
-    # rewarded; a fast ball going the wrong way earns nothing (clamped at 0).
+    # Quick-shot shaping: reward a fast, *free* ball that is genuinely ON TARGET — its current
+    # trajectory enters the goal mouth before crossing any white line (``_shot_enters_goal_mouth``,
+    # the same accuracy gate kick_power_to_goal uses). Also gated on the ball being out of the
+    # robot's capture radius (so a fast dribble doesn't count) and above a speed threshold (so only
+    # a struck shot counts). WITHOUT the on-target gate this paid 2.5 x goalward-velocity every step
+    # for ANY fast goal-ward ball, so the policy learned to blast hard roughly-goalward shots that
+    # farm this term (it dominated the reward) yet sail wide/out at game range — the gate makes
+    # accuracy a precondition, so only shots that will actually score earn it.
     ball_speed = float(np.linalg.norm(s1.ball_vel))
-    if ball_speed > SHOT_SPEED_THRESHOLD and d_robot_ball_1 > CAPTURE_RADIUS and not ball_out_raw:
+    if ball_speed > SHOT_SPEED_THRESHOLD and d_robot_ball_1 > CAPTURE_RADIUS and not ball_out_raw \
+            and _shot_enters_goal_mouth(s1.ball_pos, s1.ball_vel):
         to_goal = OPP_GOAL - s1.ball_pos
         to_goal_norm = float(np.linalg.norm(to_goal))
         if to_goal_norm > 1e-6:
