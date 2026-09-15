@@ -1,8 +1,7 @@
 #ifndef BUCKY_SONAR_H
 #define BUCKY_SONAR_H
 
-#include <Arduino.h>
-#include "io/gpio/gpio.h"
+#include "hardware/io/gpio/gpio.h"
 
 static constexpr int SONAR_COUNT = 4;
 static constexpr uint32_t SONAR_TIMEOUT_US = 20000;

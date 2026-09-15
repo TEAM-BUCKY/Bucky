@@ -34,7 +34,6 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import torch
-from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, CheckpointCallback
@@ -55,20 +54,33 @@ class StopAtTime(BaseCallback):
     def _on_step(self) -> bool:
         return time.time() < self._deadline
 
+from bucky.algos import registry
 from bucky.curriculum import FULL_TRAINING_PHASES, Stage, get_stage_config
 from bucky.envs.bucky_single import BuckySingleEnv
 from bucky.envs.bucky_selfplay import BuckySelfPlayEnv
 
 
-def make_env(stage: str, domain_rand: bool, reward_config=None):
-    self_play = stage == Stage.SELF_PLAY_1V1.value
+def make_env(stage: str, domain_rand: bool, reward_config=None, env_wrapper: str | None = None):
+    # Any opponent-bearing stage runs in the self-play env (the static-obstacle drill freezes the
+    # opponent internally; true self-play swaps in learned snapshots — see run_phase).
+    self_play = get_stage_config(stage).opponent_present
 
     def _init():
         if self_play:
-            return BuckySelfPlayEnv(stage=stage, domain_rand=domain_rand,
-                                    reward_config=reward_config)
-        return BuckySingleEnv(stage=stage, domain_rand=domain_rand,
-                              reward_config=reward_config)
+            env = BuckySelfPlayEnv(stage=stage, domain_rand=domain_rand,
+                                   reward_config=reward_config)
+        else:
+            env = BuckySingleEnv(stage=stage, domain_rand=domain_rand,
+                                 reward_config=reward_config)
+        # Optional per-algo env transform: discrete action set (DQN) or residual-on-controller
+        # (the fuzzy+RL hybrid). Continuous algos leave the native Box(4) env unchanged.
+        if env_wrapper == "discrete":
+            from bucky.envs.discrete_wrapper import DiscreteActionWrapper
+            env = DiscreteActionWrapper(env)
+        elif env_wrapper == "residual":
+            from bucky.envs.residual_wrapper import ResidualActionWrapper
+            env = ResidualActionWrapper(env)
+        return env
     return _init
 
 
@@ -147,6 +159,13 @@ def main() -> None:
     net_arch = cfg.get("net_arch", [64, 64])
     reward_config = RewardConfig.from_dict(cfg.get("reward_weights"))
 
+    # Which learning algorithm to train. PPO is the default and reproduces the historical
+    # behaviour exactly; other algos plug in via the registry. ``algo_params`` carries any
+    # algo-specific knobs (merged over ``hyperparams`` so PPO's config is unchanged).
+    algo = cfg.get("algo", "ppo")
+    algo_spec = registry.get_spec(algo)   # fail fast on an unknown algo
+    algo_params = {**hyperparams, **cfg.get("algo_params", {})}
+
     # Resolve n_envs only if neither the flag nor the config set it: match rollout
     # parallelism to the host's core count (clamped so a 2-core VPS or a 64-core box
     # both land somewhere sane). Beyond ~32 the SubprocVecEnv IPC overhead outweighs
@@ -213,16 +232,21 @@ def main() -> None:
         """Train one curriculum stage; return (model, phase_ckpt_path). Reused by the single-stage
         path and by FULL_TRAINING. ``prev_model`` continues an in-memory model when the obs space
         matches; when it grew (single→self-play) the weights are expanded from ``prev_ckpt_path``."""
-        self_play = stage == Stage.SELF_PLAY_1V1.value
+        stage_cfg = get_stage_config(stage)
+        self_play = stage_cfg.opponent_present
+        # Only TRUE self-play swaps in learned opponent snapshots; the static-obstacle drill keeps a
+        # frozen (passive) defender, so it must skip the snapshot/pool machinery below.
+        learned_opponent = self_play and not stage_cfg.static_opponent
         # Self-play runs in-process (DummyVecEnv: torch loaded once, fits an 8 GB host); single-agent
         # stages keep SubprocVecEnv for cheap parallelism.
         vec_cls = DummyVecEnv if self_play else SubprocVecEnv
+        wrapper = algo_spec.env_wrapper
         train_env = make_vec_env(
-            make_env(stage, domain_rand, reward_config=reward_config),
+            make_env(stage, domain_rand, reward_config=reward_config, env_wrapper=wrapper),
             n_envs=args.n_envs, seed=args.seed, vec_env_cls=vec_cls,
         )
         eval_env = make_vec_env(
-            make_env(stage, domain_rand=False, reward_config=reward_config),
+            make_env(stage, domain_rand=False, reward_config=reward_config, env_wrapper=wrapper),
             n_envs=1, seed=args.seed + 1000, vec_env_cls=vec_cls,
         )
 
@@ -237,14 +261,9 @@ def main() -> None:
         ent_coef = stage_ent_coef if cfg_ent in (None, 0.01) else cfg_ent
 
         def build_fresh_model():
-            return PPO(
-                policy="MlpPolicy", env=train_env, verbose=1, tensorboard_log=log_dir, seed=args.seed,
-                learning_rate=hp("learning_rate", 3e-4), n_steps=hp("n_steps", 1024),
-                batch_size=hp("batch_size", 512), n_epochs=hp("n_epochs", 10),
-                gamma=hp("gamma", 0.99), gae_lambda=hp("gae_lambda", 0.95),
-                clip_range=hp("clip_range", 0.2), ent_coef=ent_coef,
-                vf_coef=hp("vf_coef", 0.5), max_grad_norm=hp("max_grad_norm", 0.5),
-                policy_kwargs={"net_arch": list(net_arch)}, device=device,
+            return algo_spec.build(
+                env=train_env, params=algo_params, net_arch=net_arch, seed=args.seed,
+                device=device, tensorboard_log=log_dir, ent_coef=ent_coef,
             )
 
         if prev_model is None and args.resume_from:
@@ -252,11 +271,11 @@ def main() -> None:
             # the obs width grew (35→39); fatal on any other mismatch.
             print(f"Resuming from {args.resume_from}")
             try:
-                model = PPO.load(args.resume_from, env=train_env, tensorboard_log=log_dir, device=device)
+                model = algo_spec.load(args.resume_from, env=train_env, tensorboard_log=log_dir, device=device)
             except ValueError as e:
                 if "spaces do not match" not in str(e):
                     raise
-                old_obs = PPO.load(args.resume_from, device=device).observation_space.shape[0]
+                old_obs = algo_spec.load(args.resume_from, device=device).observation_space.shape[0]
                 new_obs = train_env.observation_space.shape[0]
                 if old_obs < new_obs:
                     print(f"  obs grew {old_obs}→{new_obs}: expanding input layer (curriculum transfer).")
@@ -301,18 +320,45 @@ def main() -> None:
                                        LiveVizCallback(stream, stage=stage, domain_rand=False))
 
         # Self-play bootstrap: freeze the policy as the initial opponent, then refresh it periodically.
-        if self_play:
+        # Skipped for the static-obstacle drill, whose defender stays frozen/passive, and for algos
+        # that can't export a numpy actor opponent (e.g. DQN) — those train against the env's default.
+        if learned_opponent and algo_spec.supports_selfplay:
             from bucky.callbacks import SelfPlaySnapshotCallback
             from bucky.selfplay import export_policy_npz
             pool_size = int(cfg.get("opponent_pool_size", 5))
+            # Fixed external opponents to train AGAINST (config: run names → their opponent_snapshot.npz).
+            # Only 43-dim (current self-play obs) npz are usable — the opponent runs in pure numpy with
+            # no obs projection. The learner faces these strong models every episode and learns to beat
+            # them, not just past copies of itself.
+            from bucky.selfplay import MATCH_COMPATIBLE_OBS_DIMS
+            fixed = []
+            for name in cfg.get("extra_opponents", []) or []:
+                p = name if name.endswith(".npz") else f"checkpoints/{name}/opponent_snapshot.npz"
+                if os.path.isfile(p):
+                    try:
+                        import numpy as _np
+                        dim = int(_np.load(p)["h0_W"].shape[1])
+                        # Accept any projectable width — the NumpyOpponent self-projects the 43-dim
+                        # obs down to a legacy-dim policy (39/27/22), so older strong models can pool.
+                        if dim in MATCH_COMPATIBLE_OBS_DIMS:
+                            fixed.append(p)
+                        else:
+                            print(f"  skip extra opponent {p}: obs-dim {dim} not projectable")
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  skip extra opponent {p}: {e}")
+                else:
+                    print(f"  skip extra opponent {p}: missing")
+            if fixed:
+                print(f"Self-play opponent pool seeded with {len(fixed)} fixed external model(s): {fixed}")
             model.save(snapshot_base)
             export_policy_npz(model, snapshot_npz)
             seed_npz = f"{snapshot_base}_0.npz"
             export_policy_npz(model, seed_npz)
-            train_env.env_method("set_opponent_pool", [seed_npz])
-            eval_env.env_method("set_opponent_pool", [seed_npz])
+            train_env.env_method("set_opponent_pool", fixed + [seed_npz])
+            eval_env.env_method("set_opponent_pool", fixed + [seed_npz])
             extra_callbacks.append(
-                SelfPlaySnapshotCallback(snapshot_base, every=max(50_000 // args.n_envs, 1), pool_size=pool_size)
+                SelfPlaySnapshotCallback(snapshot_base, every=max(50_000 // args.n_envs, 1),
+                                         pool_size=pool_size, fixed_opponents=fixed)
             )
 
         callbacks = [

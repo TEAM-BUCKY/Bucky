@@ -57,6 +57,9 @@ export interface SimFrame {
 	/** Kicker charge state, 1 = ready / 0 = recharging (match frames only). */
 	kick_ready_a?: number;
 	kick_ready_b?: number;
+	/** True on the step the kicker fired — drives the field kick burst FX (match frames). */
+	kicked_a?: boolean;
+	kicked_b?: boolean;
 	reward_terms: RewardTerms;
 	reward_total?: number;
 	obs: number[];
@@ -187,6 +190,10 @@ export interface Hyperparams {
 
 export interface LaunchConfig {
 	stage: string;
+	/** Learning algorithm (default 'ppo'); see bucky.algos.registry for the full set. */
+	algo?: string;
+	/** Algo-specific hyperparameters (merged over `hyperparams`). */
+	algo_params?: Record<string, number | string>;
 	/** FULL_TRAINING only: per-phase budget fractions (APPROACH / PUSH / SELF_PLAY). */
 	full_training_split?: number[];
 	timesteps: number;
@@ -283,6 +290,52 @@ export interface ModelInfo {
 	has_meta: boolean;
 	config?: Record<string, unknown> | null;
 	checkpoints: ModelCheckpoint[];
+}
+
+// ── competition brackets (round-robin tournaments) ─────────────────────────────
+export interface TournamentStanding {
+	label: string;
+	played: number;
+	wins: number;
+	draws: number;
+	losses: number;
+	goals_for: number;
+	goals_against: number;
+	goal_diff: number;
+	points: number;
+	elo: number;
+	kicks_per_match: number;
+}
+
+export interface TournamentPairing {
+	a: string;
+	b: string;
+	goals_a: number;
+	goals_b: number;
+	wins_a: number;
+	wins_b: number;
+	draws: number;
+	matches: number;
+}
+
+export interface TournamentState {
+	id: string;
+	created_at: number;
+	created_by: string | null;
+	status: 'running' | 'done' | 'stopped' | 'error';
+	config: {
+		entrants: { label: string; path: string }[];
+		matches_per_pairing: number;
+		seed: number;
+		max_steps: number;
+	};
+	standings: {
+		standings: TournamentStanding[];
+		pairings: TournamentPairing[];
+		complete: boolean;
+	} | null;
+	progress: { match: number; total: number; pairing: string } | null;
+	error?: string;
 }
 
 export interface MetricPoint {
@@ -431,6 +484,8 @@ class SimulationState {
 	evalSummary = $state<EvalSummary | null>(null);
 	/** Server-reported eval lifecycle ({phase, running}). */
 	evalStatus = $state<{ phase?: string; running: boolean }>({ running: false });
+	/** Latest competition bracket (round-robin) state, streamed as `tournament_status`. */
+	tournament = $state<TournamentState | null>(null);
 	/** Last error from a start/stop eval action. */
 	evalError = $state<string | null>(null);
 	/** Live playback-speed multiplier for the running eval (1.0 = real time). */
@@ -667,6 +722,43 @@ class SimulationState {
 			seed: config.seed,
 			manual_red: config.manualRed ?? false
 		});
+	}
+
+	/** Launch a round-robin competition bracket. Returns the tournament id, or null on failure.
+	 * Standings then stream in as `tournament_status` frames (see {@link tournament}). */
+	async launchTournament(config: {
+		entrants: { run: string; checkpoint?: string; label?: string }[];
+		matchesPerPairing: number;
+		seed: number;
+		maxSteps: number;
+	}): Promise<string | null> {
+		if (!this.hasCredentials) {
+			this.authError = 'Log in to run a tournament.';
+			return null;
+		}
+		const { httpBase } = apiBases();
+		try {
+			const res = await fetch(httpBase + '/tournament', {
+				...this._authInit({ 'Content-Type': 'application/json' }),
+				method: 'POST',
+				body: JSON.stringify({
+					entrants: config.entrants,
+					matches_per_pairing: config.matchesPerPairing,
+					seed: config.seed,
+					max_steps: config.maxSteps
+				})
+			});
+			if (!res.ok) return null;
+			const j = await res.json();
+			return (j?.id as string) ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Ask a running tournament to stop after its current match. */
+	async stopTournament(id: string) {
+		await this._control(`/tournament/${id}/stop`, {});
 	}
 
 	/** Launch an evaluation drill. Returns the eval run name (so the page can filter the
@@ -1248,6 +1340,9 @@ class SimulationState {
 				break;
 			case 'models':
 				if (Array.isArray(data.models)) this.models = data.models as ModelInfo[];
+				break;
+			case 'tournament_status':
+				this.tournament = (data.tournament as TournamentState | null) ?? null;
 				break;
 			case 'devices':
 				if (Array.isArray(data.devices)) this.devices = data.devices as DeviceInfo[];

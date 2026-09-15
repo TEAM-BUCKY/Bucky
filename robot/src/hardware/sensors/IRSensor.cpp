@@ -1,9 +1,10 @@
-#include "sensors/IRSensor.h"
+#include "hardware/sensors/IRSensor.h"
 
 #include "optimizations/optimizations.h"
-#include "io/dma/DMA.h"
-#include "io/adc/ADC.h"
 #include "optimizations/bitboard.h"
+
+#include "hardware/io/dma/DMA.h"
+#include "hardware/io/adc/ADC.h"
 
 static FORCE_INLINE void gpio_set_af(GPIO_TypeDef* gpio, const uint8_t pin, const uint8_t af) {
     writeField(gpio->MODER, 3U, pin * 2, 2U);

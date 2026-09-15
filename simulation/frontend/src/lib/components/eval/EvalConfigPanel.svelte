@@ -6,6 +6,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import Combobox from '$lib/components/ui/combobox/Combobox.svelte';
+	import ModelVersionPicker from '$lib/components/simulation/ModelVersionPicker.svelte';
 	import { Play, Square } from '@lucide/svelte';
 
 	// Drills = curriculum stages, each a concrete eval scenario.
@@ -22,21 +23,6 @@
 	let nEpisodes = $state('10');
 	let seed = $state('999');
 	let deterministic = $state(true);
-
-	const runItems = $derived(simulation.runs.map((r) => ({ value: r.run, label: r.run })));
-	const checkpoints = $derived(simulation.runs.find((r) => r.run === run)?.checkpoints ?? []);
-	const checkpointItems = $derived(checkpoints.map((c) => ({ value: c, label: c })));
-
-	// Keep the checkpoint valid when the run changes; default to a sensible file.
-	$effect(() => {
-		if (run && !checkpoints.includes(checkpoint)) {
-			checkpoint =
-				checkpoints.find((c) => c === 'final_model.zip') ??
-				checkpoints.find((c) => c === 'best_model.zip') ??
-				checkpoints[0] ??
-				'';
-		}
-	});
 
 	const running = $derived(simulation.evalStatus.running);
 	const canStart = $derived(!!run && !!checkpoint && !running && simulation.hasCredentials);
@@ -62,14 +48,7 @@
 	<Card.Content class="flex flex-col gap-3">
 		<div class="flex flex-col gap-1.5">
 			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Model</Label>
-			<Combobox bind:value={run} items={runItems} size="sm" placeholder="Select a run…"
-				searchPlaceholder="Search runs…" disabled={running} />
-		</div>
-
-		<div class="flex flex-col gap-1.5">
-			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</Label>
-			<Combobox bind:value={checkpoint} items={checkpointItems} size="sm" placeholder="Select a checkpoint…"
-				searchPlaceholder="Search checkpoints…" disabled={running || !run} />
+			<ModelVersionPicker bind:run bind:checkpoint size="sm" disabled={running} />
 		</div>
 
 		<div class="flex flex-col gap-1.5">

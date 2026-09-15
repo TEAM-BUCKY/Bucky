@@ -1,5 +1,5 @@
 #include "Sonar.h"
-#include "io/gpio/gpio.h"
+#include "hardware/io/gpio/gpio.h"
 #include <HardwareTimer.h>
 
 static GpioPin echoGpio[SONAR_COUNT];

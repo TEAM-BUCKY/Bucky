@@ -22,6 +22,24 @@ export const STAGES = [
 	{ value: 'SELF_PLAY_1V1', label: 'Self-play 1v1' }
 ];
 
+// Learning algorithms trainable through the UI (the registry algos in bucky.algos). Other model
+// types (classical controller, tabular, imitation, supervised, offline, evolutionary) are trained
+// via their dedicated CLI scripts and don't launch through this train form.
+export const ALGOS = [
+	{ value: 'ppo', label: 'PPO (default)' },
+	{ value: 'a2c', label: 'A2C' },
+	{ value: 'sac', label: 'SAC' },
+	{ value: 'td3', label: 'TD3' },
+	{ value: 'ddpg', label: 'DDPG' },
+	{ value: 'tqc', label: 'TQC (contrib)' },
+	{ value: 'trpo', label: 'TRPO (contrib)' },
+	{ value: 'ars', label: 'ARS (contrib)' },
+	{ value: 'dqn', label: 'DQN (discrete)' },
+	{ value: 'qrdqn', label: 'QR-DQN (discrete)' },
+	{ value: 'residual_sac', label: 'Residual SAC (hybrid)' },
+	{ value: 'residual_ppo', label: 'Residual PPO (hybrid)' }
+];
+
 export const STOP_TABS: { value: StopKind; label: string }[] = [
 	{ value: 'steps', label: 'Steps' },
 	{ value: 'duration', label: 'Duration' },
@@ -142,6 +160,8 @@ export class RunConfig {
 	mode = $state<'train' | 'match'>('train');
 
 	// ── basics ─────────────────────────────────────────────────────────────────
+	/** Learning algorithm (registry key in bucky.algos). */
+	algo = $state('ppo');
 	stage = $state('FULL_TRAINING');
 	/** FULL_TRAINING per-phase budget split % [APPROACH, PUSH, AIM_AND_KICK, SELF_PLAY] (sums to 100). */
 	fullSplit = $state<number[]>([10, 20, 25, 45]);
@@ -250,6 +270,7 @@ export class RunConfig {
 	trainPayload(): LaunchConfig {
 		const p: LaunchConfig = {
 			stage: this.stage,
+			algo: this.algo,
 			timesteps: this.timesteps,
 			n_envs: this.n_envs,
 			seed: this.seed,
@@ -327,6 +348,9 @@ export class RunConfig {
 	}
 
 	// ── chip summaries ─────────────────────────────────────────────────────────
+	get algoSummary(): string {
+		return ALGOS.find((a) => a.value === this.algo)?.label ?? this.algo;
+	}
 	get stageSummary(): string {
 		const label = STAGES.find((s) => s.value === this.stage)?.label ?? this.stage;
 		return this.stage === 'FULL_TRAINING' ? `${label} · ${this.fullSplit.join('/')}` : label;
@@ -368,7 +392,7 @@ export class RunConfig {
 		return fmtTime(this.startEpoch);
 	}
 	get advancedSummary(): string {
-		return `arch ${this.parseNetArch().join('·') || '—'} · PPO`;
+		return `arch ${this.parseNetArch().join('·') || '—'} · ${this.algo.toUpperCase()}`;
 	}
 	get rewardsSummary(): string {
 		return `${rewardState.fields.length} weights`;

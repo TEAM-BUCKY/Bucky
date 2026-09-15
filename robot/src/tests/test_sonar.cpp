@@ -1,6 +1,5 @@
 #include "tests.h"
 #include "debug.h"
-#include <Arduino.h>
 
 void testSonar(const TestContext& ctx) {
     DBG_PRINTLN("=== Sonar Test ===");

@@ -195,7 +195,6 @@ void MotorDriver::driveDegrees(const float degrees, const float scale, const flo
 
 constexpr float SIN_60 = 0.8660254037844f;
 
-// `radians` is expected to be in radians; `driveDegrees` converts before calling this.
 void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
     const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
     const float scaledRotation = rotation * rotationScale;

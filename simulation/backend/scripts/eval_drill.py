@@ -246,7 +246,10 @@ def main() -> None:
             captured["state"] = state
             captured["terms"] = terms
 
-        env = BuckySingleEnv(stage=stage, domain_rand=False, viz_callback=capture)
+        # Let predicted goals play out to the real net in eval so the viz shows the ball scoring
+        # instead of cutting the episode at the kick (which reads as "predicted a goal, didn't score").
+        env = BuckySingleEnv(stage=stage, domain_rand=False, viz_callback=capture,
+                             terminate_on_predicted_goal=False)
         opponent_label = None
 
         def to_full(obs):

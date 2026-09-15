@@ -46,12 +46,18 @@ class BuckySingleEnv(gym.Env):
         domain_rand: bool = True,
         reward_config: RewardConfig | None = None,
         viz_callback=None,
+        terminate_on_predicted_goal: bool = True,
     ) -> None:
         super().__init__()
         self._stage_cfg: StageConfig = get_stage_config(stage)
         self._rand_cfg = DomainRandomConfig(enabled=domain_rand)
         self._reward_cfg = reward_config or RewardConfig()
         self._viz_callback = viz_callback
+        # Training accelerator: end the episode the instant a kicked shot is *predicted* to score
+        # (paying goal-level credit early). Great for training, but in eval/viz it ends the episode
+        # at the kick so the ball is never shown reaching the net — looking like "predicted a goal
+        # but didn't score". Eval sets this False to let the shot play out to the real goal.
+        self._terminate_on_predicted_goal = terminate_on_predicted_goal
 
         self.observation_space = spaces.Box(OBS_LOW, OBS_HIGH, dtype=np.float32)
         self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
@@ -210,7 +216,8 @@ class BuckySingleEnv(gym.Env):
         reward = self._filter_reward(reward_terms)
         self._prev_action = action.copy()
 
-        terminated = bool(info["goal_scored"] or info["robot_fully_out"] or predicted_goal)
+        terminated = bool(info["goal_scored"] or info["robot_fully_out"]
+                          or (predicted_goal and self._terminate_on_predicted_goal))
         self._step_count += 1
         truncated = self._step_count >= self._stage_cfg.max_episode_steps
 
@@ -272,14 +279,27 @@ class BuckySingleEnv(gym.Env):
                               rng.uniform(-ymax, ymax)])
             heading = rng.uniform(-np.pi, np.pi)
         elif mode == "kick_blend":
-            # Ball scattered across the centre/attacking region.
-            ball = np.array([rng.uniform(-0.1, 0.5), rng.uniform(-0.45, 0.45)])
-            to_goal = field.OPP_GOAL - ball
-            base = np.arctan2(-to_goal[1], -to_goal[0])           # direction ball → away-from-goal
-            ang = base + rng.uniform(-np.deg2rad(50), np.deg2rad(50))
-            d = rng.uniform(0.16, 0.7)                            # close aim shot ↔ mid-range strike
-            robot = ball + d * np.array([np.cos(ang), np.sin(ang)])
-            heading = rng.uniform(-np.pi, np.pi)
+            if rng.random() < 0.33:
+                # Tight-corner / dead-angle finish: the ball deep in the attacking third, hard against
+                # a side wall and PAST the goal mouth laterally — the exact "stuck in the corner"
+                # spot. The robot starts right behind it (as if it dribbled it there), so it must learn
+                # to pull the ball back to a shootable angle or thread a near-post shot, instead of
+                # camping. predicted_goal credits whichever works (incl. a bank off the side wall).
+                side = 1.0 if rng.random() < 0.5 else -1.0
+                ball = np.array([rng.uniform(0.45, 0.78), side * rng.uniform(0.30, 0.50)])
+                to_goal = field.OPP_GOAL - ball
+                gdir = to_goal / max(float(np.linalg.norm(to_goal)), 1e-6)
+                robot = ball - rng.uniform(0.15, 0.30) * gdir     # behind the ball (toward the corner)
+                heading = float(np.arctan2(gdir[1], gdir[0])) + rng.uniform(-0.6, 0.6)
+            else:
+                # Ball scattered across the centre/attacking region.
+                ball = np.array([rng.uniform(-0.1, 0.5), rng.uniform(-0.45, 0.45)])
+                to_goal = field.OPP_GOAL - ball
+                base = np.arctan2(-to_goal[1], -to_goal[0])       # direction ball → away-from-goal
+                ang = base + rng.uniform(-np.deg2rad(50), np.deg2rad(50))
+                d = rng.uniform(0.16, 0.7)                        # close aim shot ↔ mid-range strike
+                robot = ball + d * np.array([np.cos(ang), np.sin(ang)])
+                heading = rng.uniform(-np.pi, np.pi)
         else:
             self._spawn_ball()
             return

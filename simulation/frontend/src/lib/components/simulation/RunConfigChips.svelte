@@ -2,6 +2,7 @@
 	import { simulation } from '$lib/state/simulation.svelte.js';
 	import {
 		RunConfig,
+		ALGOS,
 		STAGES,
 		STOP_TABS,
 		HP_FIELDS,
@@ -14,6 +15,7 @@
 	import Combobox from '$lib/components/ui/combobox/Combobox.svelte';
 	import ConfigChip from '$lib/components/ui/config-chip/ConfigChip.svelte';
 	import DateTimePicker from './DateTimePicker.svelte';
+	import ModelVersionPicker from './ModelVersionPicker.svelte';
 	import SplitBar from './SplitBar.svelte';
 
 	let { config }: { config: RunConfig } = $props();
@@ -26,8 +28,6 @@
 		cks.map((c) => ({ value: c, label: c.replace(/\.zip$/, '') }));
 
 	const srcCheckpoints = $derived(runs.find((r) => r.run === config.srcRun)?.checkpoints ?? []);
-	const ckptsA = $derived(runs.find((r) => r.run === config.runA)?.checkpoints ?? []);
-	const ckptsB = $derived(runs.find((r) => r.run === config.runB)?.checkpoints ?? []);
 
 	const pickFinal = (cks: string[]) => cks.find((c) => c === 'final_model.zip') ?? cks[0] ?? '';
 
@@ -41,17 +41,10 @@
 		if (!srcCheckpoints.includes(config.srcCkpt)) config.srcCkpt = pickFinal(srcCheckpoints);
 	});
 	$effect(() => {
+		// Seed sensible default runs; ModelVersionPicker then resolves version + checkpoint.
 		if (config.mode !== 'match' || !hasRuns) return;
 		if (!runs.some((r) => r.run === config.runA)) config.runA = runs[0].run;
 		if (!runs.some((r) => r.run === config.runB)) config.runB = runs[runs.length - 1].run;
-	});
-	$effect(() => {
-		if (config.mode !== 'match') return;
-		if (!ckptsA.includes(config.ckptA)) config.ckptA = pickFinal(ckptsA);
-	});
-	$effect(() => {
-		if (config.mode !== 'match') return;
-		if (!ckptsB.includes(config.ckptB)) config.ckptB = pickFinal(ckptsB);
 	});
 
 	const TARGET_TABS = [
@@ -118,6 +111,22 @@
 
 {#if config.mode === 'train'}
 	<div class="grid grid-cols-2 gap-2">
+		<!-- Algorithm -->
+		<ConfigChip label="Algorithm" summary={config.algoSummary} title="Learning algorithm">
+			{#snippet body()}
+				<div class="flex flex-col gap-1">
+					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+						Algorithm
+					</Label>
+					<Combobox bind:value={config.algo} items={ALGOS} searchPlaceholder="Search algorithms…" />
+					<p class="font-mono text-[10px] text-muted-foreground">
+						Non-RL model types (classical, tabular, imitation, offline, evolutionary) train via
+						their CLI scripts.
+					</p>
+				</div>
+			{/snippet}
+		</ConfigChip>
+
 		<!-- Stage -->
 		<ConfigChip label="Stage" summary={config.stageSummary}>
 			{#snippet body()}
@@ -423,8 +432,7 @@
 					<Label class="font-mono text-[10px] font-semibold uppercase tracking-wider" style="color:#3c78dc">
 						Bot A network
 					</Label>
-					<Combobox bind:value={config.runA} items={runItems} size="sm" searchPlaceholder="Search runs…" />
-					<Combobox bind:value={config.ckptA} items={ckptItems(ckptsA)} size="sm" searchPlaceholder="Search checkpoints…" />
+					<ModelVersionPicker bind:run={config.runA} bind:checkpoint={config.ckptA} size="sm" />
 				{/snippet}
 			</ConfigChip>
 
@@ -433,8 +441,7 @@
 					<Label class="font-mono text-[10px] font-semibold uppercase tracking-wider" style="color:#dc3c3c">
 						Bot B network
 					</Label>
-					<Combobox bind:value={config.runB} items={runItems} size="sm" searchPlaceholder="Search runs…" />
-					<Combobox bind:value={config.ckptB} items={ckptItems(ckptsB)} size="sm" searchPlaceholder="Search checkpoints…" />
+					<ModelVersionPicker bind:run={config.runB} bind:checkpoint={config.ckptB} size="sm" />
 				{/snippet}
 			</ConfigChip>
 

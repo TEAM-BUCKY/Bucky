@@ -6,7 +6,7 @@
 	import ModelCreateForm from '$lib/components/overview/ModelCreateForm.svelte';
 	import DevicePanel from '$lib/components/overview/DevicePanel.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Boxes, Plus, Activity, HardDrive } from '@lucide/svelte';
+	import { Boxes, Plus, Activity, HardDrive, Trophy } from '@lucide/svelte';
 
 	// The overview panel rides the same public read-only stream as /viz (models,
 	// runs, status). Control actions (create/delete/download) need login.
@@ -46,6 +46,9 @@
 			</span>
 		</div>
 		<div class="flex items-center gap-2">
+			<Button href="/bracket" variant="ghost" size="xs" class="font-mono text-[11px]">
+				<Trophy class="size-3" />Competition
+			</Button>
 			<Button href="/viz" variant="ghost" size="xs" class="font-mono text-[11px]">
 				<Activity class="size-3" />Live viz
 			</Button>

@@ -15,6 +15,10 @@ from bucky.physics.backend import PhysicsState
 from bucky.physics.python_backend import MAX_LINEAR
 
 CAPTURE_RADIUS = 0.14
+OWN_GOAL = -OPP_GOAL            # robot A defends the -x goal
+DEFENSE_LANE_HALF = 0.35       # m; perpendicular half-width of the "between ball and own goal" lane
+QUICK_SHOT_WINDOW = 30.0       # steps (~0.6 s); a scoring shot fired within this of engaging the
+                               # ball counts as a fast grab-and-shoot (full bonus at dwell 0)
 # Spin penalty only kicks in above this turn rate. Kept at ~50% of the drivetrain's real
 # max turn rate (physics.MAX_OMEGA ≈ 58 rad/s) so ordinary aiming turns are free and only
 # pathological spinning is punished — same fraction this used under the old 6 rad/s cap.
@@ -67,17 +71,34 @@ class RewardConfig:
     w_ball_to_goal: float = 5.0
 
     w_possession: float = 4.0
-    w_front_align: float = 8.5
+    # Lowered 8.5→5.0: front_alignment is a per-step lineup nudge and was the single dominant
+    # reward (~+500/ep in self-play), so the policy farmed "line up behind the ball" instead of
+    # optimising precise *scoring*. Cut so the accuracy-conditioned kick/goal rewards dominate.
+    w_front_align: float = 5.0
     # Per-step penalty for loitering near the ball while NOT lined up to drive/kick it at the goal
     # ("when aiming is possible, you should be aimed"). Scales with misalignment and closeness.
     w_front_misalign: float = -2.0
+    # Defensive positioning: reward for being goal-side of the ball (between it and our own goal,
+    # on the blocking line) while the ball is in our defensive half — pulls the learner back to
+    # defend instead of always chasing forward (self-play only; single drills have no defender).
+    w_defense_position: float = 3.0
+    # Anti-spray: penalty for firing the kicker in the attacking half when the shot is NOT goal-bound
+    # (a wasted shot). Defensive-half clearances are exempt. -3.0 over-suppressed attacking and, with
+    # extended training, helped drive a passive mutual-stalemate (run#7: 0.6 kicks/ep). Eased to -1.0
+    # so the kicker stays worth firing while still discouraging pure spray.
+    w_wasted_kick: float = -1.0
 
     possession_decay_steps: float = 40.0
 
-    w_goal: float = 55.0
-    w_goal_against: float = -100.0
+    # Scoring raised 55→75 toward symmetry with the -100 conceding penalty: at 55 vs -100 the agent
+    # played risk-averse (run#5: concedes 2.0 but only scores 0.67), so push offence without making
+    # conceding cheap.
+    w_goal: float = 75.0
+    w_goal_against: float = -70.0   # -100→-70: at -100 vs +75 scoring the policy plays for the draw
+                                    # (run#19: fewest losses but 13 draws / only 52 GF). Lighter concede
+                                    # penalty + strong scoring → play to WIN (draws→wins = more points).
     w_in_goal: float = -4.0
-    w_predicted_goal: float = 55.0
+    w_predicted_goal: float = 75.0
     predicted_goal_horizon_steps: int = 75
 
     w_out_of_bounds: float = -50.0
@@ -88,17 +109,42 @@ class RewardConfig:
     w_play_oob_ball: float = -0.15
     w_stuck: float = -0.1
 
-    w_steal: float = 10.0
+    w_steal: float = 10.0       # reverted 18→10: user reports conceding is rare, so defense isn't the
+                                # gap; the steal boost risked a give-and-resteal kickoff exploit.
     w_blocked_shot: float = 15
-    w_kick_goal: float = 12.0
-    w_bank_shot: float = 6.0
+    w_kick_goal: float = 18.0   # 12→18: reward real (non-predicted) kicked goals more, part of the
+                                # run#6 offence push.
+    w_bank_shot: float = 20.0   # 6→15→20: actively reward banking a shot off a wall into the goal
+                                # (e.g. around a defender) on top of predicted_goal — user wants more banks.
     w_risky_shot: float = 2.0
     w_kick_lost: float = -8.0
     w_kick_at_opponent: float = -5.0
     w_shot_out_of_bounds: float = -12.0
+    # Anti-corner-camp: per-step penalty for the ball sitting in the dead attacking corner (deep past
+    # the goal mouth, against a side wall — no scoring angle). Stops the robot dribbling it there and
+    # getting stuck instead of pulling back for a shot.
+    w_corner_camp: float = -0.4
 
-    w_kick_attempt: float = 0.5
-    w_kick_power_to_goal: float = 4
+    w_kick_attempt: float = 2.0   # 0.5→2.0: reward TAKING an on-target shot (one-time, gated on the
+                                  # shot entering the mouth) so the robot actually shoots — incl.
+                                  # long-range open-goal shots — instead of dribbling the ball in.
+    # Strengthened 4→8→14 and squared (see compute): the main *accuracy-conditioned*, one-time
+    # (non-farmable) shot reward. Raised again because self-play (front_alignment stripped) finishes
+    # open goals poorly — this is the aiming gradient that survives into match play.
+    w_kick_power_to_goal: float = 14
+    # Continuous aiming gradient: like kick_power_to_goal but NOT gated on the shot already being on
+    # target, so a wide shot earns partial reward that grows toward the goal centre — the smooth
+    # "aim closer" signal the gated rewards can't give (they pay a miss zero). One-time per kick.
+    w_kick_aim: float = 4.0
+    # Shot-ANGLE quality: bonus for kicking from a position with a WIDE view of the goal mouth
+    # (central) vs a narrow corner angle. One-time per kick (non-farmable). Targets v23's #1 weakness
+    # — funnelling attacks into the corner (2% conversion) and firing junk instead of carrying central
+    # (60% conversion). Pushes it to reposition to a good angle before shooting.
+    w_kick_angle: float = 8.0
+    # Quick-release: bonus for a SCORING shot (direct or banked) fired fast after grabbing the ball
+    # (low dwell). Rewards the snatch-and-immediately-bank finish that beats the defender, instead of
+    # dribbling/holding first. Scales from full (instant) to 0 at QUICK_SHOT_WINDOW dwell.
+    w_quick_shot: float = 8.0
 
     # Per-step on-target-shot shaping. Kept modest: it accumulates every step a struck ball is in
     # flight, so over a 1500-step self-play episode even the now-accuracy-gated term can dwarf the
@@ -133,6 +179,9 @@ class RewardTerms:
     possession: float = 0.0
     front_alignment: float = 0.0
     front_misalign: float = 0.0
+    defense_position: float = 0.0
+    wasted_kick: float = 0.0
+    corner_camp: float = 0.0
 
     goal: float = 0.0
     goal_against: float = 0.0
@@ -156,6 +205,9 @@ class RewardTerms:
     shot_out_of_bounds: float = 0.0
     kick_attempt: float = 0.0
     kick_power_to_goal: float = 0.0
+    kick_aim: float = 0.0
+    kick_angle: float = 0.0
+    quick_shot: float = 0.0
     shot_on_goal: float = 0.0
 
     time_penalty: float = 0.0
@@ -164,14 +216,16 @@ class RewardTerms:
     @property
     def total(self) -> float:
         return (self.approach + self.speed + self.ball_to_goal + self.possession +
-                self.front_alignment + self.front_misalign + self.goal + self.goal_against +
+                self.front_alignment + self.front_misalign + self.defense_position +
+                self.wasted_kick + self.corner_camp + self.goal + self.goal_against +
                 self.predicted_goal + self.in_goal +
                 self.out_of_bounds + self.lack_of_progress + self.defective +
                 self.spin + self.play_oob_ball + self.stuck +
                 self.steal + self.blocked_shot + self.kick_goal +
                 self.bank_shot + self.risky_shot + self.kick_lost +
                 self.kick_at_opponent + self.shot_out_of_bounds + self.kick_attempt +
-                self.kick_power_to_goal + self.shot_on_goal + self.time_penalty +
+                self.kick_power_to_goal + self.kick_aim + self.kick_angle + self.quick_shot +
+                self.shot_on_goal + self.time_penalty +
                 self.action_smoothness)
 
     def as_dict(self) -> dict[str, float]:
@@ -182,6 +236,9 @@ class RewardTerms:
             "possession": self.possession,
             "front_alignment": self.front_alignment,
             "front_misalign": self.front_misalign,
+            "defense_position": self.defense_position,
+            "wasted_kick": self.wasted_kick,
+            "corner_camp": self.corner_camp,
             "goal": self.goal,
             "goal_against": self.goal_against,
             "predicted_goal": self.predicted_goal,
@@ -202,6 +259,9 @@ class RewardTerms:
             "shot_out_of_bounds": self.shot_out_of_bounds,
             "kick_attempt": self.kick_attempt,
             "kick_power_to_goal": self.kick_power_to_goal,
+            "kick_aim": self.kick_aim,
+            "kick_angle": self.kick_angle,
+            "quick_shot": self.quick_shot,
             "shot_on_goal": self.shot_on_goal,
             "time_penalty": self.time_penalty,
             "action_smoothness": self.action_smoothness,
@@ -288,6 +348,23 @@ def compute_rewards(
         # rather than hover half-aimed and shoot wide.
         terms.front_misalign = config.w_front_misalign * (1.0 - aligned) * prox
 
+    # Defensive positioning (self-play): while the ball is in our defensive half, reward being
+    # goal-side of it — on the ball→own-goal line, between the ball and the goal (not in the net),
+    # scaled by how deep the threat is. Pulls the learner back to defend instead of ball-chasing.
+    if float(s1.ball_pos[0]) < 0.0 and not ball_out_raw:
+        to_owngoal = OWN_GOAL - s1.ball_pos
+        d_og = float(np.linalg.norm(to_owngoal))
+        if d_og > 1e-6:
+            gdir = to_owngoal / d_og
+            rel = s1.robot_pos - s1.ball_pos
+            along = float(np.dot(rel, gdir))                  # >0 → robot is goal-side of the ball
+            if along > 0.0:
+                lateral = float(np.linalg.norm(rel - along * gdir))
+                on_line = max(0.0, 1.0 - lateral / DEFENSE_LANE_HALF)
+                ahead = max(0.0, 1.0 - along / d_og)          # 0 once at/behind the goal line
+                depth = min(1.0, -float(s1.ball_pos[0]) / HALF_W)  # deeper threat → more reward
+                terms.defense_position = config.w_defense_position * on_line * ahead * depth
+
     if info.get("goal_scored", False):
         terms.goal = config.w_goal
 
@@ -298,6 +375,11 @@ def compute_rewards(
     # goal-level credit now, at the kick (see env step / predict_goal_by_rollout).
     if info.get("predicted_goal", False):
         terms.predicted_goal = config.w_predicted_goal
+        # Quick-release bonus: the same scoring shot, paid extra when fired FAST after engaging the
+        # ball (low dwell). predicted_goal already covers banks (rollout bounces) and avoids the
+        # defender (interception check), so this rewards the snatch-and-immediately-bank finish.
+        quickness = max(0.0, 1.0 - float(info.get("dwell_steps", 0.0)) / QUICK_SHOT_WINDOW)
+        terms.quick_shot = config.w_quick_shot * quickness
 
     # Heavy penalty for driving inside a goal box (either goal). Per-step, no termination.
     if robot_in_goal(s1.robot_pos):
@@ -355,7 +437,51 @@ def compute_rewards(
         if speed > 1e-6 and to_goal_norm > 1e-6:
             cos_to_goal = float(np.dot(s1.ball_vel / speed, to_goal / to_goal_norm))
             terms.kick_attempt = config.w_kick_attempt
-            terms.kick_power_to_goal = config.w_kick_power_to_goal * max(0.0, cos_to_goal)
+            # Square the goal-aim cosine so reward concentrates on shots aimed squarely at the goal
+            # centre — a shot clipping the mouth edge pays much less than a dead-centre strike.
+            terms.kick_power_to_goal = config.w_kick_power_to_goal * max(0.0, cos_to_goal) ** 2
+
+    # Continuous aiming gradient (one-time per kick → non-farmable): NOT gated on the shot already
+    # entering the mouth, so a wide shot earns partial reward that grows (cos²) as the aim nears the
+    # goal centre. This is the smooth "aim closer" signal the gated rewards above can't provide (they
+    # pay a miss zero), so it pulls off-target shots toward on-target. Attacking half only; not a
+    # shot straight into the opponent.
+    if info.get("kicked", False) and not kick_at_opponent and not ball_out_raw \
+            and float(s1.ball_pos[0]) > 0.0:
+        speed_k = float(np.linalg.norm(s1.ball_vel))
+        to_goal_k = OPP_GOAL - s1.ball_pos
+        n_k = float(np.linalg.norm(to_goal_k))
+        if speed_k > 1e-6 and n_k > 1e-6:
+            cos_k = float(np.dot(s1.ball_vel / speed_k, to_goal_k / n_k))
+            # cos³ (sharper than cos²): concentrates the gradient on well-aimed shots and pays a
+            # wild, near-sideways kick almost nothing — trims the wasted OOB shots run#12 still took.
+            terms.kick_aim = config.w_kick_aim * max(0.0, cos_k) ** 3
+        # Shot-ANGLE quality (one-time, non-farmable): how WIDE the goal mouth looks from the ball —
+        # large from a central position, tiny from the corner. Squared for a sharp central preference.
+        # Teaches the robot to carry the ball central before shooting instead of funnelling wide.
+        p1 = np.array([HALF_W, GOAL_HALF_WIDTH]); p2 = np.array([HALF_W, -GOAL_HALF_WIDTH])
+        v1 = p1 - s1.ball_pos; v2 = p2 - s1.ball_pos
+        nv1 = float(np.linalg.norm(v1)); nv2 = float(np.linalg.norm(v2))
+        if nv1 > 1e-6 and nv2 > 1e-6:
+            width = float(np.arccos(np.clip(np.dot(v1, v2) / (nv1 * nv2), -1.0, 1.0)))
+            terms.kick_angle = config.w_kick_angle * min(1.0, width) ** 2
+
+    # Anti-spray: a kick fired in the ATTACKING half whose shot is not goal-bound is a wasted shot —
+    # penalize it. Gated to the attacking half so defensive-half clearances aren't punished. This is
+    # the direct counter to the 16-kicks/ep, 7%-on-target self-play spray.
+    if info.get("kicked", False) and not ball_out_raw and float(s1.ball_pos[0]) > 0.0 \
+            and not _shot_enters_goal_mouth(s1.ball_pos, s1.ball_vel):
+        terms.wasted_kick = config.w_wasted_kick
+
+    # Anti-corner-camp: the ball deep in the attacking corner (past the mouth laterally, hard against
+    # a side wall) has no scoring angle — a dead spot the robot gets stuck dribbling into. Penalize it
+    # per step (only while the robot is right on the ball, i.e. it's the one keeping it there) so it
+    # pulls the ball back to a shootable position instead.
+    if not ball_out_raw and float(s1.ball_pos[0]) > 0.55 \
+            and abs(float(s1.ball_pos[1])) > GOAL_HALF_WIDTH + 0.08 \
+            and abs(float(s1.ball_pos[1])) > HALF_H - 0.18 \
+            and d_robot_ball_1 < CAPTURE_RADIUS + 0.06:
+        terms.corner_camp = config.w_corner_camp
 
     # Quick-shot shaping: reward a fast, *free* ball that is genuinely ON TARGET — its current
     # trajectory enters the goal mouth before crossing any white line (``_shot_enters_goal_mouth``,

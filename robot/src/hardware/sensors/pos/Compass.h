@@ -6,7 +6,7 @@
 #define BUCKY_COMPASS_H
 
 #include <Arduino.h>
-#include "io/i2c/I2CDMA.h"
+#include "hardware/io/i2c/I2CDMA.h"
 
 #define LIS2MDL_ADDR 0x1E
 #define LIS2MDL_WHO_AM_I_REG 0x4F

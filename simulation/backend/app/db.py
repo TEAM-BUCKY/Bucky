@@ -77,6 +77,19 @@ _MIGRATIONS: list[str] = [
     ALTER TABLE devices ADD COLUMN reported_cores      INTEGER;  -- worker os.cpu_count()
     ALTER TABLE devices ADD COLUMN reported_capacity   INTEGER;  -- worker recommended concurrency
     """,
+    # v3 — competition brackets: a round-robin tournament and its rolled-up standings.
+    """
+    CREATE TABLE IF NOT EXISTS tournaments (
+        id          TEXT PRIMARY KEY,
+        created_at  REAL NOT NULL,
+        created_by  TEXT,
+        status      TEXT NOT NULL,           -- running | done | stopped | error
+        config      TEXT NOT NULL,           -- JSON: entrants, matches_per_pairing, seed, max_steps
+        standings   TEXT,                    -- JSON: {standings, pairings, complete}
+        progress    TEXT                     -- JSON: {match, total, pairing}
+    );
+    CREATE INDEX IF NOT EXISTS idx_tournaments_created ON tournaments(created_at);
+    """,
 ]
 
 

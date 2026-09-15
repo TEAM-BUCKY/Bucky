@@ -159,6 +159,13 @@ class JobManager:
         self._dist: dict[str, dict] = {}
         self._dist_lock = asyncio.Lock()
 
+        # Competition brackets: live per-tournament state (id -> dict) + ids asked to stop.
+        # Tournaments run headless in-process (not as play.py subprocesses), so they neither
+        # consume local_slots nor appear in the training panel. Final standings persist to the
+        # `tournaments` table; live standings stream as `tournament_status` frames.
+        self._tournaments: dict[str, dict] = {}
+        self._tournament_stops: set[str] = set()
+
     @property
     def ingest_token(self) -> str:
         return self._settings.ingest_token
@@ -550,6 +557,8 @@ class JobManager:
             model_cfg = ModelConfig(
                 name=name or run_name,
                 version=version,
+                algo=cfg.get("algo") or "ppo",
+                algo_params=cfg.get("algo_params") or {},
                 stage=stage,
                 full_training_split=cfg.get("full_training_split"),
                 n_envs=n_envs,
@@ -1294,7 +1303,10 @@ class JobManager:
         model_cfg = ModelConfig(
             name=name or run_name,
             version=version,
+            algo=config.get("algo") or "ppo",
+            algo_params=config.get("algo_params") or {},
             stage=stage,
+            full_training_split=config.get("full_training_split"),
             n_envs=int(config.get("n_envs") or 16),
             seed=int(config.get("seed") or 0),
             domain_rand=True if dr is None else bool(dr),
@@ -1667,6 +1679,152 @@ class JobManager:
             return None
         path = self._base_dir / "checkpoints" / run / checkpoint
         return path if path.is_file() else None
+
+    # ── competition brackets (round-robin tournaments) ───────────────────────────
+    def _row_to_tournament(self, row) -> dict:
+        return {
+            "id": row["id"], "created_at": row["created_at"], "created_by": row["created_by"],
+            "status": row["status"], "config": json.loads(row["config"]),
+            "standings": json.loads(row["standings"]) if row["standings"] else None,
+            "progress": json.loads(row["progress"]) if row["progress"] else None,
+        }
+
+    def _tournament_row(self, tid: str) -> dict | None:
+        row = self._db.query_one("SELECT * FROM tournaments WHERE id=?", (tid,))
+        return self._row_to_tournament(row) if row else None
+
+    def get_tournament(self, tid: str) -> dict | None:
+        """Live in-memory state if the tournament is running, else the persisted row."""
+        return self._tournaments.get(tid) or self._tournament_row(tid)
+
+    def list_tournaments(self, limit: int = 20) -> list[dict]:
+        rows = self._db.query(
+            "SELECT * FROM tournaments ORDER BY created_at DESC LIMIT ?", (int(limit),))
+        return [self._row_to_tournament(r) for r in rows]
+
+    def tournament_status_msg(self, tid: str | None = None) -> dict:
+        """Latest tournament state for the stream. With no id, the most recent tournament
+        (used to prime a newly-connected browser)."""
+        if tid is not None:
+            state = self.get_tournament(tid)
+        elif self._tournaments:
+            state = max(self._tournaments.values(), key=lambda t: t.get("created_at", 0))
+        else:
+            row = self._db.query_one("SELECT * FROM tournaments ORDER BY created_at DESC LIMIT 1")
+            state = self._row_to_tournament(row) if row else None
+        return {"type": "tournament_status", "tournament": state}
+
+    def _persist_tournament(self, state: dict) -> None:
+        self._db.execute(
+            "INSERT INTO tournaments (id, created_at, created_by, status, config, standings, "
+            "progress) VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET status=excluded.status, standings=excluded.standings, "
+            "progress=excluded.progress",
+            (state["id"], state["created_at"], state.get("created_by"), state["status"],
+             json.dumps(state["config"]),
+             json.dumps(state["standings"]) if state.get("standings") else None,
+             json.dumps(state.get("progress")) if state.get("progress") else None),
+        )
+
+    def stop_tournament(self, tid: str, actor: str | None = None) -> dict:
+        if self.get_tournament(tid) is None:
+            return {"ok": False, "message": "Tournament not found."}
+        self._tournament_stops.add(tid)
+        self._audit("tournament_stop", tid, actor)
+        return {"ok": True}
+
+    def _resolve_entrant(self, ent: dict) -> tuple[str, str]:
+        """Return (label, artifact_path) for one entrant, or raise ValueError. The literal
+        ``run == "classical"`` selects the hand-coded controller (no checkpoint file)."""
+        run = str(ent.get("run", "")).strip()
+        ckpt = str(ent.get("checkpoint", "")).strip()
+        label = str(ent.get("label") or "").strip()
+        if run == "classical":
+            return (label or "classical", "classical")
+        path = self.checkpoint_path(run, ckpt)
+        if path is None:
+            raise ValueError(f"checkpoint not found: {run}/{ckpt}")
+        return (label or run, str(path))
+
+    async def launch_tournament(self, cfg: dict, actor: str | None = None) -> dict:
+        """Start a headless round-robin over the entrants; stream standings as they roll in."""
+        import secrets
+
+        entrants = cfg.get("entrants") or []
+        if len(entrants) < 2:
+            return {"ok": False, "message": "Need at least 2 entrants."}
+        try:
+            resolved = [self._resolve_entrant(e) for e in entrants]
+        except ValueError as e:
+            return {"ok": False, "message": str(e)}
+        # run_round_robin requires unique labels — disambiguate collisions.
+        seen: dict[str, int] = {}
+        uniq: list[dict] = []
+        for label, path in resolved:
+            if label in seen:
+                seen[label] += 1
+                label = f"{label}#{seen[label]}"
+            else:
+                seen[label] = 0
+            uniq.append({"label": label, "path": path})
+
+        tid = secrets.token_hex(6)
+        config = {
+            "entrants": uniq,
+            "matches_per_pairing": max(1, int(cfg.get("matches_per_pairing", 5))),
+            "seed": int(cfg.get("seed", 0)),
+            "max_steps": int(cfg.get("max_steps", 200_000)),
+        }
+        state = {"id": tid, "created_at": time.time(), "created_by": actor, "status": "running",
+                 "config": config, "standings": None,
+                 "progress": {"match": 0, "total": 0, "pairing": ""}}
+        self._tournaments[tid] = state
+        self._persist_tournament(state)
+        self._audit("tournament_launch", tid, actor, detail=f"{len(uniq)} entrants")
+        self._tasks.append(asyncio.create_task(self._run_tournament(tid)))
+        await self._bc.broadcast(self.tournament_status_msg(tid))
+        return {"ok": True, "id": tid}
+
+    async def _run_tournament(self, tid: str) -> None:
+        """Load the entrant policies and run the round-robin off the event loop, streaming
+        standings after each match and persisting the final table."""
+        state = self._tournaments[tid]
+        cfg = state["config"]
+        loop = asyncio.get_running_loop()
+
+        def _work() -> dict:
+            # Imported lazily: pulls in torch (for SB3 zips) only when a tournament actually runs.
+            from bucky.eval.tournament import run_round_robin
+            from bucky.policies import PolicyRef, load_policy
+
+            entrants = [(e["label"], load_policy(PolicyRef(path=e["path"], label=e["label"])))
+                        for e in cfg["entrants"]]
+
+            def _emit():
+                asyncio.create_task(self._bc.broadcast(self.tournament_status_msg(tid)))
+
+            def on_update(live, progress):
+                state["standings"] = live.to_dict()
+                state["progress"] = progress
+                loop.call_soon_threadsafe(_emit)
+
+            result = run_round_robin(
+                entrants, matches_per_pairing=cfg["matches_per_pairing"], seed=cfg["seed"],
+                max_steps=cfg["max_steps"], on_update=on_update,
+                should_stop=lambda: tid in self._tournament_stops)
+            return result.to_dict()
+
+        try:
+            state["standings"] = await asyncio.to_thread(_work)
+            state["status"] = "stopped" if tid in self._tournament_stops else "done"
+        except Exception as exc:  # noqa: BLE001 — surface failure to the UI, don't crash the loop
+            log.exception("tournament %s failed", tid)
+            state["status"] = "error"
+            state["error"] = str(exc)
+        finally:
+            self._tournament_stops.discard(tid)
+            self._persist_tournament(state)
+            await self._bc.broadcast(self.tournament_status_msg(tid))
 
     def status_msg(self, message: str | None = None) -> dict:
         """Legacy single-run status: surfaces a *primary* run (a local server run if any,

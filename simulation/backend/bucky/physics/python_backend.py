@@ -62,7 +62,10 @@ BALL_RESTITUTION = 0.7
 # derivation, never the sim.
 KICK_MAX_SPEED = 3.55          # m/s, legal upper limit (selectable force scales 0..1 of this)
 KICK_RANGE = 0.16              # ball must be within this of the robot centre (≈ COLLISION_DIST + margin)
-KICK_FRONT_COS = 0.766         # cos(40°): ball must lie within a ±40° forward cone to be kicked
+KICK_FRONT_COS = 0.906         # cos(25°): ball must lie within a ±25° forward cone to be kicked
+                               # (tightened from ±40° to force precise lineup → fewer wide shots;
+                               #  NOTE: if the real robot's kicker accepts a wider angle, widen this
+                               #  back to close the sim-to-real gap)
 KICK_COOLDOWN_STEPS = 50       # 1.0 s recharge at 50 Hz
 KICK_DEADZONE = 0.05           # kick command below this fires nothing
 
@@ -71,7 +74,7 @@ def apply_kick(ball_pos, ball_vel, r_pos, r_heading, kick_cmd, cooldown):
     """Apply a kicker impulse to the ball along the robot heading, subject to gating.
 
     Fires only when the kicker has recharged (``cooldown == 0``), the ball is within
-    ``KICK_RANGE`` and inside a ±40° forward cone, and ``kick_cmd`` clears the deadzone.
+    ``KICK_RANGE`` and inside a ±25° forward cone, and ``kick_cmd`` clears the deadzone.
     The selectable force ``clip(kick_cmd, 0, 1)`` scales the imparted speed up to
     ``KICK_MAX_SPEED``.
 
@@ -575,6 +578,16 @@ class TwoRobotPhysics:
         kick_b = float(action_b[3]) if len(action_b) > 3 else 0.0
         kicked_a = kicked_b = False
         kick_speed_a = kick_speed_b = 0.0
+
+        # Resolve both robots' interactions with the SHARED ball (kick, then collision push-out)
+        # in a fixed A-then-B order. NOTE: a per-step RANDOMIZED order was tried (to remove a
+        # ~2:1 slot-B scoring edge on contested touches) but it BROKE self-play training — the
+        # per-step coin flip makes the same (state, action) yield different ball outcomes on
+        # every contested touch, injecting irreducible noise that stops the value function
+        # converging (confirmed by bisection: reverting this block restores v23-competitive
+        # training). The slot bias is survivable (v23/v8/v4 all trained on this deterministic
+        # order and are strong). If the bias is ever revisited, do it WITHOUT per-step noise
+        # (e.g. randomize once per episode, or only on genuine simultaneous contact).
         if not self._a_removed:
             self._ball_vel, self._a_kick_cooldown, kicked_a, kick_speed_a = apply_kick(
                 self._ball_pos, self._ball_vel, self._a_pos, self._a_heading,
@@ -585,7 +598,6 @@ class TwoRobotPhysics:
                 self._ball_pos, self._ball_vel, self._b_pos, self._b_heading,
                 kick_b, self._b_kick_cooldown,
             )
-
         if not self._a_removed:
             self._resolve_robot_ball(self._a_pos, self._a_vel)
         if not self._b_removed:

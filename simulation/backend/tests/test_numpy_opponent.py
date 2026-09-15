@@ -34,6 +34,44 @@ def _make_model():
                seed=0, device="cpu")
 
 
+def _make_offpolicy(cls, **kw):
+    import gymnasium as gym
+    from gymnasium import spaces
+
+    class Dummy(gym.Env):
+        observation_space = spaces.Box(-3.0, 3.0, (SELF_PLAY_OBS_DIM,), np.float32)
+        action_space = spaces.Box(-1.0, 1.0, (4,), np.float32)
+
+        def reset(self, *a, **k):
+            return self.observation_space.sample(), {}
+
+        def step(self, a):
+            return self.observation_space.sample(), 0.0, True, False, {}
+
+    return cls("MlpPolicy", Dummy(), seed=0, device="cpu", buffer_size=1000, **kw)
+
+
+@pytest.mark.parametrize("algo", ["SAC", "TD3", "DDPG"])
+def test_numpy_opponent_matches_offpolicy_predict(tmp_path, algo):
+    """The numpy opponent must also reproduce the tanh-squashed, ReLU-hidden off-policy actors
+    (SAC/TD3/DDPG), so any of them can serve as a frozen self-play opponent / run on-device."""
+    import stable_baselines3 as sb3
+
+    model = _make_offpolicy(getattr(sb3, algo))
+    npz = str(tmp_path / "opponent_snapshot.npz")
+    export_policy_npz(model, npz)
+    data = np.load(npz)
+    assert str(data["activation"]) == "relu" and bool(data["squash"]) is True
+    opp = load_numpy_opponent(npz)
+
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        obs = rng.uniform(-3.0, 3.0, SELF_PLAY_OBS_DIM).astype(np.float32)
+        ref, _ = model.predict(obs, deterministic=True)
+        got, _ = opp.predict(obs, deterministic=True)
+        assert np.allclose(ref, got, atol=1e-4), f"{algo}\nref={ref}\ngot={got}"
+
+
 def test_numpy_opponent_matches_ppo_predict(tmp_path):
     model = _make_model()
     npz = str(tmp_path / "opponent_snapshot.npz")

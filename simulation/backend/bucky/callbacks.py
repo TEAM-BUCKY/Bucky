@@ -100,7 +100,7 @@ class SelfPlaySnapshotCallback(BaseCallback):
     """
 
     def __init__(self, snapshot_base: str, every: int = 200, pool_size: int = 5,
-                 verbose: int = 0) -> None:
+                 fixed_opponents: list[str] | None = None, verbose: int = 0) -> None:
         super().__init__(verbose)
         self._base = snapshot_base
         self._npz = snapshot_base + ".npz"        # canonical single-file snapshot (viz/back-compat)
@@ -108,6 +108,9 @@ class SelfPlaySnapshotCallback(BaseCallback):
         self._pool_size = max(1, pool_size)
         self._count = 0
         self._paths: deque[str] = deque(maxlen=self._pool_size)
+        # External strong opponents kept in the pool PERMANENTLY (never rolled out) so the learner
+        # keeps facing them and learns to beat them — not just past copies of itself.
+        self._fixed = list(fixed_opponents or [])
 
     def _on_step(self) -> bool:
         if self.n_calls % self._every == 0:
@@ -121,7 +124,7 @@ class SelfPlaySnapshotCallback(BaseCallback):
                 self._paths.append(path)
             self._count += 1
             try:
-                self.training_env.env_method("set_opponent_pool", list(self._paths))
+                self.training_env.env_method("set_opponent_pool", self._fixed + list(self._paths))
             except Exception:  # noqa: BLE001 — best effort; workers keep the old pool
                 pass
         return True

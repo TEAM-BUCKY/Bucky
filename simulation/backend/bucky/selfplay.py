@@ -276,22 +276,35 @@ def predict_opponent_action(
 # .npz next to each snapshot via :func:`export_policy_npz`; workers load that with
 # :func:`load_numpy_opponent`.
 
-class NumpyOpponent:
-    """A frozen PPO ``MlpPolicy`` evaluated in pure numpy.
+def _relu(z: np.ndarray) -> np.ndarray:
+    return np.maximum(0.0, z)
 
-    Replicates SB3's deterministic action for the default (non-squashed) Box policy used
-    here: the action is the Gaussian mean ``action_net(policy_net(obs))`` with ``tanh``
-    activations between the hidden layers, then clipped to ``[-1, 1]`` exactly as
-    ``BasePolicy.predict`` does. Valid only for that config — identity (Flatten) features,
-    no ``VecNormalize``, ``tanh`` activation, separate (un-shared) policy layers — which is
-    what :mod:`scripts.train` builds.
+
+class NumpyOpponent:
+    """A frozen SB3 MLP actor evaluated in pure numpy.
+
+    Replicates SB3's deterministic action for the actor architectures the trainer produces:
+      * **On-policy** (PPO/A2C/TRPO): the un-squashed Gaussian mean
+        ``action_net(policy_net(obs))`` with ``tanh`` hidden activations, clipped to ``[-1, 1]``.
+      * **Off-policy** (SAC/TD3/DDPG): the ``tanh``-squashed deterministic action, with ``relu``
+        hidden activations by default (``squash=True``).
+    ``activation`` (``"tanh"``/``"relu"``) selects the hidden non-linearity and ``squash`` applies
+    a final ``tanh`` to the output. Valid for identity (Flatten) features, no ``VecNormalize``, and
+    separate (un-shared) actor layers — which is what :mod:`scripts.train` builds.
     """
 
     def __init__(self, hidden, out_w: np.ndarray, out_b: np.ndarray,
-                 log_std: np.ndarray | None = None) -> None:
-        self._hidden = hidden          # list of (W, b) tanh layers, applied in order
+                 log_std: np.ndarray | None = None, *, activation: str = "tanh",
+                 squash: bool = False) -> None:
+        self._hidden = hidden          # list of (W, b) layers, applied in order
         self._out_w = out_w
         self._out_b = out_b
+        self._activation = activation
+        self._squash = bool(squash)
+        # The policy's expected input width (first hidden layer's column count). If it's narrower
+        # than the current self-play obs, predict() projects the obs down (adapt_obs_to_policy) so a
+        # LEGACY-dim model (e.g. 39-dim) can serve as a training-pool opponent against a 43-dim env.
+        self._in_dim = int(hidden[0][0].shape[1]) if hidden else None
         # Per-dim Gaussian log-std (SB3's state-independent ``policy.log_std``). ``None`` for
         # legacy .npz snapshots without it → the opponent stays deterministic (mean action).
         self._log_std = None if log_std is None else np.asarray(log_std, dtype=np.float32).reshape(-1)
@@ -300,21 +313,25 @@ class NumpyOpponent:
         """Mirror of ``model.predict`` — returns ``(action, None)`` so it is a drop-in for
         :func:`predict_opponent_action`.
 
-        ``deterministic=True`` returns the policy mean (matching ``PPO.predict``). With
-        ``deterministic=False`` and a stored ``log_std`` the action is *sampled* from the
-        diagonal Gaussian — ``mean + temperature * exp(log_std) * N(0, 1)`` — so the frozen
-        opponent explores instead of replaying one memorizable pattern. Without a ``log_std``
-        (legacy snapshot) it falls back to the mean.
+        ``deterministic=True`` returns the policy's deterministic action (matching ``.predict``).
+        With ``deterministic=False`` and a stored ``log_std`` (on-policy only) the action is
+        *sampled* from the pre-squash diagonal Gaussian — ``mean + temperature * exp(log_std) *
+        N(0, 1)`` — so the frozen opponent explores instead of replaying one memorizable pattern.
+        Without a ``log_std`` (off-policy or a legacy snapshot) it stays deterministic.
         """
         x = np.asarray(obs, dtype=np.float32).reshape(-1)
+        if self._in_dim is not None and x.shape[0] != self._in_dim:
+            x = adapt_obs_to_policy(x, self._in_dim)   # project 43-dim obs → this policy's layout
+        act = np.tanh if self._activation == "tanh" else _relu
         for w, b in self._hidden:
-            x = np.tanh(w @ x + b)
-        mean = self._out_w @ x + self._out_b
+            x = act(w @ x + b)
+        pre = self._out_w @ x + self._out_b
         if not deterministic and self._log_std is not None:
             if rng is None:
                 rng = np.random.default_rng()
-            noise = rng.standard_normal(mean.shape[0]).astype(np.float32)
-            mean = mean + temperature * np.exp(self._log_std) * noise
+            noise = rng.standard_normal(pre.shape[0]).astype(np.float32)
+            pre = pre + temperature * np.exp(self._log_std) * noise
+        mean = np.tanh(pre) if self._squash else pre
         a = np.clip(mean, -1.0, 1.0).astype(np.float32)
         return a, None
 
@@ -327,29 +344,84 @@ def load_numpy_opponent(path: str) -> NumpyOpponent:
     hidden = [(data[f"h{i}_W"].astype(np.float32), data[f"h{i}_b"].astype(np.float32))
               for i in range(n_hidden)]
     log_std = data["log_std"].astype(np.float32) if "log_std" in data.files else None
+    # activation/squash are absent in legacy (pre-off-policy) snapshots → default to the PPO
+    # layout (tanh hidden, no squash) so old opponents load and behave identically.
+    activation = str(data["activation"]) if "activation" in data.files else "tanh"
+    squash = bool(data["squash"]) if "squash" in data.files else False
     return NumpyOpponent(hidden, data["out_W"].astype(np.float32),
-                         data["out_b"].astype(np.float32), log_std=log_std)
+                         data["out_b"].astype(np.float32), log_std=log_std,
+                         activation=activation, squash=squash)
 
 
-def export_policy_npz(model, path: str) -> None:
-    """Dump a PPO ``MlpPolicy``'s deterministic-action weights to ``path`` (.npz) so the
-    workers can drive the frozen opponent in numpy. Runs in the trainer (torch) process
-    only; torch is imported lazily so importing this module in a worker never pulls it in.
+def _detect_activation(seq) -> str:
+    """Return ``"relu"`` or ``"tanh"`` for the hidden non-linearity of a torch Sequential."""
+    import torch.nn as nn  # lazy: keep torch out of worker imports
+    for m in seq:
+        if isinstance(m, nn.ReLU):
+            return "relu"
+        if isinstance(m, nn.Tanh):
+            return "tanh"
+    return "tanh"
+
+
+def _extract_actor_mlp(model):
+    """Extract the deterministic actor-mean MLP from a supported SB3 policy.
+
+    Returns ``(hidden_linears, out_linear, activation, squash, log_std)``. Handles the two
+    families the trainer produces:
+      * on-policy ``ActorCriticPolicy`` (PPO/A2C/TRPO): ``policy_net`` + ``action_net``, no squash;
+      * off-policy actors — SAC (``actor.latent_pi`` + ``actor.mu``, tanh-squashed) and
+        TD3/DDPG (``actor.mu`` is a Sequential ending in ``Tanh``; its last Linear is the head).
+    Torch imported lazily (trainer process only).
     """
     import torch.nn as nn  # lazy: keep torch out of worker imports
 
     pol = model.policy
-    layers = [m for m in pol.mlp_extractor.policy_net if isinstance(m, nn.Linear)]
-    arrays: dict[str, np.ndarray] = {"n_hidden": np.array(len(layers))}
-    for i, m in enumerate(layers):
+    # On-policy: separate policy MLP + a linear action head; un-squashed Gaussian mean.
+    if hasattr(pol, "action_net") and hasattr(pol, "mlp_extractor"):
+        hidden = [m for m in pol.mlp_extractor.policy_net if isinstance(m, nn.Linear)]
+        activation = _detect_activation(pol.mlp_extractor.policy_net)
+        log_std = (pol.log_std.detach().cpu().numpy() if hasattr(pol, "log_std") else None)
+        return hidden, pol.action_net, activation, False, log_std
+
+    actor = getattr(pol, "actor", None)
+    if actor is not None and hasattr(actor, "latent_pi") and hasattr(actor, "mu"):
+        # SAC: deterministic action = tanh(mu(latent_pi(obs))). log_std is state-dependent, so the
+        # frozen opponent runs deterministically (no stored constant log_std).
+        hidden = [m for m in actor.latent_pi if isinstance(m, nn.Linear)]
+        return hidden, actor.mu, _detect_activation(actor.latent_pi), True, None
+    if actor is not None and hasattr(actor, "mu"):
+        # TD3/DDPG: actor.mu is Sequential[Linear, ReLU, ..., Linear, Tanh]. The trailing Tanh is
+        # the squash; the last Linear is the output head, the rest are hidden layers.
+        linears = [m for m in actor.mu if isinstance(m, nn.Linear)]
+        if not linears:
+            raise TypeError("TD3/DDPG actor.mu has no Linear layers")
+        return linears[:-1], linears[-1], _detect_activation(actor.mu), True, None
+
+    raise TypeError(f"cannot extract a numpy actor MLP from policy {type(pol).__name__}")
+
+
+def export_policy_npz(model, path: str) -> None:
+    """Dump an SB3 actor's deterministic-action weights to ``path`` (.npz) so the workers can
+    drive the frozen opponent in numpy. Supports on-policy (PPO/A2C/TRPO) and off-policy
+    (SAC/TD3/DDPG) actors — see :func:`_extract_actor_mlp`. Runs in the trainer (torch) process
+    only; torch is imported lazily so importing this module in a worker never pulls it in.
+    """
+    hidden, out, activation, squash, log_std = _extract_actor_mlp(model)
+    arrays: dict[str, np.ndarray] = {
+        "n_hidden": np.array(len(hidden)),
+        "activation": np.array(activation),
+        "squash": np.array(bool(squash)),
+    }
+    for i, m in enumerate(hidden):
         arrays[f"h{i}_W"] = m.weight.detach().cpu().numpy()
         arrays[f"h{i}_b"] = m.bias.detach().cpu().numpy()
-    arrays["out_W"] = pol.action_net.weight.detach().cpu().numpy()
-    arrays["out_b"] = pol.action_net.bias.detach().cpu().numpy()
-    # State-independent diagonal Gaussian log-std, so workers can sample a stochastic
-    # opponent (see NumpyOpponent.predict). Older snapshots without this stay deterministic.
-    if hasattr(pol, "log_std"):
-        arrays["log_std"] = pol.log_std.detach().cpu().numpy()
+    arrays["out_W"] = out.weight.detach().cpu().numpy()
+    arrays["out_b"] = out.bias.detach().cpu().numpy()
+    # State-independent diagonal Gaussian log-std (on-policy only), so workers can sample a
+    # stochastic opponent (see NumpyOpponent.predict). Off-policy/legacy snapshots omit it.
+    if log_std is not None:
+        arrays["log_std"] = log_std
     np.savez(path, **arrays)
 
 
@@ -361,10 +433,10 @@ def transfer_weights_expand_obs(new_model, old_path: str, device=None) -> tuple[
     parameter that matches by shape; for the first Linear layer (whose input width grew) copies the
     overlapping input columns and leaves the new sonar columns at their fresh initialisation.
     Returns ``(copied, padded)`` tensor counts. Torch/SB3 imported lazily (trainer process only).
+    The old checkpoint is loaded with the *same* algorithm class as ``new_model`` (curriculum
+    transfer keeps the algo fixed across phases), so this works for any registered algo.
     """
-    from stable_baselines3 import PPO
-
-    old = PPO.load(old_path, device=device)
+    old = type(new_model).load(old_path, device=device)
     old_sd = old.policy.state_dict()
     new_sd = new_model.policy.state_dict()
     copied = padded = 0

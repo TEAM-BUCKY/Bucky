@@ -20,7 +20,7 @@ from bucky.curriculum import Stage, StageConfig, get_stage_config
 from bucky.physics.python_backend import TwoRobotPhysics, predict_goal_by_rollout
 from bucky.play_events import PlayEventTracker
 from bucky.randomization import DomainRandomConfig, EpisodeRandomization, sample_episode_randomization
-from bucky.game.field import ball_out_of_play
+from bucky.game.field import ball_out_of_play, HALF_W, HALF_H, OPP_GOAL
 from bucky.game.referee import Referee
 from bucky.rewards import ALIGN_RADIUS, RewardConfig, RewardTerms, compute_rewards
 from bucky.selfplay import (
@@ -136,7 +136,35 @@ class BuckySelfPlayEnv(gym.Env):
         self._heading_drift = 0.0
         self._dwell_steps = 0
         self._predicted_goal_guard = 0
+        # Bank/shoot-around-defender drill: freeze the opponent as a passive obstacle on the
+        # ball→goal line (overrides the referee's kickoff formation set just above).
+        if self._stage_cfg.static_opponent:
+            self._opponent = None
+            self._place_obstacle_drill()
         return self._get_obs(), {}
+
+    def _place_obstacle_drill(self) -> None:
+        """Lay out the shoot-around-defender drill: ball in the attacking half, learner (A) just
+        behind it aimed at goal, and the frozen defender (B) planted on the ball→goal line so a
+        straight shot is blocked — the learner must thread a corner or bank off a side wall."""
+        rng = self._rng
+        ball = np.array([float(rng.uniform(0.0, 0.35)), float(rng.uniform(-0.40, 0.40))])
+        to_goal = OPP_GOAL - ball
+        gdir = to_goal / max(float(np.linalg.norm(to_goal)), 1e-6)
+        a_pos = ball - 0.16 * gdir                              # A behind the ball, on the goal line
+        a_heading = float(np.arctan2(gdir[1], gdir[0]))
+        t = float(rng.uniform(0.55, 0.72))                     # B sits 55–72% of the way to goal
+        b_pos = ball + t * to_goal
+        # Lateral jitter perpendicular to the ball→goal line so the defender blocks from varied
+        # positions (dead-centre ↔ off to one side) — the learner must find the OPEN lane and drive
+        # around it, not just memorise one banking solution.
+        perp = np.array([-gdir[1], gdir[0]])
+        b_pos = b_pos + float(rng.uniform(-0.22, 0.22)) * perp
+        b_pos[0] = float(np.clip(b_pos[0], 0.2, HALF_W - 0.12))
+        b_pos[1] = float(np.clip(b_pos[1], -HALF_H + 0.12, HALF_H - 0.12))
+        self._phys.place_ball(ball, vel=(0.0, 0.0))
+        self._phys.place_robot("a", a_pos, heading=a_heading)
+        self._phys.place_robot("b", b_pos, heading=float(np.pi))
 
     def step(self, action: np.ndarray):
         action = np.clip(action, -1.0, 1.0).astype(np.float32)
@@ -228,6 +256,10 @@ class BuckySelfPlayEnv(gym.Env):
         # when the learner (A) is sent off, or on the step budget.
         terminated = bool(a_removed)
         if EARLY_TERMINATE_ON_PREDICTED_GOAL and predicted_goal:
+            terminated = True
+        # Obstacle drill is one-shot: end the attempt on a made or inevitable goal so the referee
+        # never re-kicks-off out of the drill formation (the next reset re-plants the defender).
+        if self._stage_cfg.static_opponent and (decision.goal_a or predicted_goal):
             terminated = True
         self._step_count += 1
         truncated = self._step_count >= self._stage_cfg.max_episode_steps

@@ -71,6 +71,9 @@ class StopCondition(BaseModel):
 
 class LaunchRequest(BaseModel):
     mode: Literal["train", "play"] = "train"
+    # Learning algorithm (train mode). "ppo" default; see bucky.algos.registry for the full set.
+    algo: Optional[str] = None
+    algo_params: Optional[dict] = None
     stage: Optional[str] = None
     timesteps: Optional[int] = None
     n_envs: Optional[int] = None
@@ -130,6 +133,22 @@ class ControlRequest(BaseModel):
     run: str
     action: Optional[list[float]] = None     # [vx, vy, omega, kick], each in [-1, 1]
     red_mode: Optional[Literal["human", "ai"]] = None
+
+
+class TournamentEntrant(BaseModel):
+    # A run+checkpoint (as elsewhere), or run="classical" for the hand-coded controller.
+    run: str
+    checkpoint: str = ""
+    label: Optional[str] = None
+
+
+class TournamentRequest(BaseModel):
+    # A headless round-robin league between saved models. Standings stream as tournament_status.
+    entrants: list[TournamentEntrant]
+    matches_per_pairing: int = 5
+    seed: int = 0
+    # Per-match step cap: default runs a full 2×7-min match; smaller = faster, noisier league.
+    max_steps: int = 200_000
 
 
 class CreateGameRequest(BaseModel):
@@ -491,6 +510,35 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     async def eval_control(req: EvalControlRequest, _user: str = Depends(require_control)) -> dict:
         return await manager.eval_control(req.model_dump())
 
+    # ── competition brackets (round-robin tournaments) ───────────────────────────
+    @router.post("/tournament")
+    async def create_tournament(
+        req: TournamentRequest, _user: str = Depends(require_control)
+    ) -> dict:
+        """Launch a headless round-robin league; standings stream as tournament_status frames."""
+        result = await manager.launch_tournament(req.model_dump(), actor=_user)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("message", "tournament failed"))
+        return result
+
+    @router.get("/tournaments")
+    async def list_tournaments() -> dict:
+        return {"type": "tournaments", "tournaments": manager.list_tournaments()}
+
+    @router.get("/tournament/{tid}")
+    async def get_tournament(tid: str) -> dict:
+        state = manager.get_tournament(tid)
+        if state is None:
+            raise HTTPException(status_code=404, detail="tournament not found")
+        return {"type": "tournament_status", "tournament": state}
+
+    @router.post("/tournament/{tid}/stop")
+    async def stop_tournament(tid: str, _user: str = Depends(require_control)) -> dict:
+        result = manager.stop_tournament(tid, actor=_user)
+        if not result.get("ok"):
+            raise HTTPException(status_code=404, detail=result.get("message", "not found"))
+        return result
+
     @router.post("/control")
     async def control_match(req: ControlRequest, _user: str = Depends(require_control)) -> dict:
         """Send a manual control command (human action / red mode) to a running match.
@@ -637,6 +685,7 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
             await broadcaster.send(ws, manager.models_msg())
             await broadcaster.send(ws, manager.devices_msg())
             await broadcaster.send(ws, manager.eval_status_msg())  # recover an in-flight eval
+            await broadcaster.send(ws, manager.tournament_status_msg())  # recover latest tournament
             # The stream is read-only; we still read (and ignore) to detect disconnects.
             while True:
                 await ws.receive_text()

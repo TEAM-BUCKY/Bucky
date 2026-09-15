@@ -1,17 +1,13 @@
-#include <Arduino.h>
 #include <cmath>
 
 #include "debug.h"
-#include "motor/MotorDriver.h"
-#include "control/ball/IRBallProcessor.h"
-#include <control/pos/SelfLocalizationEKF.h>
-#include <field/DigitalField.h>
-#include <io/i2c/I2CDMA.h>
-#include <sensors/pos/Compass.h>
-#include <sensors/pos/Sonar.h>
-#include <io/cordic/cordic.h>
-#include <sensors/IRSensor.h>
-#include <strategy/StrategyFSM.h>
+
+#include "hardware/motor/MotorDriver.h"
+#include <hardware/io/i2c/I2CDMA.h>
+#include <hardware/sensors/pos/Compass.h>
+#include <hardware/sensors/pos/Sonar.h>
+#include <hardware/io/cordic/cordic.h>
+#include <hardware/sensors/IRSensor.h>
 #include <tests/tests.h>
 
 #include "robot/RobotBrain.h"

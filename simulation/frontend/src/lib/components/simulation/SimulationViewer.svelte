@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { simulation } from '$lib/state/simulation.svelte.js';
 	import SoccerField from '../SoccerField.svelte';
 	import RewardBreakdown from './panels/RewardBreakdown.svelte';
@@ -48,6 +48,26 @@
 				: [];
 		const ball = { x: f.ball_pos[1] * SCALE_X, y: f.ball_pos[0] * SCALE_Y };
 		return { allies, enemies, ball };
+	});
+
+	// Kick FX: bump a counter each time a kicker fires so the field replays a burst, pinned to where
+	// the ball was struck (it flies off after). Ally kick = cyan, enemy kick = red.
+	// NOTE: the writes are wrapped in untrack() — `kickPulse += 1` both reads AND writes kickPulse,
+	// which would otherwise make this effect depend on its own output and loop forever
+	// (effect_update_depth_exceeded). The only real dependency is simulation.frame.
+	let kickPulse = $state(0);
+	let kickFx = $state<{ x: number; y: number; color: string } | null>(null);
+	$effect(() => {
+		const f = simulation.frame;
+		if (!f || !(f.kicked_a || f.kicked_b)) return;
+		untrack(() => {
+			kickPulse += 1;
+			kickFx = {
+				x: f.ball_pos[1] * SCALE_X,
+				y: f.ball_pos[0] * SCALE_Y,
+				color: f.kicked_a ? '#22d3ee' : '#f87171'
+			};
+		});
 	});
 
 	const score = $derived(simulation.frame?.score ?? null);
@@ -302,6 +322,8 @@
 							enemies={fieldData.enemies ?? []}
 							ball={fieldData.ball}
 							showBall={!!simulation.frame}
+							{kickPulse}
+							{kickFx}
 							rotation={90}
 							class="border-0"
 					/>

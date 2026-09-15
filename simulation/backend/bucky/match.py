@@ -117,6 +117,8 @@ class MatchEngine:
             "ball_pos": sa.ball_pos.tolist(),
             "kick_ready_a": a_ready,
             "kick_ready_b": b_ready,
+            "kicked_a": bool(info.get("kicked_a", False)),   # kicker fired this step → UI kick FX
+            "kicked_b": bool(info.get("kicked_b", False)),
             "score": dict(decision.score),
             "clock": round(decision.clock, 2),
             "half": decision.half,

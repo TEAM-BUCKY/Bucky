@@ -66,6 +66,11 @@ class ModelConfig(BaseModel):
 
     name: str = "model"
     version: str = "1"
+    # Learning algorithm (see bucky.algos.registry). "ppo" is the default and reproduces the
+    # historical behaviour exactly; algo-specific knobs go in ``algo_params`` (merged over
+    # ``hyperparams``, so a PPO config is unchanged).
+    algo: str = "ppo"
+    algo_params: dict[str, float | int | str] = Field(default_factory=dict)
     stage: str = "FULL_TRAINING"
     # FULL_TRAINING only: fraction of the total budget for each phase (APPROACH / PUSH / SELF_PLAY).
     # None → the default split in curriculum.FULL_TRAINING_PHASES (0.15 / 0.25 / 0.60).

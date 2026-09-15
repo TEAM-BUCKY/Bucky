@@ -17,6 +17,7 @@ class Stage(str, Enum):
     APPROACH_STATIC_BALL = "APPROACH_STATIC_BALL"
     PUSH_TO_EMPTY_GOAL = "PUSH_TO_EMPTY_GOAL"
     AIM_AND_KICK = "AIM_AND_KICK"
+    SHOOT_AROUND_DEFENDER = "SHOOT_AROUND_DEFENDER"
     SELF_PLAY_1V1 = "SELF_PLAY_1V1"
     FULL_TRAINING = "FULL_TRAINING"
     SELF_PLAY_2V2 = "SELF_PLAY_2V2"
@@ -41,6 +42,10 @@ class StageConfig:
     # Default PPO entropy coefficient for this stage when the model config doesn't set one.
     # Kick/self-play stages want more exploration (firing the kicker, breaking symmetry).
     recommended_ent_coef: float = 0.01
+    # A drill that runs in the self-play env (opponent_present=True) but with the opponent FROZEN as
+    # a passive obstacle the learner must shoot around (no learned/snapshot opponent). The env places
+    # it on the ball→goal line and ends the episode one-shot on a made/inevitable goal.
+    static_opponent: bool = False
     description: str = ""
 
 
@@ -92,7 +97,8 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
             # earns ~nothing while a clean kick earns the full payout.
             "approach", "speed", "ball_to_goal", "front_alignment", "front_misalign",
             "predicted_goal", "in_goal",
-            "kick_attempt", "kick_power_to_goal", "shot_on_goal", "kick_goal", "bank_shot",
+            "kick_attempt", "kick_power_to_goal", "kick_aim", "kick_angle", "shot_on_goal", "kick_goal", "bank_shot",
+            "wasted_kick",
             "shot_out_of_bounds", "out_of_bounds", "lack_of_progress", "defective", "spin",
             "time_penalty", "action_smoothness", "play_oob_ball", "stuck",
         ],
@@ -100,27 +106,55 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         recommended_ent_coef=0.02,
         description="Aim the kicker: shoot a scattered ball into the goal from varied angles/ranges.",
     ),
+    Stage.SHOOT_AROUND_DEFENDER: StageConfig(
+        stage=Stage.SHOOT_AROUND_DEFENDER,
+        max_episode_steps=400,
+        ball_spawn_radius=0.5,
+        goal_present=True,
+        # Runs in the self-play env (43-dim, sonar sees the obstacle) with the opponent FROZEN as a
+        # passive defender on the ball→goal line. The learner must thread a shot to an open corner or
+        # BANK it off a side wall around the defender. predicted_goal already rolls the ball through
+        # wall bounces with an interception check at the defender, so a banked shot that avoids the
+        # defender and scores is credited; bank_shot adds a premium on top. Plain ``goal`` omitted —
+        # only kicked goals score, same as AIM_AND_KICK.
+        active_reward_terms=[
+            "approach", "speed", "ball_to_goal", "front_alignment", "front_misalign",
+            "predicted_goal", "in_goal",
+            "kick_attempt", "kick_power_to_goal", "kick_aim", "kick_angle", "kick_goal", "bank_shot", "wasted_kick",
+            "shot_out_of_bounds", "out_of_bounds", "lack_of_progress", "defective", "spin",
+            "time_penalty", "action_smoothness", "play_oob_ball", "stuck",
+        ],
+        opponent_present=True,
+        static_opponent=True,
+        recommended_ent_coef=0.025,
+        description="Shoot/bank around a stationary defender into the goal.",
+    ),
     Stage.SELF_PLAY_1V1: StageConfig(
         stage=Stage.SELF_PLAY_1V1,
         max_episode_steps=1500,
         ball_spawn_radius=0.5,
         goal_present=True,
         active_reward_terms=[
-            # plain ``goal`` is omitted on purpose (``goal_against`` kept): exactly like
-            # AIM_AND_KICK, only kicked goals score here, so this long phase (45% of the budget,
-            # runs after the drill) can't re-teach dribbling and overwrite the kicker. The
-            # ``front_misalign`` penalty carries the aim/commit-to-kick pressure over from the drill.
-            "approach", "speed", "ball_to_goal", "possession", "front_alignment", "front_misalign",
+            # plain ``goal`` omitted (``goal_against`` kept): only KICKED goals score here.
+            # Dense camping farms (front_alignment, possession, defense_position, front_misalign,
+            # shot_on_goal) stay stripped. ALSO removed now: ``ball_to_goal`` (it rewarded advancing
+            # the ball — easily earned by DRIBBLING, so the policy regressed to dribbling the ball
+            # over the line instead of shooting) and ``wasted_kick`` (its penalty was suppressing
+            # shots — the robot stopped kicking entirely, even open nets from distance). Net: the
+            # ONLY way to be rewarded near the goal is to KICK it in (predicted_goal/kick_power/
+            # kick_goal/bank_shot), exactly like the AIM_AND_KICK drill that finishes at 92%.
+            # ``approach`` stays (robot→ball, not a dribble reward).
+            "approach", "speed",
             "goal_against",
             "predicted_goal", "in_goal",
-            "steal", "blocked_shot", "kick_attempt", "kick_power_to_goal", "shot_on_goal",
+            "steal", "blocked_shot", "kick_attempt", "kick_power_to_goal", "kick_aim", "kick_angle",
             "kick_goal", "bank_shot", "risky_shot", "kick_lost", "kick_at_opponent",
             "shot_out_of_bounds",
             "out_of_bounds", "lack_of_progress", "defective", "spin", "time_penalty",
             "action_smoothness", "play_oob_ball", "stuck",
         ],
         opponent_present=True,
-        recommended_ent_coef=0.025,  # more exploration so the two robots don't lock into a symmetric stalemate
+        recommended_ent_coef=0.025,  # more exploration so the two robots don't lock into a symmetric stalemate (0.04 trialled, no benefit)
         description="1v1 self-play: learner (robot A) vs a frozen-snapshot opponent (robot B).",
     ),
 }
@@ -135,10 +169,11 @@ STAGE_CONFIGS[Stage.FULL_TRAINING] = StageConfig(
 # The phases FULL_TRAINING runs, in order, with each one's default fraction of the total budget
 # (steps or wall-clock). Overridable per run via the config's ``full_training_split``.
 FULL_TRAINING_PHASES: list[tuple[Stage, float]] = [
-    (Stage.APPROACH_STATIC_BALL, 0.10),
-    (Stage.PUSH_TO_EMPTY_GOAL, 0.20),
-    (Stage.AIM_AND_KICK, 0.25),
-    (Stage.SELF_PLAY_1V1, 0.45),
+    (Stage.APPROACH_STATIC_BALL, 0.08),
+    (Stage.PUSH_TO_EMPTY_GOAL, 0.10),
+    (Stage.AIM_AND_KICK, 0.22),            # incl. tight-corner / dead-angle finishing (33% of spawns)
+    (Stage.SHOOT_AROUND_DEFENDER, 0.20),   # match-scoring vs a live defender — kept strong
+    (Stage.SELF_PLAY_1V1, 0.40),           # more self-play → stronger match player (run#4-like)
 ]
 
 

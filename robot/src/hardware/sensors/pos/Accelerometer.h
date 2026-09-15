@@ -1,8 +1,7 @@
 #ifndef BUCKY_ACCELEROMETER_H
 #define BUCKY_ACCELEROMETER_H
 
-#include <Arduino.h>
-#include "io/i2c/I2CDMA.h"
+#include "hardware/io/i2c/I2CDMA.h"
 
 // LSM303AGR accelerometer (paired with LIS2MDL magnetometer on the board).
 #define LSM303AGR_ACC_ADDR     0x19

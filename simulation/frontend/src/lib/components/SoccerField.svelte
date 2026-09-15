@@ -48,6 +48,11 @@
 		// fit: scale the diagram to *contain* within its parent box (letterboxed
 		// by height as well as width) instead of always filling the parent width.
 		fit = false,
+		// ── Kick FX ──────────────────────────────────────────────────────────
+		// kickPulse increments each time the kicker fires; the field replays a burst
+		// animation at kickFx (pinned where the ball was struck, since it flies off).
+		kickPulse = 0,
+		kickFx = null,
 		class: className = '',
 		style,
 	}: {
@@ -83,6 +88,8 @@
 		goalHalfWidth?: number;
 		penaltyDepth?: number;
 		fit?: boolean;
+		kickPulse?: number;
+		kickFx?: { x: number; y: number; color: string } | null;
 		class?: string;
 		style?: string;
 	} = $props();
@@ -389,6 +396,18 @@
 			/>
 			{/if}
 
+			<!-- Kick FX: an expanding ring + flash at the strike point, replayed each kick. {#key
+			     kickPulse} re-creates the circles so the CSS animations restart (CSS animations begin
+			     on element creation — unlike SMIL begin="0s", which is relative to the document clock). -->
+			{#if kickPulse > 0 && kickFx}
+				{#key kickPulse}
+					<circle class="kick-ring" cx={kickFx.x} cy={kickFx.y} r={BALL_R}
+							fill="none" stroke={kickFx.color} stroke-width="11" />
+					<circle class="kick-flash" cx={kickFx.x} cy={kickFx.y} r={BALL_R * 1.3}
+							fill={kickFx.color} />
+				{/key}
+			{/if}
+
 			<!-- Robots -->
 			{#each robots as robot}
 				<!--
@@ -446,5 +465,43 @@
 		</g>
 	</svg>
 </div>
+
+<style>
+	/* Kick burst: expands + fades from the strike point. transform-box/origin make the scale grow
+	   from each circle's own centre. CSS animations start on element creation, so the {#key kickPulse}
+	   re-mount replays them on every kick. */
+	.kick-ring,
+	.kick-flash {
+		transform-box: fill-box;
+		transform-origin: center;
+		pointer-events: none;
+	}
+	.kick-ring {
+		animation: kick-ring 0.5s ease-out forwards;
+	}
+	.kick-flash {
+		animation: kick-flash 0.32s ease-out forwards;
+	}
+	@keyframes kick-ring {
+		from {
+			transform: scale(1);
+			opacity: 0.95;
+		}
+		to {
+			transform: scale(6);
+			opacity: 0;
+		}
+	}
+	@keyframes kick-flash {
+		from {
+			transform: scale(1);
+			opacity: 0.85;
+		}
+		to {
+			transform: scale(0.4);
+			opacity: 0;
+		}
+	}
+</style>
 
 
