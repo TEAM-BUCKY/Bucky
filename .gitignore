@@ -41,3 +41,5 @@ simulation/traefik/letsencrypt/acme.json
 .playwright-mcp
 
 .env
+
+simulation/backend/data
