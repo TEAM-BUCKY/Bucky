@@ -2,12 +2,13 @@
 #define BUCKY_BOARD_H562RG_H
 
 #include "hardware/io/i2c/I2CDMA.h"
+#include "hardware/io/uart/UARTDMA.h"
 #include "hardware/io/encoder/Encoder.h"
 #include "hardware/motor/MotorDriver.h"
 #include "hardware/sensors/GPort.h"
 #include "hardware/sensors/pos/Sonar.h"
 
-#define BOARD_HAS_UART 1
+#define BOARD_HAS_BLUETOOTH 1
 #define BOARD_HAS_GPORTS 1
 
 // _ALTn suffixes pick the timer when a pad has several (see PeripheralPins.c of
@@ -90,20 +91,11 @@ inline const I2CPort& SENSOR_I2C = I2C_2;
 // No FM+ pad drivers on PB3/PB10/PC9/PA8 (H5 only has them on PB6-PB9).
 constexpr auto SENSOR_I2C_FREQ = I2CFrequency::FM_400K;
 
-// ---- UART ----
-struct UartPort {
-    USART_TypeDef* instance;
-    PinName tx;
-    PinName rx;
-    DmaChannel* dmaTx;
-    uint32_t dmaTxRequest;
-    DmaChannel* dmaRx;
-    uint32_t dmaRxRequest;
-};
-
-inline const UartPort UART = {USART2, PA_2, PA_3,
-                              GPDMA1_Channel3, GPDMA1_REQUEST_USART2_TX,
-                              GPDMA1_Channel2, GPDMA1_REQUEST_USART2_RX};
+// ---- Bluetooth module (USART2) ----
+inline const UartHardware BLUETOOTH_UART = {USART2, PA_2, PA_3,
+                                            GPDMA1_Channel3, GPDMA1_REQUEST_USART2_TX,
+                                            GPDMA1_Channel2, GPDMA1_REQUEST_USART2_RX};
+constexpr uint32_t BLUETOOTH_BAUD = 115200;   // TODO: match the module's configured rate
 
 } // namespace board
 

@@ -583,6 +583,11 @@ class SimulationState {
 		return 'Invalid username or password.';
 	}
 
+	/** Public form of {@link _authInit} for feature modules (e.g. the Lab) with their own fetches. */
+	authInit(headers: Record<string, string> = {}): RequestInit {
+		return this._authInit(headers);
+	}
+
 	/** Request init carrying the right credentials for the active auth mode. */
 	private _authInit(headers: Record<string, string> = {}): RequestInit {
 		if (this.oauthMode) {

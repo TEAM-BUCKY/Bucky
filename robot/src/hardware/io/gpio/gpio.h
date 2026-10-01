@@ -28,7 +28,7 @@ static FORCE_INLINE GpioPin gpio_pin_init(const int pin)
 
 static FORCE_INLINE void gpio_mode(const GpioPin gp, const int mode)
 {
-    const uint8_t pos = GetLSB(gp.mask);
+    const uint8_t pos = getLSB(gp.mask);
     writeField(gp.port->MODER, 0x3U, pos * 2, mode == OUTPUT ? 1U : 0U);
 
     if (mode == INPUT_PULLUP)

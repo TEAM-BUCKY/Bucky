@@ -10,7 +10,7 @@
 	import EvalTransport from '$lib/components/eval/EvalTransport.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { ChartLine, Boxes, Gamepad2 } from '@lucide/svelte';
+	import { ChartLine, Boxes, Gamepad2, TestTubes } from '@lucide/svelte';
 
 	onMount(() => {
 		simulation.connect();
@@ -67,6 +67,9 @@
 						</span>
 						<Button href="/viz" variant="ghost" size="xs" class="font-mono text-[11px]">
 							<ChartLine class="size-3" />Train
+						</Button>
+						<Button href="/lab" variant="ghost" size="xs" class="font-mono text-[11px]">
+							<TestTubes class="size-3" />Lab
 						</Button>
 						<Button href="/play" variant="ghost" size="xs" class="font-mono text-[11px]">
 							<Gamepad2 class="size-3" />Play a friend

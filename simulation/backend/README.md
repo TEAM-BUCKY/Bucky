@@ -133,6 +133,26 @@ does accept `--stream-url ws://host/api/ingest` directly if you want to stream a
 uv run python scripts/eval.py --checkpoint checkpoints/PUSH_TO_EMPTY_GOAL_seed0/final_model
 ```
 
+## Lab: test hand-written robot code
+
+Drop a module (a drive formula today; compass/sonar/line code later) into
+`bucky/lab/user/*.py` and sweep it over every start position in the real training physics.
+Modules are written in the **user frame**: cm, robot at the origin, field-aligned, +y = opponent
+goal (the same picture as a GeoGebra sketch). They only see sensor readings (`ctx.ball`,
+`ctx.compass`, …), so the code ports to the robot. See `bucky/lab/user/bisector_drive.py`.
+
+```bash
+uv run python scripts/lab.py list                                   # modules, params, experiments
+uv run python scripts/lab.py sweep bisector --grid ball_step_cm=10  # summary + worst cases
+uv run python scripts/lab.py sweep bisector --variant slow:speed=0.3 --variant wide:behind_dist=30
+uv run python scripts/lab.py replay bisector --ball 0 0 --robot 0 40
+```
+
+The dashboard's `/lab` page does the same with a heatmap and replays. Files are re-read on every
+run, so no restart is needed. Extension points: new sensors go in `bucky/lab/sensors/`
+(`@register_sensor`), and new module kinds plus their scoring go in `bucky/lab/experiments/`
+(`@register_experiment`).
+
 ## Export ONNX
 
 ```bash

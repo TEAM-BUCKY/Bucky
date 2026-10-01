@@ -3,7 +3,7 @@
 #include "board/board.h"
 #include "hardware/io/cordic/cordic.h"
 #include "hardware/io/i2c/I2CDMA.h"
-#include "hardware/io/uart/UARTDMA.h"
+#include "hardware/io/serial/SerialPort.h"
 #include "hardware/motor/MotorDriver.h"
 #include "hardware/sensors/pos/Compass.h"
 #include "hardware/sensors/pos/Sonar.h"
@@ -31,14 +31,14 @@ GPort gPort2;
 [[maybe_unused]] [[maybe_unused]] static GPort* irPort() { return nullptr; }
 #endif
 
-#ifdef BOARD_HAS_UART
-static uint8_t uartTxBuf[512];
-static uint8_t uartRxBuf[256];
-UartDma uart;
+UsbSerialPort host;
+
+#ifdef BOARD_HAS_BLUETOOTH
+UartSerialPort<512, 256> bluetooth;
 #endif
 
 void setupEnvironment() {
-    Serial.begin(115200);
+    host.begin();
     cordic_init();
 
     i2c_dma_init<board::SENSOR_I2C_FREQ>(&sensorI2C, board::SENSOR_I2C.instance,
@@ -48,25 +48,8 @@ void setupEnvironment() {
     compass.begin(sensorI2C);
     accel.begin(sensorI2C);
 
-#ifdef BOARD_HAS_UART
-    const UartDmaConfig uartConfig = {
-        .uart = board::UART.instance,
-        .tx_pin = board::UART.tx,
-        .rx_pin = board::UART.rx,
-        .baud = 115200,
-        .tx_dma = board::UART.dmaTx,
-        .tx_request = board::UART.dmaTxRequest,
-        .tx_buf = uartTxBuf,
-        .tx_size = sizeof(uartTxBuf),
-        .rx_dma = board::UART.dmaRx,
-        .rx_request = board::UART.dmaRxRequest,
-        .rx_buf = uartRxBuf,
-        .rx_size = sizeof(uartRxBuf),
-        .irq_priority = 4,
-        .on_rx = nullptr,
-        .on_rx_ctx = nullptr,
-    };
-    uart_dma_init(&uart, &uartConfig);
+#ifdef BOARD_HAS_BLUETOOTH
+    bluetooth.begin(board::BLUETOOTH_UART, board::BLUETOOTH_BAUD);
 #endif
 
     analogReadResolution(12);
@@ -104,6 +87,7 @@ void setupEnvironment() {
     setupEnvironment();
 
 #ifdef RUN_TEST
+    dbg.setBlocking(true);   // test reports are long; let them arrive complete
     const TestContext ctx = {motorDriver, compass, accel, sonar, sensorI2C, irPort()};
     RUN_TEST(ctx);
 #endif

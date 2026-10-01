@@ -339,7 +339,7 @@ static FORCE_INLINE void pwm_commit()
 
     uint8_t dirty = pwm_sync.dirtyPins;
     Bitloop(dirty) {
-        const PwmStagedPin &pin = pwm_sync.pins[GetLSB(dirty)];
+        const PwmStagedPin &pin = pwm_sync.pins[getLSB(dirty)];
 #if defined(HRTIM1)
         if (pin.hrtimOutputEnableMask != 0) {
             hrtim_write_output(pin.ccr, pin.hrtimOutputEnableMask, pin.value);

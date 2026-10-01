@@ -24,6 +24,17 @@
 extern "C" {
 #endif
 
+/* Board wiring of one USART. */
+typedef struct {
+    USART_TypeDef* instance;
+    PinName        tx;
+    PinName        rx;
+    DmaChannel*    dmaTx;
+    uint32_t       dmaTxRequest;
+    DmaChannel*    dmaRx;
+    uint32_t       dmaRxRequest;
+} UartHardware;
+
 typedef struct {
     USART_TypeDef* uart;
     PinName        tx_pin;

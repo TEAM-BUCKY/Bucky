@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 
 	// ── Public props ─────────────────────────────────────────────────────────
@@ -53,6 +54,9 @@
 		// animation at kickFx (pinned where the ball was struck, since it flies off).
 		kickPulse = 0,
 		kickFx = null,
+		// Extra SVG drawn in field space (mm, +Y = enemy goal) above the markings and below the
+		// ball/robots — heatmaps, trails, debug points. Note the group is Y-flipped (no text).
+		overlay,
 		class: className = '',
 		style,
 	}: {
@@ -90,6 +94,7 @@
 		fit?: boolean;
 		kickPulse?: number;
 		kickFx?: { x: number; y: number; color: string } | null;
+		overlay?: Snippet;
 		class?: string;
 		style?: string;
 	} = $props();
@@ -385,6 +390,8 @@
 					x2={GOAL_HW}  y2={FH2 + NZ}
 					stroke={enemyGoalColor} stroke-width="6" stroke-dasharray="20 12"
 			/>
+
+			{#if overlay}{@render overlay()}{/if}
 
 			<!-- Ball -->
 			{#if showBall}

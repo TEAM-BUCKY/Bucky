@@ -31,6 +31,7 @@ from .auth import OAUTH_STATE_COOKIE, SESSION_COOKIE, current_user, require_cont
 from .broadcast import Broadcaster
 from .config import settings
 from .jobs import JobManager
+from .lab import LabJobs
 from .oauth import OAuthError
 
 log = logging.getLogger(__name__)
@@ -126,6 +127,34 @@ class EvalControlRequest(BaseModel):
     speed: Optional[float] = None
     paused: Optional[bool] = None
     step: Optional[int] = None
+
+
+class LabVariant(BaseModel):
+    label: str = ""
+    params: dict = {}
+
+
+class LabSweepRequest(BaseModel):
+    module: str
+    kind: str = "drive"
+    experiment: str = "drive_approach"
+    params: dict = {}
+    variants: Optional[list[LabVariant]] = None
+    grid: dict = {}
+    sensor_params: dict = {}
+    workers: Optional[int] = None
+    seed: int = 0
+
+
+class LabReplayRequest(BaseModel):
+    module: str
+    scenario: dict
+    kind: str = "drive"
+    experiment: str = "drive_approach"
+    params: dict = {}
+    grid: dict = {}
+    sensor_params: dict = {}
+    seed: int = 0
 
 
 class ControlRequest(BaseModel):
@@ -509,6 +538,51 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
     @router.post("/eval/control")
     async def eval_control(req: EvalControlRequest, _user: str = Depends(require_control)) -> dict:
         return await manager.eval_control(req.model_dump())
+
+    # ── Bucky Lab: sweep hand-written modules over every start position ──────────
+    lab_jobs = LabJobs()
+
+    @router.get("/lab/modules")
+    async def lab_modules(kind: Optional[str] = None) -> dict:
+        """User modules (re-read from disk on every call), plus files that failed to load."""
+        from bucky.lab import registry
+        from bucky.lab.sensors import list_sensors
+
+        await asyncio.to_thread(registry.discover)
+        return {"modules": registry.list_modules(kind), "errors": registry.load_errors(),
+                "sensors": list_sensors()}
+
+    @router.get("/lab/experiments")
+    async def lab_experiments(kind: Optional[str] = None) -> dict:
+        from bucky.lab.experiments import list_experiments
+
+        return {"experiments": list_experiments(kind)}
+
+    @router.post("/lab/sweep")
+    async def lab_sweep(req: LabSweepRequest, _user: str = Depends(require_control)) -> dict:
+        try:
+            return lab_jobs.start(req.model_dump(), actor=_user)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+
+    @router.get("/lab/sweep/{job_id}")
+    async def lab_sweep_status(job_id: str) -> dict:
+        view = lab_jobs.view(job_id)
+        if view is None:
+            raise HTTPException(status_code=404, detail="unknown lab sweep")
+        return view
+
+    @router.post("/lab/replay")
+    async def lab_replay(req: LabReplayRequest, _user: str = Depends(require_control)) -> dict:
+        from bucky.lab.runner import replay
+
+        try:
+            return await asyncio.to_thread(
+                replay, req.module, req.scenario, kind=req.kind, experiment=req.experiment,
+                params=req.params, grid=req.grid, sensor_params=req.sensor_params, seed=req.seed,
+            )
+        except (KeyError, ValueError, NotImplementedError) as e:
+            raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
 
     # ── competition brackets (round-robin tournaments) ───────────────────────────
     @router.post("/tournament")

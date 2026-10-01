@@ -1,13 +1,16 @@
 #ifndef BUCKY_BITBOARD_H
 #define BUCKY_BITBOARD_H
 
+
+typedef uint32_t bitboard_32;
+
 #define setBit(board, position) ((board) |= (1U << (position)))
 #define clearBit(board, position) ((board) &= ~(1U << (position)))
 #define toggleBit(board, position) ((board) ^= (1U << (position)))
 #define getBit(board, position) ((board) & (1U << (position)))
 #define popBit(board) ((board) & ((board) - 1))
 #define Bitloop(board) for (; (board); (board) = popBit(board))
-#define GetLSB(board) (__builtin_ctz(board))
+#define getLSB(board) (__builtin_ctz(board))
 
 #define writeField(reg, mask, shift, value) \
     ((reg) = ((reg) & ~((uint32_t)(mask) << (shift))) | ((uint32_t)(value) << (shift)))

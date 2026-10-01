@@ -131,7 +131,7 @@ void MotorDriver::syncUpdateAllMotors() {
 }
 
 void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed) {
-    DBG_PRINTLN("Motor drive: beginSpeed=" + String(motor.beginSpeed) + ", targetSpeed=" + String(motor.targetSpeed) + ", totalSpeed=" + String(motor.totalSpeed));
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, "Motor drive: beginSpeed=" + String(motor.beginSpeed) + ", targetSpeed=" + String(motor.targetSpeed) + ", totalSpeed=" + String(motor.totalSpeed));
     if (motor.targetSpeed == speed && motor.totalSpeed == totalSpeed)
         return;
     motor.beginSpeed = motor.motor.currentSpeed;
@@ -163,7 +163,7 @@ void MotorDriver::driveRadians(const float radians, const float scale, const flo
     for (uint8_t i = 0; i < MOTOR_COUNT; i++)
         drive(motors[i], clampSpeed(speeds[i]), scale);
 
-    DBG_PRINTLN("");
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, "Drive: radians=" + String(radians) + ", scale=" + String(scale) + ", rotation=" + String(rotation));
 }
 
 void MotorDriver::driveVector(const VectorXY vector, const float rotation) {

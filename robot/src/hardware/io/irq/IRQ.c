@@ -95,7 +95,7 @@ static void exti_dispatch(void* ctx)
     uint32_t pending = EXTI->PR1 & EXTI->IMR1 & (uint32_t)(uintptr_t)ctx;
     EXTI->PR1 = pending;
     Bitloop(pending) {
-        const ExtiSlot* s = &exti_slots[GetLSB(pending)];
+        const ExtiSlot* s = &exti_slots[getLSB(pending)];
         if (s->handler) s->handler(s->ctx);
     }
 }
