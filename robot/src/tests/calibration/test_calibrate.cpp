@@ -1,4 +1,5 @@
 #include "../tests.h"
+#include "calibration_storage.h"
 #include "debug.h"
 #include <Arduino.h>
 #include <EEPROM.h>
@@ -23,24 +24,10 @@ static void fastEEPROMPut(const uint32_t addr, const T& value) {
     eeprom_buffer_flush();
 }
 
-#define CALIBRATION_MAGIC 0xCA1B0003
 #define CAL_LOG_MAGIC     0xCA106001
 #define CAL_LOG_ADDR      512
 
-constexpr uint8_t NUM_DIRECTIONS = 12;
-constexpr float SIN_60 = 0.8660254037844f;
-
-struct StoredCalibration {
-    uint32_t magic;
-    float maxTicksPerSec[3];
-    float linearityRatio[3];
-    float dirScale[NUM_DIRECTIONS];
-    float dirOffsetDeg[NUM_DIRECTIONS];
-    bool  dirValid;
-    float magOffset[3];   // LIS2MDL hard-iron X/Y/Z
-    float magScale[3];    // LIS2MDL soft-iron diagonal X/Y/Z
-    bool  magValid;
-};
+constexpr float SIN_60 = MotorDriver::SIN_60;
 
 // Diagnostic log written unconditionally at the end of every run so calibration
 // can be done without a laptop attached and reviewed later via testCalibrationDump.
@@ -114,7 +101,7 @@ bool loadCalibration(MotorDriver& md, Compass& compass) {
 }
 
 // Compute omni-drive motor speeds and apply via driveMotorsDirect (no smooth ramp).
-// Uses the same inverse kinematics + rotation scaling as driveRadians.
+// Uses the same inverse kinematics as driveRadians.
 // After this, syncUpdateAllMotors will apply PI feedback if gains are non-zero.
 static void driveDirectDegrees(MotorDriver& md, const float degrees, const float scale, const float rotation) {
     const float rad = Math::degreesToRadians(degrees);
@@ -124,14 +111,10 @@ static void driveDirectDegrees(MotorDriver& md, const float degrees, const float
     // returns ±50 max (boosted for calibration). M1 and M3 direction pins
     // are physically flipped on this board; their entire computed output
     // is negated so physical wheels match the kinematic formula. M2 is
-    // normal. Same compensation as MotorDriver::driveRadians.
-    const float m1Raw = (0.5f * sinR - SIN_60 * cosR) * scale + rotation;
-    const float m2Raw = -sinR * scale + rotation;
-    const float m3Raw = (0.5f * sinR + SIN_60 * cosR) * scale + rotation;
-    const float m1 = fmaxf(-100.0f, fminf(100.0f, -m1Raw));
-    const float m2 = fmaxf(-100.0f, fminf(100.0f,  m2Raw));
-    const float m3 = fmaxf(-100.0f, fminf(100.0f, -m3Raw));
-    md.driveMotorsDirect(m1, m2, m3);
+    // normal. driveMotorsDirect clamps to ±100.
+    float raw[MotorDriver::MOTOR_COUNT];
+    MotorDriver::wheelSpeeds(sinR, cosR, scale, rotation, raw);
+    md.driveMotorsDirect(-raw[0], raw[1], -raw[2]);
 }
 
 static void updateLoop(MotorDriver& md, const uint32_t durationMs) {

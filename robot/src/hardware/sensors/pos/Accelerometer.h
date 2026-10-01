@@ -18,6 +18,9 @@ class Accelerometer {
     // HR mode (12-bit), ±2g => 0.98 mg/digit after right-shifting the 16-bit frame by 4.
     static constexpr float MG_PER_LSB = 0.98f;
 
+    void writeReg(const uint8_t reg, const uint8_t value) const { i2c_dma_write_reg(bus, LSM303AGR_ACC_ADDR, reg, value); }
+    [[nodiscard]] uint8_t readReg(const uint8_t reg) const { return i2c_dma_read_reg_blocking(bus, LSM303AGR_ACC_ADDR, reg); }
+
 public:
     void begin(I2CDMABus& busRef);
     [[nodiscard]] bool isOk() const { return ok; }

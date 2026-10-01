@@ -39,11 +39,6 @@ static FORCE_INLINE void gpio_mode(const GpioPin gp, const int mode)
         clearField(gp.port->PUPDR, 0x3U, pos * 2);
 }
 
-static FORCE_INLINE void gpio_write(const GpioPin gp, const int high)
-{
-    gp.port->BSRR = high ? gp.mask : static_cast<uint32_t>(gp.mask) << 16;
-}
-
 static FORCE_INLINE int gpio_read(const GpioPin gp)
 {
     return (gp.port->IDR & gp.mask) != 0;
@@ -59,9 +54,24 @@ static FORCE_INLINE void gpio_low(const GpioPin gp)
     gp.port->BSRR = static_cast<uint32_t>(gp.mask) << 16;
 }
 
+static FORCE_INLINE void gpio_write(const GpioPin gp, const int high)
+{
+    if (high) gpio_high(gp);
+    else      gpio_low(gp);
+}
+
 static FORCE_INLINE void gpio_toggle(const GpioPin gp)
 {
     toggleMask(gp.port->ODR, gp.mask);
+}
+
+// Drive the pad as a low GPIO output, e.g. until a peripheral takes it over.
+// Any _ALTn suffix is ignored.
+static FORCE_INLINE void gpio_hold_low(const PinName pn)
+{
+    const auto pad = static_cast<PinName>(pn & PNAME_MASK);
+    pinMode(pinNametoDigitalPin(pad), OUTPUT);
+    digitalWriteFast(pad, LOW);
 }
 
 #endif // BUCKY_GPIO_H

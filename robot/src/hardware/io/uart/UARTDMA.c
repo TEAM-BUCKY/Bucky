@@ -8,46 +8,29 @@
 
 #include "optimizations/bitboard.h"
 
-static void uart_clock_enable(const USART_TypeDef* uart)
-{
-    if      (uart == USART1) __HAL_RCC_USART1_CLK_ENABLE();
-    else if (uart == USART2) __HAL_RCC_USART2_CLK_ENABLE();
-    else if (uart == USART3) __HAL_RCC_USART3_CLK_ENABLE();
-#ifdef UART4
-    else if (uart == UART4)  __HAL_RCC_UART4_CLK_ENABLE();
-#endif
-#ifdef UART5
-    else if (uart == UART5)  __HAL_RCC_UART5_CLK_ENABLE();
-#endif
-#ifdef USART6
-    else if (uart == USART6) __HAL_RCC_USART6_CLK_ENABLE();
-#endif
-#ifdef UART7
-    else if (uart == UART7)  __HAL_RCC_UART7_CLK_ENABLE();
-#endif
-#ifdef UART8
-    else if (uart == UART8)  __HAL_RCC_UART8_CLK_ENABLE();
-#endif
-}
+/* Enable the instance's RCC clock and return its interrupt. */
+#define UART_CASE(inst) \
+    if (uart == inst) { __HAL_RCC_##inst##_CLK_ENABLE(); return inst##_IRQn; }
 
-static IRQn_Type uart_irqn(const USART_TypeDef* uart)
+static IRQn_Type uart_clock_enable(const USART_TypeDef* uart)
 {
-    if (uart == USART1) return USART1_IRQn;
-    if (uart == USART2) return USART2_IRQn;
+    UART_CASE(USART1)
+    UART_CASE(USART2)
+    UART_CASE(USART3)
 #ifdef UART4
-    if (uart == UART4)  return UART4_IRQn;
+    UART_CASE(UART4)
 #endif
 #ifdef UART5
-    if (uart == UART5)  return UART5_IRQn;
+    UART_CASE(UART5)
 #endif
 #ifdef USART6
-    if (uart == USART6) return USART6_IRQn;
+    UART_CASE(USART6)
 #endif
 #ifdef UART7
-    if (uart == UART7)  return UART7_IRQn;
+    UART_CASE(UART7)
 #endif
 #ifdef UART8
-    if (uart == UART8)  return UART8_IRQn;
+    UART_CASE(UART8)
 #endif
     return USART3_IRQn;
 }
@@ -99,7 +82,7 @@ void uart_dma_init(UartDma* u, const UartDmaConfig* cfg)
     u->cfg = *cfg;
     USART_TypeDef* uart = cfg->uart;
 
-    uart_clock_enable(uart);
+    const IRQn_Type uart_irq = uart_clock_enable(uart);
     pinmap_pinout(cfg->tx_pin, PinMap_UART_TX);
     pinmap_pinout(cfg->rx_pin, PinMap_UART_RX);
 
@@ -125,7 +108,7 @@ void uart_dma_init(UartDma* u, const UartDmaConfig* cfg)
               | (cfg->on_rx ? USART_CR1_IDLEIE : 0U);
 
     if (cfg->on_rx)
-        irq_attach(uart_irqn(uart), uart_isr, u, cfg->irq_priority);
+        irq_attach(uart_irq, uart_isr, u, cfg->irq_priority);
 }
 
 size_t uart_dma_write_available(const UartDma* u)
@@ -146,11 +129,10 @@ size_t uart_dma_write(UartDma* u, const uint8_t* data, size_t len)
         head = (uint16_t)((head + 1U) & mask);
     }
 
-    const uint32_t primask = __get_PRIMASK();
-    __disable_irq();
+    const uint32_t primask = irq_lock();
     u->tx_head = head;
     tx_kick(u);
-    __set_PRIMASK(primask);
+    irq_restore(primask);
 
     return len;
 }

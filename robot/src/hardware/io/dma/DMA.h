@@ -58,13 +58,6 @@ uint32_t dma_take_events(DmaChannel* ch);
 
 IRQn_Type dma_irqn(const DmaChannel* ch);
 
-// Legacy helpers kept for the IR sensor code.
-void dma_init_mem_to_periph_32(DmaChannel* ch, volatile void* periph_addr, const void* mem_addr,
-                               uint32_t transfer_count, uint32_t request);
-
-void dma_init_periph_to_mem_16(DmaChannel* ch, volatile void* periph_addr, volatile void* mem_addr,
-                               uint32_t transfer_count, uint32_t request);
-
 #ifdef __cplusplus
 }
 #endif

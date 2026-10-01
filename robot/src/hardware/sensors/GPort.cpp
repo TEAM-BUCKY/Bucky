@@ -4,13 +4,11 @@
 #include <pinmap.h>
 
 #include "hardware/io/adc/ADC.h"
-#include "hardware/io/gpio/pwm.h"
+#include "hardware/io/gpio/gpio.h"
 #include "hardware/io/timer/LPTIM.h"
 #include "hardware/io/timer/Timer.h"
-#include "optimizations/bitboard.h"
 
 constexpr uint8_t GPORT_RESET_PRIORITY = 2;
-constexpr uint32_t MMS_OC1REF = 4;   // TRGO = OCxREF: 4 + channel index
 
 bool GPort::begin(const GPortHardware& hw, const GSensorKind kind) {
     return begin(hw, kind, kind == GSensorKind::Line ? G_TIMING_LINE : G_TIMING_IR);
@@ -44,30 +42,24 @@ bool GPort::begin(const GPortHardware& hw, const GSensorKind kind, const GPortTi
                                     ? ADC_TRIGGER_RISING : ADC_TRIGGER_FALLING;
     adc_init_triggered(adc, channel, ADC_EXTSEL_FROM_HAL(hw.adcTrigger), timing.adcSampleTime, sampleEdge);
 
-    // ---- Loop boundary ----
     if (!exti_attach(hw.resetPin, hw.resetEdge, onReset, this, GPORT_RESET_PRIORITY))
         return false;
 
-    // ---- Board outputs ----
     if (kind == GSensorKind::Line && timing.modulationHz != 0) {
-        if (!startModulation(hw, timing.modulationHz)) return false;
+        TIM_TypeDef* mod = tim_pwm_setup(hw.modulationPin, timing.modulationHz, 500, nullptr);
+        if (mod == nullptr) return false;
+        tim_start(mod);
     } else if (hw.modulationPin != NC) {
-        const PinName pad = static_cast<PinName>(hw.modulationPin & PNAME_MASK);
-        pinMode(pinNametoDigitalPin(pad), OUTPUT);
-        digitalWriteFast(pad, LOW);
+        gpio_hold_low(hw.modulationPin);
     }
 
     return startClock(hw, timing.sampleRateHz);
 }
 
-// 50% duty clock whose OCxREF (TIMx) or channel output (LPTIMx) also triggers the ADC.
 bool GPort::startClock(const GPortHardware& hw, const uint32_t rateHz) {
-    if (rateHz == 0) return false;
-
 #if defined(MCU_FAMILY_H5)
     if (hw.clockLptim != nullptr) {
-        LptimPwmInfo info;
-        if (!lptim_pwm_start(hw.clockLptim, hw.clockLptimChannel, rateHz, 500, false, &info))
+        if (!lptim_pwm_start(hw.clockLptim, hw.clockLptimChannel, rateHz, 500))
             return false;
         lptim_pin_connect(hw.clockPin, hw.clockLptimAf);
         return true;
@@ -75,49 +67,11 @@ bool GPort::startClock(const GPortHardware& hw, const uint32_t rateHz) {
 #endif
 
     uint8_t ch = 0;
-    bool complementary = false;
-    TIM_TypeDef* tim = tim_from_pin(hw.clockPin, &ch, &complementary);
+    TIM_TypeDef* tim = tim_pwm_setup(hw.clockPin, rateHz, 500, &ch);
     if (tim == nullptr) return false;
 
-    tim_clock_enable(tim);
-    tim_stop(tim);
-
-    const uint32_t clk = tim_clock_hz(tim);
-    const uint32_t periodTicks = clk / rateHz;
-    const uint32_t psc = (periodTicks - 1U) / 0x10000U;
-    const uint32_t arr = clk / ((psc + 1U) * rateHz) - 1U;
-
-    tim->PSC = psc;
-    tim->ARR = arr;
-
-    volatile uint32_t* ccmr = &tim->CCMR1 + (ch >> 1);
-    writeField(*ccmr, 0xFFU, (ch & 1U) * 8U, 0x68U);   // PWM mode 1, preload
-    (&tim->CCR1)[ch] = (arr + 1U) / 2U;
-
-    setBit(tim->CCER, ch * 4U + (complementary ? 2U : 0U));
-    if (complementary) setBit(tim->CCER, ch * 4U + 3U);
-    if (IS_TIM_BREAK_INSTANCE(tim)) setMask(tim->BDTR, TIM_BDTR_MOE);
-
-    tim_set_trgo(tim, MMS_OC1REF + ch);
-    setMask(tim->CR1, TIM_CR1_ARPE);
-    tim->EGR = TIM_EGR_UG;
-    tim->SR = 0;
-
-    tim_pin_connect(hw.clockPin);
+    tim_set_trgo(tim, TIM_TRGO_OCREF(ch));
     tim_start(tim);
-    return true;
-}
-
-bool GPort::startModulation(const GPortHardware& hw, const uint32_t freqHz) {
-    PwmPin pw = pwm_pin_init(hw.modulationPin);
-    if (pw.timer == nullptr) return false;
-
-    tim_clock_enable(pw.timer);
-    const uint32_t resolution = tim_clock_hz(pw.timer) / freqHz - 1U;   // PSC = 0
-    if (resolution > 0xFFFFU) return false;
-
-    pwm_init(&pw, freqHz, resolution);
-    pwm_write(&pw, (resolution + 1U) / 2U);
     return true;
 }
 

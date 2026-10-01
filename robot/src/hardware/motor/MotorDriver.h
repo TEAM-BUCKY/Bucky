@@ -47,17 +47,18 @@ struct SpeedRange {
 };
 
 class MotorDriver {
-    MotorPin m1;
-    MotorPin m2;
-    MotorPin m3;
+public:
+    static constexpr uint8_t MOTOR_COUNT = 3;
+    static constexpr float SIN_60 = 0.8660254037844f;
 
-    MotorPwm pw1;
-    MotorPwm pw2;
-    MotorPwm pw3;
+    // Omni-wheel inverse kinematics: wheel speeds (in % before clamping) for a
+    // heading given as sin/cos, a translation scale and a rotation term.
+    static void wheelSpeeds(float sinHeading, float cosHeading, float scale, float rotation,
+                            float out[MOTOR_COUNT]);
 
-    Motor motor1;
-    Motor motor2;
-    Motor motor3;
+private:
+    MotorPin pins[MOTOR_COUNT];
+    Motor motors[MOTOR_COUNT];
 
     SpeedRange speedRange = {MIN_SPEED, MAX_SPEED, (MAX_SPEED - MIN_SPEED) / 100.0f};
 
@@ -65,7 +66,7 @@ class MotorDriver {
     float kP = 0.5f;
     float kI = 0.05f;
     float piIntegralMax = 30.0f;
-    float maxTicksPerSec[3] = {1200.0f, 1200.0f, 1200.0f};
+    float maxTicksPerSec[MOTOR_COUNT] = {1200.0f, 1200.0f, 1200.0f};
 
     template<bool stage>
     void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
@@ -73,13 +74,11 @@ class MotorDriver {
     void updateMotor(Motor& motor) const;
     static void drive(Motor& motor, float speed, float totalSpeed);
 
-    void syncUpdateMotor(Motor& motor) const;
-
 public:
-    MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : m1(m1), m2(m2), m3(m3) {};
+    MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : pins{m1, m2, m3} {}
 
     void init(float minSpeed = MIN_SPEED, float maxSpeed = MAX_SPEED,
-              const EncoderPins enc[3] = nullptr);
+              const EncoderPins enc[MOTOR_COUNT] = nullptr);
 
     void updateAllMotors();
     void syncUpdateAllMotors();
@@ -90,8 +89,7 @@ public:
     void driveMotorsDirect(float m1Speed, float m2Speed, float m3Speed);
 
     void changeSpeed(const float minSpeed = MIN_SPEED, const float maxSpeed = MAX_SPEED) {
-        this->speedRange.min = minSpeed;
-        this->speedRange.max = maxSpeed;
+        speedRange = {minSpeed, maxSpeed, (maxSpeed - minSpeed) / 100.0f};
     }
 
     [[nodiscard]] SpeedRange getSpeedRange() const
@@ -106,11 +104,11 @@ public:
     }
 
     void setMaxTicksPerSec(const float tps) {
-        maxTicksPerSec[0] = maxTicksPerSec[1] = maxTicksPerSec[2] = tps;
+        for (float& max : maxTicksPerSec) max = tps;
     }
 
     void setMaxTicksPerSec(const uint8_t motor, const float tps) {
-        if (motor < 3) maxTicksPerSec[motor] = tps;
+        if (motor < MOTOR_COUNT) maxTicksPerSec[motor] = tps;
     }
 };
 

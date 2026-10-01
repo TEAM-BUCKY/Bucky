@@ -1,21 +1,16 @@
-#include <cmath>
-
 #include "debug.h"
 
 #include "board/board.h"
+#include "hardware/io/cordic/cordic.h"
+#include "hardware/io/i2c/I2CDMA.h"
+#include "hardware/io/uart/UARTDMA.h"
 #include "hardware/motor/MotorDriver.h"
-#include <hardware/io/i2c/I2CDMA.h>
-#include <hardware/io/uart/UARTDMA.h>
-#include <hardware/sensors/pos/Compass.h>
-#include <hardware/sensors/pos/Sonar.h>
-#include <hardware/io/cordic/cordic.h>
-#include <hardware/sensors/IRSensor.h>
-#include <tests/tests.h>
+#include "hardware/sensors/pos/Compass.h"
+#include "hardware/sensors/pos/Sonar.h"
+#include "tests/tests.h"
 
-// Set to run a test instead of the main loop. testADCRaw runs before
-// setupEnvironment for clean isolation; all others run after.
+// Set to run a test instead of the main loop.
 // #define RUN_TEST testDriveForward
-// #define RUN_TEST_EARLY  // only for testADCRaw (runs before setupEnvironment)
 
 MotorDriver motorDriver(board::MOTOR1, board::MOTOR2, board::MOTOR3);
 I2CDMABus sensorI2C;
@@ -26,6 +21,14 @@ Sonar sonar;
 #ifdef BOARD_HAS_GPORTS
 GPort gPort1;
 GPort gPort2;
+
+[[maybe_unused]] static GPort* irPort() {
+    if (board::G_PORT1_KIND == GSensorKind::IR) return &gPort1;
+    if (board::G_PORT2_KIND == GSensorKind::IR) return &gPort2;
+    return nullptr;
+}
+#else
+[[maybe_unused]] [[maybe_unused]] static GPort* irPort() { return nullptr; }
 #endif
 
 #ifdef BOARD_HAS_UART
@@ -75,8 +78,6 @@ void setupEnvironment() {
 #ifdef BOARD_HAS_GPORTS
     if (!gPort1.begin(board::G_PORT1, board::G_PORT1_KIND)) DBG_PRINTLN("G port 1 init failed");
     if (!gPort2.begin(board::G_PORT2, board::G_PORT2_KIND)) DBG_PRINTLN("G port 2 init failed");
-#else
-    ir_sensor_init();
 #endif
 
     while (!compass.tick()) {}
@@ -98,33 +99,15 @@ void setupEnvironment() {
     sonar.startRead();
 }
 
-// Board 1 is disabled in IRSensor.h; the active IR ring is Board 2.
-constexpr uint8_t boardIR = 2;
-
 [[noreturn]] int main() {
     init();
-//
-// #ifdef RUN_TEST
-//     delay(5000);
-// #endif
-
-#if defined(RUN_TEST) && defined(RUN_TEST_EARLY)
-    // Early tests run BEFORE setupEnvironment to avoid DMA/timer/OPAMP contamination.
-    Serial.begin(115200);
-    { constexpr TestContext ctx = {motorDriver, compass, accel, sonar, sensorI2C}; RUN_TEST(ctx); }
-#endif
-
     setupEnvironment();
 
-#if defined(RUN_TEST) && !defined(RUN_TEST_EARLY)
-    constexpr TestContext ctx = {motorDriver, compass, accel, sonar, sensorI2C};
-
+#ifdef RUN_TEST
+    const TestContext ctx = {motorDriver, compass, accel, sonar, sensorI2C, irPort()};
     RUN_TEST(ctx);
-#else
-
+#endif
 
     while (true) {
-
     }
-#endif
 }

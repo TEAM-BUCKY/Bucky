@@ -1,26 +1,10 @@
 #include "../tests.h"
+#include "calibration_storage.h"
 #include "debug.h"
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <limits.h>
 #include <cmath>
-
-// Same layout as test_calibrate.cpp — kept local to avoid leaking the struct into a
-// header. Any change here must also be mirrored there.
-#define CALIBRATION_MAGIC 0xCA1B0003
-constexpr uint8_t NUM_DIRECTIONS = 12;
-
-struct StoredCalibration {
-    uint32_t magic;
-    float maxTicksPerSec[3];
-    float linearityRatio[3];
-    float dirScale[NUM_DIRECTIONS];
-    float dirOffsetDeg[NUM_DIRECTIONS];
-    bool  dirValid;
-    float magOffset[3];
-    float magScale[3];
-    bool  magValid;
-};
 
 void testCompassCalibrate(const TestContext& ctx) {
     DBG_PRINTLN("=== LIS2MDL Compass Calibration ===");

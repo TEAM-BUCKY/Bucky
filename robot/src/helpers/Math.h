@@ -361,6 +361,14 @@ namespace Math
 		return radians;
 	}
 
+	// Wrap into ±180 (one step, inputs within ±540).
+	FORCE_INLINE float wrapSignedDegrees(float degrees)
+	{
+		if (degrees > 180.0f) degrees -= 360.0f;
+		else if (degrees < -180.0f) degrees += 360.0f;
+		return degrees;
+	}
+
 	FORCE_INLINE float wrapDegrees(float degrees)
 	{
 		if (degrees >= 360.0f) degrees -= 360.0f;

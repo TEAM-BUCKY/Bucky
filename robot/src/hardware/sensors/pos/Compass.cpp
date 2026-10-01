@@ -106,19 +106,13 @@ void Compass::setCalibration(const float ox, const float oy, const float oz,
 
 bool Compass::update(const uint32_t timeoutMs) {
     startRead();
-    const uint32_t start = millis();
-    while (!isReadComplete()) {
-        if (millis() - start > timeoutMs) return false;
-    }
+    if (!i2c_dma_wait_timeout(bus, timeoutMs)) return false;
     processRead();
     return true;
 }
 
 float Compass::getOffset() const {
-    float diff = heading - startHeading;
-    if (diff > 180.0f) diff -= 360.0f;
-    if (diff < -180.0f) diff += 360.0f;
-    return diff;
+    return Math::wrapSignedDegrees(heading - startHeading);
 }
 
 float Compass::computeRotation(const float targetDegrees) {
@@ -127,9 +121,7 @@ float Compass::computeRotation(const float targetDegrees) {
     const float dtS = dtMs * 0.001f;
     lastTime = now;
 
-    float error = getOffset() - targetDegrees;
-    if (error > 180.0f) error -= 360.0f;
-    if (error < -180.0f) error += 360.0f;
+    const float error = Math::wrapSignedDegrees(getOffset() - targetDegrees);
 
     // Dirty-D: one-pole IIR on the derivative to keep magnetometer noise
     // (±0.5-1°) from driving the motors at the rated kd. Skip the state

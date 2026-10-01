@@ -6,6 +6,7 @@
 #include "hardware/sensors/pos/Accelerometer.h"
 #include "hardware/sensors/pos/Sonar.h"
 #include "hardware/io/i2c/I2CDMA.h"
+#include "hardware/sensors/GPort.h"
 
 struct TestContext {
     MotorDriver& motorDriver;
@@ -13,6 +14,7 @@ struct TestContext {
     Accelerometer& accel;
     Sonar& sonar;
     I2CDMABus& i2c;
+    GPort* irPort;   // nullptr when no G port carries the IR ring
 };
 
 void testHoldHeading(const TestContext& ctx);
@@ -24,7 +26,6 @@ void testEncoder(const TestContext& ctx);
 void testCalibrate(const TestContext& ctx);
 void testCalibrationDump(const TestContext& ctx);
 void testCompassCalibrate(const TestContext& ctx);
-void testADCRaw(const TestContext& ctx);
 void testCompass(const TestContext& ctx);
 void testIRPositioning(const TestContext& ctx);
 void testIRBallSeek(const TestContext& ctx);

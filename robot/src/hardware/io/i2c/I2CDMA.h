@@ -57,6 +57,9 @@ static FORCE_INLINE void i2c_dma_wait(const I2CDMABus* bus) {
     while (bus->busy) {}
 }
 
+// Wait for the running DMA read. False when it has not finished within timeout_ms.
+bool i2c_dma_wait_timeout(const I2CDMABus* bus, uint32_t timeout_ms);
+
 #ifdef __cplusplus
 }
 

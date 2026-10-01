@@ -31,13 +31,12 @@ static void relocate_vectors(void)
 {
     if (relocated) return;
 
-    const uint32_t primask = __get_PRIMASK();
-    __disable_irq();
+    const uint32_t primask = irq_lock();
     memcpy(ram_vectors, (const Vector*)SCB->VTOR, sizeof(ram_vectors));
     SCB->VTOR = (uint32_t)ram_vectors;
     __DSB();
     relocated = true;
-    __set_PRIMASK(primask);
+    irq_restore(primask);
 }
 
 void irq_attach(const IRQn_Type irqn, const IrqHandler handler, void* ctx, const uint8_t priority)
@@ -127,12 +126,16 @@ static IRQn_Type exti_irqn(const uint8_t line)
     return (IRQn_Type)(EXTI0_IRQn + line);
 }
 
+static void exti_clear_pending(const uint32_t bit)
+{
+    EXTI->RPR1 = bit;
+    EXTI->FPR1 = bit;
+}
+
 static void exti_dispatch(void* ctx)
 {
     const uint32_t line = (uint32_t)(uintptr_t)ctx;
-    const uint32_t bit  = 1UL << line;
-    EXTI->RPR1 = bit;
-    EXTI->FPR1 = bit;
+    exti_clear_pending(1UL << line);
     const ExtiSlot* s = &exti_slots[line];
     if (s->handler) s->handler(s->ctx);
 }
@@ -145,12 +148,6 @@ static uint32_t exti_dispatch_ctx(const uint8_t line)
 static void exti_select_port(const uint8_t line, const uint8_t port)
 {
     writeField(EXTI->EXTICR[line >> 2], 0xFFU, (line & 3U) * 8U, port);
-}
-
-static void exti_clear_pending(const uint32_t bit)
-{
-    EXTI->RPR1 = bit;
-    EXTI->FPR1 = bit;
 }
 
 #endif
@@ -173,8 +170,7 @@ bool exti_attach(const PinName pin, const ExtiEdge edge, const IrqHandler handle
     GPIO_TypeDef* gpio = set_GPIO_Port_Clock(port);
     clearField(gpio->MODER, 3U, line * 2U);   /* input, keep existing pull */
 
-    const uint32_t primask = __get_PRIMASK();
-    __disable_irq();
+    const uint32_t primask = irq_lock();
 
     clearMask(EXTI->IMR1, bit);
     exti_select_port(line, port);
@@ -190,7 +186,7 @@ bool exti_attach(const PinName pin, const ExtiEdge edge, const IrqHandler handle
     exti_clear_pending(bit);
     setMask(EXTI->IMR1, bit);
 
-    __set_PRIMASK(primask);
+    irq_restore(primask);
 
     irq_attach(exti_irqn(line), exti_dispatch, (void*)(uintptr_t)exti_dispatch_ctx(line), priority);
     return true;

@@ -55,17 +55,6 @@ void dma_setup(DmaChannel* ch, const DmaDirection dir, const DmaWidth width,
     ((DMAMUX_Channel_TypeDef*)(DMAMUX1_Channel0_BASE + info.mux * 4U))->CCR = request;
 }
 
-void dma_enable(DmaChannel* ch)
-{
-    setMask(ch->CCR, DMA_CCR_EN);
-}
-
-void dma_enable_events(DmaChannel* ch, const uint32_t events)
-{
-    setMask(ch->CCR, ((events & DMA_EVT_TC) ? DMA_CCR_TCIE : 0U)
-                   | ((events & DMA_EVT_HT) ? DMA_CCR_HTIE : 0U));
-}
-
 uint32_t dma_remaining(const DmaChannel* ch)
 {
     return ch->CNDTR;
@@ -168,17 +157,6 @@ void dma_setup(DmaChannel* ch, const DmaDirection dir, const DmaWidth width,
     }
 }
 
-void dma_enable(DmaChannel* ch)
-{
-    setMask(ch->CCR, DMA_CCR_EN);
-}
-
-void dma_enable_events(DmaChannel* ch, const uint32_t events)
-{
-    setMask(ch->CCR, ((events & DMA_EVT_TC) ? DMA_CCR_TCIE : 0U)
-                   | ((events & DMA_EVT_HT) ? DMA_CCR_HTIE : 0U));
-}
-
 uint32_t dma_remaining(const DmaChannel* ch)
 {
     const uint32_t width = (ch->CTR1 & DMA_CTR1_SDW_LOG2_Msk) >> DMA_CTR1_SDW_LOG2_Pos;
@@ -203,16 +181,15 @@ IRQn_Type dma_irqn(const DmaChannel* ch)
 
 #endif
 
-void dma_init_mem_to_periph_32(DmaChannel* ch, volatile void* periph_addr, const void* mem_addr,
-                               const uint32_t transfer_count, const uint32_t request)
+/* ------------------------------------------------------------ common ----- */
+
+void dma_enable(DmaChannel* ch)
 {
-    dma_setup(ch, DMA_MEM_TO_PERIPH, DMA_WIDTH_32, periph_addr, (volatile void*)mem_addr,
-              transfer_count, request, true);
+    setMask(ch->CCR, DMA_CCR_EN);
 }
 
-void dma_init_periph_to_mem_16(DmaChannel* ch, volatile void* periph_addr, volatile void* mem_addr,
-                               const uint32_t transfer_count, const uint32_t request)
+void dma_enable_events(DmaChannel* ch, const uint32_t events)
 {
-    dma_setup(ch, DMA_PERIPH_TO_MEM, DMA_WIDTH_16, periph_addr, mem_addr,
-              transfer_count, request, true);
+    setMask(ch->CCR, ((events & DMA_EVT_TC) ? DMA_CCR_TCIE : 0U)
+                   | ((events & DMA_EVT_HT) ? DMA_CCR_HTIE : 0U));
 }

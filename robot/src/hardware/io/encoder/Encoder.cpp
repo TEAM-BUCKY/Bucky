@@ -41,8 +41,7 @@ static bool try_init_timer(EncoderState& e, const EncoderPins& pins) {
     tim->SMCR = (tim->SMCR & ~TIM_SMCR_SMS_Msk) | TIM_SMCR_SMS_0;
 
     tim->CNT = 0;
-    tim->EGR = TIM_EGR_UG;
-    tim->SR  = 0;
+    tim_load(tim);
 
     tim_pin_connect(pins.pinA);
     tim_pin_connect(pins.pinB);

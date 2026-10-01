@@ -1,5 +1,6 @@
 #include "I2CDMA.h"
 
+#include <Arduino.h>
 #include <PeripheralPins.h>
 #include <PortNames.h>
 #include <pinmap.h>
@@ -227,4 +228,12 @@ bool i2c_dma_probe(const I2CDMABus* bus, const uint8_t addr) {
     const bool found = isr & I2C_ISR_STOPF && !(isr & I2C_ISR_NACKF);
     i2c->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
     return found;
+}
+
+bool i2c_dma_wait_timeout(const I2CDMABus* bus, const uint32_t timeout_ms) {
+    const uint32_t start = millis();
+    while (bus->busy) {
+        if (millis() - start > timeout_ms) return false;
+    }
+    return true;
 }

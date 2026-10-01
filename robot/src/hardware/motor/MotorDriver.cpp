@@ -6,49 +6,48 @@
 #include "helpers/Math.h"
 #include "optimizations/logic.h"
 
-void MotorDriver::init(const float minSpeed, const float maxSpeed, const EncoderPins enc[3])
+// Float noise can produce tiny non-zero commands (e.g. -0.00 in logs).
+// Treat a small band around zero as stop to avoid commanding MIN_SPEED.
+constexpr float STOP_DEADBAND = 0.05f;
+
+constexpr uint32_t MOTOR_PWM_FREQ_HZ = 5000;
+constexpr uint32_t MOTOR_PWM_RESOLUTION = 3399;
+
+constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
+
+static FORCE_INLINE float clampSpeed(const float speed) {
+    return clampf(speed, -100.0f, 100.0f);
+}
+
+// Start the pin stopped and register it for sync so all timer counters can be aligned.
+static void initPwm(PwmPin& pw, const PinName pin) {
+    pw = pwm_pin_init(pin);
+    pwm_init(&pw, MOTOR_PWM_FREQ_HZ, MOTOR_PWM_RESOLUTION);
+    pwm_write(&pw, 0);
+    pwm_sync_register(&pw);
+}
+
+void MotorDriver::init(const float minSpeed, const float maxSpeed, const EncoderPins enc[MOTOR_COUNT])
 {
-    speedRange.min = minSpeed;
-    speedRange.max = maxSpeed;
-    speedRange.scale = (maxSpeed - minSpeed) / 100.0f;
+    changeSpeed(minSpeed, maxSpeed);
 
-    pw1 = {pwm_pin_init(m1.inA), pwm_pin_init(m1.inB)};
-    pw2 = {pwm_pin_init(m2.inA), pwm_pin_init(m2.inB)};
-    pw3 = {pwm_pin_init(m3.inA), pwm_pin_init(m3.inB)};
+    const uint32_t currentTime = micros();
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        Motor& m = motors[i];
+        m = Motor{};
+        m.beginTimeMs = currentTime;
+        m.encoderIndex = i;
 
-    pwm_init(&pw1.inA, 5000, 3399);
-    pwm_init(&pw1.inB, 5000, 3399);
-    pwm_init(&pw2.inA, 5000, 3399);
-    pwm_init(&pw2.inB, 5000, 3399);
-    pwm_init(&pw3.inA, 5000, 3399);
-    pwm_init(&pw3.inB, 5000, 3399);
-
-    pwm_write(&pw1.inA, 0);
-    pwm_write(&pw1.inB, 0);
-    pwm_write(&pw2.inA, 0);
-    pwm_write(&pw2.inB, 0);
-    pwm_write(&pw3.inA, 0);
-    pwm_write(&pw3.inB, 0);
-
-    // Register all PWM pins for sync and align timer counters
-    pwm_sync_register(&pw1.inA);
-    pwm_sync_register(&pw1.inB);
-    pwm_sync_register(&pw2.inA);
-    pwm_sync_register(&pw2.inB);
-    pwm_sync_register(&pw3.inA);
-    pwm_sync_register(&pw3.inB);
+        initPwm(m.motor.inA, pins[i].inA);
+        initPwm(m.motor.inB, pins[i].inB);
+    }
     pwm_sync_timers();
 
     if (enc != nullptr) {
-        for (uint8_t i = 0; i < 3; i++)
+        for (uint8_t i = 0; i < MOTOR_COUNT; i++)
             encoder_init(i, enc[i]);
         encodersEnabled = true;
     }
-
-    const uint32_t currentTime = micros();
-    motor1 = {pw1, 0, 0, 0, currentTime, 0, {}};
-    motor2 = {pw2, 0, 0, 0, currentTime, 1, {}};
-    motor3 = {pw3, 0, 0, 0, currentTime, 2, {}};
 }
 
 template<bool stage>
@@ -57,8 +56,7 @@ void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const
     if constexpr (stage) {
         pwm_stage(&motor.inA, speedA);
         pwm_stage(&motor.inB, speedB);
-    } else
-    {
+    } else {
         pwm_write(&motor.inA, speedA);
         pwm_write(&motor.inB, speedB);
     }
@@ -67,43 +65,34 @@ void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const
 template<bool stage>
 void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
 {
-    // Float noise can produce tiny non-zero commands (e.g. -0.00 in logs).
-    // Treat a small band around zero as stop to avoid commanding MIN_SPEED.
-    constexpr float kStopDeadband = 0.05f;
-    if (fabsf(targetSpeed) <= kStopDeadband)
-    {
+    if (fabsf(targetSpeed) <= STOP_DEADBAND) {
         writeMotorSpeed<stage>(motor, 0, 0);
         return;
     }
 
-    const float speed = fabsf(targetSpeed) * speedRange.scale + speedRange.min;
-
-    if (targetSpeed < 0) {
-        writeMotorSpeed<stage>(motor, 0, static_cast<int>(speed));
-        return;
-    }
-
-    writeMotorSpeed<stage>(motor, static_cast<int>(speed), 0);
+    const auto speed = static_cast<int>(fabsf(targetSpeed) * speedRange.scale + speedRange.min);
+    if (targetSpeed < 0)
+        writeMotorSpeed<stage>(motor, 0, speed);
+    else
+        writeMotorSpeed<stage>(motor, speed, 0);
 }
 
-constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
-
-// New implementation using Hermite smoothstep
+// Hermite smoothstep from begin to target over a time proportional to the speed change.
 float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time)
 {
-    const float difference = fabsf(begin - totalSpeed);
+    const float duration = fabsf(begin - totalSpeed) * timePer100;
     const auto floatTime = static_cast<float>(time);
 
-    if (floatTime > difference * timePer100)
+    if (floatTime > duration)
         return target;
 
-    const float t = floatTime / (difference * timePer100); // Normalize time to [0, 1]
-    const float smoothStep = t * t * (3 - 2 * t); // Hermite smoothstep function
+    const float t = floatTime / duration;
+    const float smoothStep = t * t * (3 - 2 * t);
     return begin + smoothStep * (target - begin);
 }
 
 template<bool stage>
-void MotorDriver::updateMotor(Motor &motor) const
+void MotorDriver::updateMotor(Motor& motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
     const float setpoint = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
@@ -114,8 +103,7 @@ void MotorDriver::updateMotor(Motor &motor) const
         return;
     }
 
-    constexpr float kStopDeadband = 0.05f;
-    if (fabsf(setpoint) <= kStopDeadband) {
+    if (fabsf(setpoint) <= STOP_DEADBAND) {
         motor.pi.integral = 0.0f;
         setMotorSpeed<stage>(motor.motor, 0.0f);
         return;
@@ -130,51 +118,15 @@ void MotorDriver::updateMotor(Motor &motor) const
     motor.pi.integral = clampf(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
     const float correction = kP * error + kI * motor.pi.integral;
 
-    const float output = clampf(setpoint + correction, -100.0f, 100.0f);
-    setMotorSpeed<stage>(motor.motor, output);
+    setMotorSpeed<stage>(motor.motor, clampSpeed(setpoint + correction));
 }
 
 void MotorDriver::updateAllMotors() {
-    updateMotor<false>(motor1);
-    updateMotor<false>(motor2);
-    updateMotor<false>(motor3);
-}
-
-void MotorDriver::syncUpdateMotor(Motor& motor) const
-{
-    const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
-    const float setpoint = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
-    motor.motor.currentSpeed = setpoint;
-
-    if (!encodersEnabled || !encoder_is_active(motor.encoderIndex)) {
-        setMotorSpeed<true>(motor.motor, setpoint);
-        return;
-    }
-
-    constexpr float kStopDeadband = 0.05f;
-    if (fabsf(setpoint) <= kStopDeadband) {
-        motor.pi.integral = 0.0f;
-        setMotorSpeed<true>(motor.motor, 0.0f);
-        return;
-    }
-
-    encoder_update_speed(motor.encoderIndex);
-
-    const float ticksPerPercent = maxTicksPerSec[motor.encoderIndex] / 100.0f;
-    const float measuredSpeed = encoder_get_speed(motor.encoderIndex) / ticksPerPercent;
-    const float error = setpoint - measuredSpeed;
-
-    motor.pi.integral = clampf(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
-    const float correction = kP * error + kI * motor.pi.integral;
-
-    const float output = clampf(setpoint + correction, -100.0f, 100.0f);
-    setMotorSpeed<true>(motor.motor, output);
+    for (Motor& m : motors) updateMotor<false>(m);
 }
 
 void MotorDriver::syncUpdateAllMotors() {
-    syncUpdateMotor(motor1);
-    syncUpdateMotor(motor2);
-    syncUpdateMotor(motor3);
+    for (Motor& m : motors) updateMotor<true>(m);
     pwm_commit();
 }
 
@@ -186,33 +138,30 @@ void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed)
     motor.targetSpeed = speed;
     motor.totalSpeed = totalSpeed;
     motor.beginTimeMs = micros();
+}
 
+void MotorDriver::wheelSpeeds(const float sinHeading, const float cosHeading, const float scale,
+                              const float rotation, float out[MOTOR_COUNT]) {
+    out[0] = (0.5f * sinHeading - SIN_60 * cosHeading) * scale + rotation;
+    out[1] = -sinHeading * scale + rotation;
+    out[2] = (0.5f * sinHeading + SIN_60 * cosHeading) * scale + rotation;
 }
 
 void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
     driveRadians(Math::degreesToRadians(degrees), scale, rotation);
 }
 
-constexpr float SIN_60 = 0.8660254037844f;
-
 void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
     const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
-    const float scaledRotation = rotation * rotationScale;
 
     float sinRadians, cosRadians;
     cordic_sin_cos(radians, &sinRadians, &cosRadians);
 
-    float m1Speed = (0.5f * sinRadians - SIN_60 * cosRadians) * scale + scaledRotation;
-    float m2Speed = -sinRadians * scale + scaledRotation;
-    float m3Speed = (0.5f * sinRadians + SIN_60 * cosRadians) * scale + scaledRotation;
+    float speeds[MOTOR_COUNT];
+    wheelSpeeds(sinRadians, cosRadians, scale, rotation * rotationScale, speeds);
 
-    m1Speed = clampf(m1Speed, -100.0f, 100.0f);
-    m2Speed = clampf(m2Speed, -100.0f, 100.0f);
-    m3Speed = clampf(m3Speed, -100.0f, 100.0f);
-
-    drive(this->motor1, m1Speed, scale);
-    drive(this->motor2, m2Speed, scale);
-    drive(this->motor3, m3Speed, scale);
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++)
+        drive(motors[i], clampSpeed(speeds[i]), scale);
 
     DBG_PRINTLN("");
 }
@@ -224,19 +173,17 @@ void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
     driveRadians(angleRad, magnitude, rotation);
 }
 
-void MotorDriver::driveMotorsDirect(float m1Speed, float m2Speed, float m3Speed) {
-    m1Speed = clampf(m1Speed, -100.0f, 100.0f);
-    m2Speed = clampf(m2Speed, -100.0f, 100.0f);
-    m3Speed = clampf(m3Speed, -100.0f, 100.0f);
+void MotorDriver::driveMotorsDirect(const float m1Speed, const float m2Speed, const float m3Speed) {
+    const float speeds[MOTOR_COUNT] = {m1Speed, m2Speed, m3Speed};
+    const uint32_t now = micros();
 
-    auto set = [](Motor& m, const float speed) {
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        Motor& m = motors[i];
+        const float speed = clampSpeed(speeds[i]);
         m.beginSpeed = speed;
         m.targetSpeed = speed;
         m.totalSpeed = fabsf(speed);
         m.motor.currentSpeed = speed;
-        m.beginTimeMs = micros();
-    };
-    set(motor1, m1Speed);
-    set(motor2, m2Speed);
-    set(motor3, m3Speed);
+        m.beginTimeMs = now;
+    }
 }

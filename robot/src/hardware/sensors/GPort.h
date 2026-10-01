@@ -120,8 +120,7 @@ public:
 private:
     static void onReset(void* ctx);
 
-    bool startClock(const GPortHardware& hw, uint32_t rateHz);
-    bool startModulation(const GPortHardware& hw, uint32_t freqHz);
+    static bool startClock(const GPortHardware& hw, uint32_t rateHz);
 
     GSensorKind sensorKind = GSensorKind::None;
     DmaChannel* dma = nullptr;

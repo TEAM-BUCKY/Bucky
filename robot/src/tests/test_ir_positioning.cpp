@@ -2,14 +2,16 @@
 #include "debug.h"
 #include <Arduino.h>
 #include <cmath>
-#include "hardware/sensors/IRSensor.h"
 #include "helpers/Math.h"
 
 void testIRPositioning(const TestContext& ctx) {
-    (void)ctx;
     DBG_PRINTLN("=== IR Ball Positioning Test (front arc: S1-3, S11-12) ===");
 
-    constexpr uint8_t board = 2;
+    if (ctx.irPort == nullptr) {
+        DBG_PRINTLN("No G port is configured for the IR ring.");
+        while (true) {}
+    }
+    GPort& ir = *ctx.irPort;
     constexpr uint8_t FRONT_ARC[] = {0, 1, 2, 10, 11};  // 1-indexed S1-3, S11-12
     constexpr uint8_t FRONT_ARC_N = sizeof(FRONT_ARC) / sizeof(FRONT_ARC[0]);
     constexpr uint32_t SENSOR_COUNT = 12;
@@ -35,36 +37,22 @@ void testIRPositioning(const TestContext& ctx) {
         return false;
     };
 
-    // The mux-rotation calibration (ir_calibrate_channels) was removed from
-    // IRSensor; buffer slot 0 is assumed to be physical S1.
-    constexpr uint8_t bufOffset = 0;
-    DBG_PRINT("Mux channel offset: "); DBG_PRINT(bufOffset);
-    DBG_PRINT("  (physical S1 at buf["); DBG_PRINT(bufOffset); DBG_PRINTLN("])");
-
-    auto physToBuf = [bufOffset](uint32_t p) -> uint32_t {
-        return (p + bufOffset) % IR_MUX_CHANNELS;
-    };
-
-    uint32_t lastIrSeq = ir_get_frame_sequence(board);
+    // Frame slot 0 is assumed to be physical S1; slots past SENSOR_COUNT are
+    // unpopulated mux inputs.
+    uint16_t frame[GPort::SENSORS];
+    uint32_t lastIrSeq = ir.frameSequence();
     uint32_t lastPrintMs = 0;
     constexpr uint32_t PRINT_INTERVAL_MS = 100;
 
     while (true) {
-        if (!ir_has_new_frame(board, lastIrSeq)) { delay(1); continue; }
-        lastIrSeq = ir_get_frame_sequence(board);
-
-        const uint16_t* raw = ir_get_buffer(board);
+        if (!ir.hasNewFrame(lastIrSeq) || !ir.readIR(frame)) { delay(1); continue; }
+        lastIrSeq = ir.frameSequence();
 
         uint16_t rawMax[SENSOR_COUNT];
         float frontAmp[SENSOR_COUNT];  // baseline-subtracted, non-front = 0
         float rearAmp[SENSOR_COUNT];   // baseline-subtracted, front = 0
         for (uint32_t ch = 0; ch < SENSOR_COUNT; ++ch) {
-            const uint32_t bufIdx = physToBuf(ch);
-            uint16_t m = 0;
-            for (uint32_t sweep = 0; sweep < IR_SWEEPS_PER_CYCLE; ++sweep) {
-                uint16_t v = raw[sweep * IR_MUX_CHANNELS + bufIdx];
-                if (v > m) m = v;
-            }
+            const uint16_t m = frame[ch];
             rawMax[ch] = m;
             float a = static_cast<float>(m) - BASELINE;
             if (a < 0.0f) a = 0.0f;

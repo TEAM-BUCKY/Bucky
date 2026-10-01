@@ -22,6 +22,19 @@
 extern "C" {
 #endif
 
+// Mask interrupts and return the previous state for irq_restore(). Nests safely.
+static inline uint32_t irq_lock(void)
+{
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+static inline void irq_restore(const uint32_t primask)
+{
+    __set_PRIMASK(primask);
+}
+
 typedef void (*IrqHandler)(void* ctx);
 
 typedef enum {

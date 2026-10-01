@@ -13,6 +13,13 @@ static volatile bool done[SONAR_COUNT];
 
 constexpr uint8_t SONAR_EXTI_PRIORITY = 2;
 
+static void echoISR(void* ctx);
+
+static bool attachEcho(const PinName pin, const int idx) {
+    return exti_attach(pin, EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(idx)),
+                       SONAR_EXTI_PRIORITY);
+}
+
 static void echoISR(void* ctx) {
     const auto idx = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
     if (gpio_read(echoGpio[idx]))
@@ -59,14 +66,12 @@ void Sonar::begin(const SonarPins& pins) {
         gpio_mode(echoGpio[i], INPUT);
 
         if (echoPinNames[i] != PA_10)
-            exti_attach(echoPinNames[i], EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(i)),
-                        SONAR_EXTI_PRIORITY);
+            attachEcho(echoPinNames[i], i);
     }
 
     for (int i = 0; i < SONAR_COUNT; i++) {
         if (echoPinNames[i] != PA_10) continue;
-        if (!exti_attach(PA_10, EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(i)),
-                         SONAR_EXTI_PRIORITY))
+        if (!attachEcho(PA_10, i))
             setupPA10TimerCapture();
     }
 }
