@@ -1,0 +1,30 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m33",
+    "extra_flags": "-DSTM32H562xx -DSTM32H5xx -DSTM32H5",
+    "f_cpu": "250000000L",
+    "framework_extra_flags": {
+      "arduino": "-D ARDUINO_GENERIC_H562RGTX"
+    },
+    "mcu": "stm32h562rgt6",
+    "product_line": "STM32H562xx",
+    "variant": "STM32H5xx/H562R(G-I)T",
+    "variant_h": "variant_generic.h"
+  },
+  "debug": {
+    "jlink_device": "STM32H562RG",
+    "openocd_target": "stm32h5x",
+    "svd_path": "STM32H562.svd"
+  },
+  "frameworks": ["arduino", "cmsis", "stm32cube"],
+  "name": "Custom STM32H562RG",
+  "upload": {
+    "maximum_ram_size": 655360,
+    "maximum_size": 1048576,
+    "protocol": "dfu",
+    "protocols": ["dfu", "stlink", "jlink"]
+  },
+  "url": "https://www.st.com/en/microcontrollers-microprocessors/stm32h562rg.html",
+  "vendor": "Generic"
+}

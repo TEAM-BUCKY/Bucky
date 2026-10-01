@@ -1,6 +1,6 @@
 #include "MotorDriver.h"
 #include "debug.h"
-#include "io/cordic/cordic.h"
+#include "hardware/io/cordic/cordic.h"
 #include <cmath>
 
 #include "helpers/Math.h"
@@ -16,12 +16,12 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed, const Encoder
     pw2 = {pwm_pin_init(m2.inA), pwm_pin_init(m2.inB)};
     pw3 = {pwm_pin_init(m3.inA), pwm_pin_init(m3.inB)};
 
-    pwm_init(&pw1.inA, m1.inA, 5000, 3399);
-    pwm_init(&pw1.inB, m1.inB, 5000, 3399);
-    pwm_init(&pw2.inA, m2.inA, 5000, 3399);
-    pwm_init(&pw2.inB, m2.inB, 5000, 3399);
-    pwm_init(&pw3.inA, m3.inA, 5000, 3399);
-    pwm_init(&pw3.inB, m3.inB, 5000, 3399);
+    pwm_init(&pw1.inA, 5000, 3399);
+    pwm_init(&pw1.inB, 5000, 3399);
+    pwm_init(&pw2.inA, 5000, 3399);
+    pwm_init(&pw2.inB, 5000, 3399);
+    pwm_init(&pw3.inA, 5000, 3399);
+    pwm_init(&pw3.inB, 5000, 3399);
 
     pwm_write(&pw1.inA, 0);
     pwm_write(&pw1.inB, 0);

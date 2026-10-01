@@ -4,8 +4,8 @@
 #include <EEPROM.h>
 #include <utility/stm32_eeprom.h>
 #include <cmath>
-#include "io/encoder/Encoder.h"
-#include "io/cordic/cordic.h"
+#include "hardware/io/encoder/Encoder.h"
+#include "hardware/io/cordic/cordic.h"
 #include "helpers/Math.h"
 
 // EEPROM.put() flushes the whole 2KB flash page after every byte, so saving a
@@ -104,11 +104,6 @@ bool loadCalibration(MotorDriver& md, Compass& compass) {
         if (cal.maxTicksPerSec[i] < 100.0f || cal.maxTicksPerSec[i] > 10000.0f)
             return false;
         md.setMaxTicksPerSec(i, cal.maxTicksPerSec[i]);
-    }
-
-    if (cal.dirValid) {
-        md.setDirectionCalibration(cal.dirScale, cal.dirOffsetDeg);
-        md.enableDirectionCalibration(true);
     }
 
     if (cal.magValid) {

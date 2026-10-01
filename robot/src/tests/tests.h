@@ -1,11 +1,11 @@
 #ifndef BUCKY_TESTS_H
 #define BUCKY_TESTS_H
 
-#include "../motor/MotorDriver.h"
-#include "../sensors/pos/Compass.h"
-#include "../sensors/pos/Accelerometer.h"
-#include "../sensors/pos/Sonar.h"
-#include "io/i2c/I2CDMA.h"
+#include "hardware/motor/MotorDriver.h"
+#include "hardware/sensors/pos/Compass.h"
+#include "hardware/sensors/pos/Accelerometer.h"
+#include "hardware/sensors/pos/Sonar.h"
+#include "hardware/io/i2c/I2CDMA.h"
 
 struct TestContext {
     MotorDriver& motorDriver;

@@ -1,8 +1,7 @@
 #include "tests.h"
 #include "debug.h"
 #include <Arduino.h>
-#include <stm32g4xx.h>
-#include "../sensors/IRSensor.h"
+#include "hardware/sensors/IRSensor.h"
 
 static void printHex(const char* label, uint32_t val) {
     DBG_PRINT(label);
@@ -18,6 +17,7 @@ void testIR(const TestContext& ctx) {
     DBG_PRINTLN("=== IR Sensor Test (DMA) ===");
     DBG_PRINTLN();
 
+#if defined(MCU_FAMILY_G4)
     // One-time register dump to verify configuration
     DBG_PRINTLN("-- Board 2 register dump (ADC4 / PB14 / TIM3) --");
     printHex("GPIOB MODER     = 0x", GPIOB->MODER);
@@ -49,6 +49,7 @@ void testIR(const TestContext& ctx) {
     printHex("ADC2  SQR1      = 0x", ADC2->SQR1);
     printHex("ADC12 CCR       = 0x", ADC12_COMMON->CCR);
     DBG_PRINTLN();
+#endif
 
     const uint32_t count2 = ir_get_sensor_count(2);
 
@@ -59,7 +60,7 @@ void testIR(const TestContext& ctx) {
         }
 
         DBG_PRINT("B2 seq="); DBG_PRINT(ir_get_frame_sequence(2));
-        DBG_PRINT(" CNDTR="); DBG_PRINTLN(DMA1_Channel4->CNDTR);
+        DBG_PRINTLN();
 
         const uint16_t* b2 = ir_get_buffer(2);
 

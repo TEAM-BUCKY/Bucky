@@ -1,6 +1,8 @@
 #ifndef BUCKY_DEBUG_H
 #define BUCKY_DEBUG_H
 
+#include <Arduino.h>
+
 #define DEBUG_LOGGING
 
 #ifdef DEBUG_LOGGING

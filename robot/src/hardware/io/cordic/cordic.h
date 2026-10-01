@@ -1,7 +1,7 @@
 #ifndef BUCKY_CORDIC_H
 #define BUCKY_CORDIC_H
 
-#include <stm32g4xx.h>
+#include "hardware/io/mcu.h"
 
 #include "optimizations/optimizations.h"
 
@@ -19,6 +19,8 @@ extern "C" {
 #define CORDIC_FUNC_HATANH  7
 #define CORDIC_FUNC_LN      8
 #define CORDIC_FUNC_SQRT    9
+
+#if MCU_HAS_CORDIC
 
 static FORCE_INLINE void cordic_init()
 {
@@ -112,6 +114,13 @@ static FORCE_INLINE void cordic_compute2_res2(uint32_t csr, int32_t arg1, int32_
         : "memory"
     );
 }
+
+#else
+
+// No CORDIC peripheral (e.g. STM32H5): cordic_* fall back to libm on the FPU.
+static FORCE_INLINE void cordic_init() {}
+
+#endif
 
 void cordic_sin_cos(float angle_rad, float *sin_out, float *cos_out);
 float cordic_sin(float angle_rad);

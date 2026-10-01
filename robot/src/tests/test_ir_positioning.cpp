@@ -2,8 +2,8 @@
 #include "debug.h"
 #include <Arduino.h>
 #include <cmath>
-#include "../sensors/IRSensor.h"
-#include "../helpers/Math.h"
+#include "hardware/sensors/IRSensor.h"
+#include "helpers/Math.h"
 
 void testIRPositioning(const TestContext& ctx) {
     (void)ctx;
@@ -35,10 +35,9 @@ void testIRPositioning(const TestContext& ctx) {
         return false;
     };
 
-    // setupEnvironment has already called ir_calibrate_channels. Pick up the
-    // detected mux-rotation offset so physical sensor indices map to the
-    // right buffer slots.
-    const uint8_t bufOffset = ir_get_channel_offset(board);
+    // The mux-rotation calibration (ir_calibrate_channels) was removed from
+    // IRSensor; buffer slot 0 is assumed to be physical S1.
+    constexpr uint8_t bufOffset = 0;
     DBG_PRINT("Mux channel offset: "); DBG_PRINT(bufOffset);
     DBG_PRINT("  (physical S1 at buf["); DBG_PRINT(bufOffset); DBG_PRINTLN("])");
 

@@ -2,7 +2,8 @@
 #define BUCKY_IRSENSOR_H
 
 #include <Arduino.h>
-#include <stm32g4xx.h>
+
+#include "hardware/io/mcu.h"
 
 #include "optimizations/optimizations.h"
 
@@ -15,6 +16,14 @@ enum class IRBallMode : uint8_t { MODE_D, MODE_A };
 static constexpr auto IR_MODE = IRBallMode::MODE_A;
 
 static constexpr uint32_t IR_MUX_CHANNELS = 16;
+
+// The timer/ADC/DMA wiring below matches the G474 board. The H562 board's IR
+// interface (clock/reset/modulation lines) still needs its own acquisition code.
+#if defined(MCU_FAMILY_G4)
+#define IR_ACQUISITION_AVAILABLE 1
+#else
+#define IR_ACQUISITION_AVAILABLE 0
+#endif
 
 static constexpr bool IR_BOARD1_ENABLED = false;
 static constexpr bool IR_BOARD2_ENABLED = true;

@@ -5,6 +5,10 @@
 
 #include "hardware/io/dma/DMA.h"
 #include "hardware/io/adc/ADC.h"
+#include "hardware/io/irq/IRQ.h"
+#include "hardware/io/timer/Timer.h"
+
+#if IR_ACQUISITION_AVAILABLE
 
 static FORCE_INLINE void gpio_set_af(GPIO_TypeDef* gpio, const uint8_t pin, const uint8_t af) {
     writeField(gpio->MODER, 3U, pin * 2, 2U);
@@ -13,22 +17,6 @@ static FORCE_INLINE void gpio_set_af(GPIO_TypeDef* gpio, const uint8_t pin, cons
 
 static FORCE_INLINE void gpio_set_analog(GPIO_TypeDef* gpio, const uint8_t pin) {
     writeField(gpio->MODER, 3U, pin * 2, 3U);
-}
-
-static FORCE_INLINE void tim_start(TIM_TypeDef* tim) {
-    setMask(tim->CR1, TIM_CR1_CEN);
-}
-
-static FORCE_INLINE void tim_set_trgo(TIM_TypeDef* tim, const uint32_t mms) {
-    tim->CR2 = tim->CR2 & ~TIM_CR2_MMS_Msk | mms << TIM_CR2_MMS_Pos;
-}
-
-static FORCE_INLINE void tim_set_dma_burst(TIM_TypeDef* tim, const uint32_t base_reg, const uint32_t count) {
-    tim->DCR = (count - 1) << TIM_DCR_DBL_Pos | base_reg << TIM_DCR_DBA_Pos;
-}
-
-static FORCE_INLINE void tim_enable_update_dma(TIM_TypeDef* tim) {
-    setMask(tim->DIER, TIM_DIER_UDE);
 }
 
 static constexpr uint32_t MMS_OC1REF   = 4;
@@ -74,39 +62,27 @@ static volatile uint16_t* volatile board2_ready = board2_dma_buf;
 static volatile uint32_t board1_frame_seq = 0;
 static volatile uint32_t board2_frame_seq = 0;
 
-static constexpr uint32_t DMA_HTIF(const uint32_t ch) { return 1U << ((ch - 1) * 4 + 2); }
-static constexpr uint32_t DMA_TCIF(const uint32_t ch) { return 1U << ((ch - 1) * 4 + 1); }
+struct BoardBuffers {
+    DmaChannel* dma;
+    volatile uint16_t* buf;
+    uint32_t half;
+    volatile uint16_t* volatile* ready;
+    volatile uint32_t* seq;
+};
 
-extern "C" {
-
-void DMA1_Channel2_IRQHandler(void) {
-    const uint32_t isr = DMA1->ISR;
-    if (isr & DMA_HTIF(2)) {
-        board1_ready = board1_dma_buf;
-        ++board1_frame_seq;
-        DMA1->IFCR = DMA_HTIF(2);
+// Half-transfer means the first half of the circular buffer holds a complete
+// frame; transfer-complete means the second half does.
+static void adc_dma_isr(void* ctx) {
+    const auto* b = static_cast<const BoardBuffers*>(ctx);
+    const uint32_t events = dma_take_events(b->dma);
+    if (events & DMA_EVT_HT) {
+        *b->ready = b->buf;
+        ++*b->seq;
     }
-    if (isr & DMA_TCIF(2)) {
-        board1_ready = board1_dma_buf + IR_ADC_BUFFER_SIZE;
-        ++board1_frame_seq;
-        DMA1->IFCR = DMA_TCIF(2);
+    if (events & DMA_EVT_TC) {
+        *b->ready = b->buf + b->half;
+        ++*b->seq;
     }
-}
-
-void DMA1_Channel4_IRQHandler(void) {
-    const uint32_t isr = DMA1->ISR;
-    if (isr & DMA_HTIF(4)) {
-        board2_ready = board2_dma_buf;
-        ++board2_frame_seq;
-        DMA1->IFCR = DMA_HTIF(4);
-    }
-    if (isr & DMA_TCIF(4)) {
-        board2_ready = board2_dma_buf + IR_BOARD2_ADC_HALF;
-        ++board2_frame_seq;
-        DMA1->IFCR = DMA_TCIF(4);
-    }
-}
-
 }
 
 static void fill_timer_dma_buf(uint32_t* buf, const uint32_t words_per_entry, const uint32_t ccr_offset) {
@@ -195,19 +171,18 @@ template<> struct BoardCfg<1> {
     static constexpr uint8_t  tim_ch = 0;
     static constexpr uint32_t trgo = MMS_OC1REF, burst_words = 3, ccr_off = 2;
     static constexpr uint32_t adc_ch = 17, extsel = ADC_EXTSEL_TIM4_TRGO, adc_smp = 2;
-    static constexpr uint32_t dma_tim_mux = DMAMUX_REQ_TIM4_UP, dma_adc_mux = DMAMUX_REQ_ADC_2;
+    static constexpr uint32_t dma_tim_mux = DMA_REQUEST_TIM4_UP, dma_adc_mux = DMA_REQUEST_ADC2;
 
     static auto timer()      { return TIM4; }
     static auto adc()        { return ADC2; }
     static auto clk_gpio()   { return GPIOB; }
     static auto adc_gpio()   { return GPIOA; }
     static auto dma_tim()    { return DMA1_Channel1; }
-    static auto dmamux_tim() { return DMAMUX1_Channel0; }
     static auto dma_adc()    { return DMA1_Channel2; }
-    static auto dmamux_adc() { return DMAMUX1_Channel1; }
-    static constexpr IRQn_Type dma_adc_irqn = DMA1_Channel2_IRQn;
     static auto tim_buf()    { return tim4_dma_buf; }
     static auto adc_buf()    { return board1_dma_buf; }
+    static inline BoardBuffers buffers = {DMA1_Channel2, board1_dma_buf, IR_ADC_BUFFER_SIZE,
+                                          &board1_ready, &board1_frame_seq};
 };
 
 template<> struct BoardCfg<2> {
@@ -218,16 +193,16 @@ template<> struct BoardCfg<2> {
     static constexpr uint8_t  tim_ch = 1;
     static constexpr uint32_t trgo = MMS_OC2REF, burst_words = 4, ccr_off = 3;
     static constexpr uint32_t adc_ch = 4, extsel = ADC_EXTSEL_TIM3_TRGO, adc_smp = 4;
-    static constexpr uint32_t dma_adc_mux = DMAMUX_REQ_ADC_4;
+    static constexpr uint32_t dma_adc_mux = DMA_REQUEST_ADC4;
 
     static auto timer()      { return TIM3; }
     static auto adc()        { return ADC4; }
     static auto clk_gpio()   { return GPIOB; }
     static auto adc_gpio()   { return GPIOB; }
     static auto dma_adc()    { return DMA1_Channel4; }
-    static auto dmamux_adc() { return DMAMUX1_Channel3; }
-    static constexpr IRQn_Type dma_adc_irqn = DMA1_Channel4_IRQn;
     static auto adc_buf()    { return board2_dma_buf; }
+    static inline BoardBuffers buffers = {DMA1_Channel4, board2_dma_buf, IR_BOARD2_ADC_HALF,
+                                          &board2_ready, &board2_frame_seq};
 };
 
 template<uint8_t Board, bool Enabled>
@@ -243,24 +218,23 @@ static void init_board() {
 
     if constexpr (!board::gated) {
         fill_timer_dma_buf(board::tim_buf(), board::burst_words, board::ccr_off);
-        dma_init_mem_to_periph_32(board::dma_tim(), board::dmamux_tim(),
+        dma_init_mem_to_periph_32(board::dma_tim(),
                                   &board::timer()->DMAR, board::tim_buf(),
                                   IR_CYCLE_COUNT * board::burst_words, board::dma_tim_mux);
     }
 
-    dma_init_periph_to_mem_16(board::dma_adc(), board::dmamux_adc(),
+    dma_init_periph_to_mem_16(board::dma_adc(),
                               &board::adc()->DR, board::adc_buf(),
                               2 * board::adc_half, board::dma_adc_mux);
 
-    setMask(board::dma_adc()->CCR, DMA_CCR_HTIE | DMA_CCR_TCIE);
-    NVIC_SetPriority(board::dma_adc_irqn, 3);
-    NVIC_EnableIRQ(board::dma_adc_irqn);
+    dma_enable_events(board::dma_adc(), DMA_EVT_HT | DMA_EVT_TC);
+    irq_attach(dma_irqn(board::dma_adc()), adc_dma_isr, &board::buffers, 3);
 
     if constexpr (!board::gated)
         dma_enable(board::dma_tim());
     dma_enable(board::dma_adc());
 
-    adc_init_triggered(board::adc(), board::adc_ch, board::extsel, board::adc_smp);
+    adc_init_triggered(board::adc(), board::adc_ch, board::extsel, board::adc_smp, ADC_TRIGGER_RISING);
 
     if constexpr (board::gated) {
         // TIM2→TIM3 gated mode: start master first, then slave
@@ -287,12 +261,14 @@ uint32_t ir_get_sensor_count(const uint8_t board) {
 }
 
 void ir_sensor_init() {
-    setMask(RCC->AHB1ENR,  RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMAMUX1EN);
-    setMask(RCC->AHB2ENR,  RCC_AHB2ENR_ADC12EN | RCC_AHB2ENR_ADC345EN
-                          | RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN);
-    setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_TIM4EN);
-    setMask(RCC->APB2ENR,  RCC_APB2ENR_SYSCFGEN);
-    __DSB();
+    adc_clock_enable(ADC2);
+    adc_clock_enable(ADC4);
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    tim_clock_enable(TIM2);
+    tim_clock_enable(TIM3);
+    tim_clock_enable(TIM4);
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
 
     // PB14 is OPAMP2_VINP and OPAMP5_VINP. Even disabled, each OPAMP's
     // input mux leaks ~18MΩ to VDD, pulling ADC readings toward 4095.
@@ -300,15 +276,32 @@ void ir_sensor_init() {
     OPAMP2->CSR = OPAMP_CSR_VPSEL_1 | OPAMP_CSR_VPSEL_0;  // VP_SEL=11
     OPAMP5->CSR = OPAMP_CSR_VPSEL_1 | OPAMP_CSR_VPSEL_0;  // VP_SEL=11
 
-    ADC12_COMMON->CCR = ADC12_COMMON->CCR & ~ADC_CCR_CKMODE_Msk
-        | 3U << ADC_CCR_CKMODE_Pos;
-
-    ADC345_COMMON->CCR = ADC345_COMMON->CCR & ~ADC_CCR_CKMODE_Msk
-        | 3U << ADC_CCR_CKMODE_Pos;
+    adc_set_sync_clock(ADC2, 3U);   // HCLK / 4
+    adc_set_sync_clock(ADC4, 3U);
 
     init_board<1, IR_BOARD1_ENABLED>();
     init_board<2, IR_BOARD2_ENABLED>();
 }
+
+#else
+
+// IR acquisition on this board is not implemented yet: report an idle ring.
+static constexpr uint16_t idle_frame[IR_ADC_BUFFER_SIZE] = {};
+
+void ir_sensor_init() {}
+
+const uint16_t* ir_get_buffer(const uint8_t) {
+    return idle_frame;
+}
+
+uint32_t ir_get_sensor_count(const uint8_t) {
+    return 0;
+}
+
+static constexpr uint32_t board1_frame_seq = 0;
+static constexpr uint32_t board2_frame_seq = 0;
+
+#endif
 
 uint32_t ir_get_frame_sequence(const uint8_t board)
 {

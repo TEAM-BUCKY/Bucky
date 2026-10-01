@@ -2,14 +2,19 @@
 #include "hardware/io/gpio/gpio.h"
 #include <HardwareTimer.h>
 
+#include "hardware/io/irq/IRQ.h"
+
 static GpioPin echoGpio[SONAR_COUNT];
-static int echoPinNumbers[SONAR_COUNT];
+static PinName echoPinNames[SONAR_COUNT];
 
 static volatile uint32_t riseTime[SONAR_COUNT];
 static volatile uint32_t duration[SONAR_COUNT];
 static volatile bool done[SONAR_COUNT];
 
-static void echoISR(const int idx) {
+constexpr uint8_t SONAR_EXTI_PRIORITY = 2;
+
+static void echoISR(void* ctx) {
+    const auto idx = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
     if (gpio_read(echoGpio[idx]))
         riseTime[idx] = micros();
     else {
@@ -18,15 +23,8 @@ static void echoISR(const int idx) {
     }
 }
 
-static void echoISR0() { echoISR(0); }
-static void echoISR1() { echoISR(1); }
-static void echoISR2() { echoISR(2); }
-static void echoISR3() { echoISR(3); }
-
-static constexpr void (*const isrTable[SONAR_COUNT])() = {echoISR0, echoISR1, echoISR2, echoISR3};
-
-// PA10 shares EXTI line 10 with PC10. Only one port can drive that line, so we
-// capture PA10 via TIM1_CH3 input capture. Timer ticks at 1 MHz so CCR3 is
+// PA10 shares EXTI line 10 with PC10 on the G474 board. Only one port can drive
+// that line, so PA10 falls back to TIM1_CH3 input capture. Timer ticks at 1 MHz so CCR3 is
 // directly in microseconds, matching micros()-based timestamps used elsewhere.
 static void pa10CaptureCallback() {
     const uint32_t captured = TIM1->CCR3;
@@ -40,7 +38,7 @@ static void pa10CaptureCallback() {
 
 static void setupPA10TimerCapture() {
     static HardwareTimer tim1(TIM1);
-    tim1.setMode(3, TIMER_INPUT_CAPTURE_BOTHEDGE, PA10);
+    tim1.setMode(3, TIMER_INPUT_CAPTURE_BOTHEDGE, PA_10);
     tim1.setPrescaleFactor(tim1.getTimerClkFreq() / 1'000'000u);
     tim1.setOverflow(0xFFFFu, TICK_FORMAT);
     tim1.attachInterrupt(3, pa10CaptureCallback);
@@ -52,18 +50,24 @@ void Sonar::begin(const SonarPins& pins) {
     gpio_mode(trigGpio, OUTPUT);
     gpio_low(trigGpio);
 
+    // Claim EXTI lines first so PA10 only takes the timer path when PC10 owns line 10.
     for (int i = 0; i < SONAR_COUNT; i++) {
-        echoPinNumbers[i] = pins.echoPins[i];
-        if (echoPinNumbers[i] < 0) continue;
+        echoPinNames[i] = pins.echoPins[i];
+        if (echoPinNames[i] == NC) continue;
 
-        echoGpio[i] = gpio_pin_init(echoPinNumbers[i]);
+        echoGpio[i] = gpio_pin_init(echoPinNames[i]);
+        gpio_mode(echoGpio[i], INPUT);
 
-        if (echoPinNumbers[i] == PA10) {
+        if (echoPinNames[i] != PA_10)
+            exti_attach(echoPinNames[i], EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(i)),
+                        SONAR_EXTI_PRIORITY);
+    }
+
+    for (int i = 0; i < SONAR_COUNT; i++) {
+        if (echoPinNames[i] != PA_10) continue;
+        if (!exti_attach(PA_10, EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(i)),
+                         SONAR_EXTI_PRIORITY))
             setupPA10TimerCapture();
-        } else {
-            gpio_mode(echoGpio[i], INPUT);
-            attachInterrupt(digitalPinToInterrupt(echoPinNumbers[i]), isrTable[i], CHANGE);
-        }
     }
 }
 
@@ -90,7 +94,7 @@ bool Sonar::isReadComplete() const {
     if (micros() - trigStart >= SONAR_TIMEOUT_US) return true;
 
     for (int i = 0; i < SONAR_COUNT; i++)
-        if (echoPinNumbers[i] >= 0 && !done[i])
+        if (echoPinNames[i] != NC && !done[i])
             return false;
 
     return true;
@@ -105,7 +109,7 @@ SonarReading Sonar::processRead() {
         // distance. A timeout leaves done[i]=false with duration[i]=0 — feed
         // that straight into 0.017 and downstream wall-avoidance would treat
         // the dead sensor as "wall at 0 mm" and push maximum repulsion.
-        r.valid[i] = (echoPinNumbers[i] >= 0) && done[i];
+        r.valid[i] = (echoPinNames[i] != NC) && done[i];
         r.distance[i] = r.valid[i] ? 0.017f * duration[i] : 0.0f;
     }
 

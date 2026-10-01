@@ -2,15 +2,16 @@
 #define BUCKY_MOTORDRIVER_H
 
 #include <Arduino.h>
-#include "io/gpio/pwm.h"
-#include "io/encoder/Encoder.h"
+#include "hardware/io/gpio/pwm.h"
+#include "hardware/io/encoder/Encoder.h"
 
 #define MIN_SPEED 1300
 #define MAX_SPEED 3399
 
+// Pins may carry an _ALTn suffix to select the timer (e.g. PB_14_ALT2 = TIM12).
 struct MotorPin {
-    int inA;
-    int inB;
+    PinName inA;
+    PinName inB;
 };
 
 struct MotorPwm {

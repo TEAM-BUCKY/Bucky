@@ -1,7 +1,7 @@
 #include "Compass.h"
 #include "debug.h"
-#include "../../optimizations/bitboard.h"
-#include "../../io/cordic/cordic.h"
+#include "optimizations/bitboard.h"
+#include "hardware/io/cordic/cordic.h"
 #include "helpers/Math.h"
 
 void Compass::begin(I2CDMABus& busRef) {

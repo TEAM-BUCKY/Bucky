@@ -1,7 +1,7 @@
 #include "tests.h"
 #include "debug.h"
 #include <Arduino.h>
-#include "io/encoder/Encoder.h"
+#include "hardware/io/encoder/Encoder.h"
 
 void testEncoder(const TestContext& ctx) {
     DBG_PRINTLN("=== Encoder Test (All Motors) ===");

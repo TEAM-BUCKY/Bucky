@@ -2,11 +2,18 @@
 #define BUCKY_PWM_H
 
 #include <Arduino.h>
-#include <stm32g4xx.h>
 #include <PeripheralPins.h>
+
+#include "hardware/io/mcu.h"
+#include "hardware/io/timer/Timer.h"
 
 #include "optimizations/bitboard.h"
 #include "optimizations/optimizations.h"
+
+#if !defined(HRTIM1)
+// Keeps PwmPin's layout identical on families without HRTIM (e.g. STM32H5).
+typedef struct HrtimTimerUnavailable HRTIM_Timerx_TypeDef;
+#endif
 
 #define PWM_SYNC_MAX_PINS   8
 #define PWM_SYNC_MAX_TIMERS 4
@@ -100,17 +107,7 @@ static FORCE_INLINE void timer_disable(TIM_TypeDef *tim)
 
 static FORCE_INLINE uint8_t pwm_timer_rank(const TIM_TypeDef *tim)
 {
-    if (tim == TIM1
-#ifdef TIM8
-        || tim == TIM8
-#endif
-#ifdef TIM20
-        || tim == TIM20
-#endif
-    ) {
-        return 3;
-    }
-    return 1;
+    return IS_TIM_BREAK_INSTANCE(tim) ? 3 : 1;
 }
 
 static FORCE_INLINE bool pwm_same_gpio_pin(const PinName a, const PinName b)
@@ -118,24 +115,70 @@ static FORCE_INLINE bool pwm_same_gpio_pin(const PinName a, const PinName b)
     return STM_PORT(a) == STM_PORT(b) && STM_PIN(a) == STM_PIN(b);
 }
 
-static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
+static FORCE_INLINE PwmPin pwm_pin_none()
 {
-    const PinName pn = digitalPinToPinName(pin);
+    PwmPin pw;
+    pw.timer = nullptr;
+    pw.ccr = nullptr;
+    pw.channel = 0;
+    pw.complementary = 0;
+    pw.mappedPin = NC;
+    pw.hrtimTimer = nullptr;
+    pw.hrtimOutputEnableMask = 0;
+    pw.hrtimCounterEnableMask = 0;
+    pw.backend = PWM_BACKEND_NONE;
+    pw.syncIndex = 0xFF;
+    return pw;
+}
 
+static FORCE_INLINE PwmPin pwm_pin_from_map(const PinName mappedPin, const TIM_TypeDef *timer,
+                                            const uint8_t channel, const bool complementary)
+{
+    PwmPin pw = pwm_pin_none();
+    pw.timer = const_cast<TIM_TypeDef *>(timer);
+    pw.channel = channel;
+    pw.complementary = complementary;
+    pw.mappedPin = mappedPin;
+    pw.ccr = &pw.timer->CCR1 + pw.channel;
+    pw.backend = PWM_BACKEND_TIM;
+    return pw;
+}
+
+// Exact lookup: `pn` may carry an _ALTn suffix to choose the timer, e.g.
+// PB_14_ALT2 selects TIM12_CH1 instead of the default TIM1_CH2N.
+static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
+{
 #if defined(HRTIM1)
     if (const HrtimMotorPinInfo *info = hrtim_motor_lookup(pn); info != nullptr) {
-        PwmPin pw;
-        pw.timer = nullptr;
+        PwmPin pw = pwm_pin_none();
         pw.hrtimTimer = info->timer;
         pw.channel = info->channel;
-        pw.syncIndex = 0xFF;
-        pw.complementary = 0;
         pw.mappedPin = pn;
         pw.ccr = (info->channel == 0U) ? &info->timer->CMP1xR : &info->timer->CMP2xR;
         pw.hrtimOutputEnableMask = info->outputEnableMask;
         pw.hrtimCounterEnableMask = info->counterEnableMask;
         pw.backend = PWM_BACKEND_HRTIM;
         return pw;
+    }
+#endif
+
+    uint8_t channel = 0;
+    bool complementary = false;
+    const TIM_TypeDef *timer = tim_from_pin(pn, &channel, &complementary);
+    if (timer == nullptr) {
+        return pwm_pin_none();
+    }
+    return pwm_pin_from_map(pn, timer, channel, complementary);
+}
+
+// Arduino pin number: prefer an advanced timer among every _ALTn entry of the pad.
+static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
+{
+    const PinName pn = digitalPinToPinName(pin);
+
+#if defined(HRTIM1)
+    if (hrtim_motor_lookup(pn) != nullptr) {
+        return pwm_pin_init(pn);
     }
 #endif
 
@@ -155,123 +198,29 @@ static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
         }
     }
 
-    const uint32_t func = (bestEntry != nullptr) ? bestEntry->function : pinmap_function(pn, PinMap_TIM);
-    PwmPin pw;
-    pw.timer = (bestEntry != nullptr)
-                   ? reinterpret_cast<TIM_TypeDef *>(bestEntry->peripheral)
-                   : (TIM_TypeDef *)pinmap_peripheral(pn, PinMap_TIM);
-    if (func == static_cast<uint32_t>(NC) || pw.timer == reinterpret_cast<TIM_TypeDef*>(NC)) {
-        pw.timer = nullptr;
-        pw.ccr = nullptr;
-        pw.channel = 0;
-        pw.complementary = 0;
-        pw.mappedPin = NC;
-        pw.hrtimTimer = nullptr;
-        pw.hrtimOutputEnableMask = 0;
-        pw.hrtimCounterEnableMask = 0;
-        pw.backend = PWM_BACKEND_NONE;
-        pw.syncIndex = 0xFF;
-        return pw;
+    if (bestEntry == nullptr) {
+        return pwm_pin_none();
     }
-    pw.channel = STM_PIN_CHANNEL(func) - 1;
-    pw.complementary = STM_PIN_INVERTED(func);
-    pw.mappedPin = (bestEntry != nullptr) ? bestEntry->pin : pn;
-    pw.ccr = &pw.timer->CCR1 + pw.channel;
-    pw.hrtimTimer = nullptr;
-    pw.hrtimOutputEnableMask = 0;
-    pw.hrtimCounterEnableMask = 0;
-    pw.backend = PWM_BACKEND_TIM;
-    pw.syncIndex = 0xFF;
-    return pw;
+    return pwm_pin_from_map(bestEntry->pin, reinterpret_cast<TIM_TypeDef *>(bestEntry->peripheral),
+                            STM_PIN_CHANNEL(bestEntry->function) - 1,
+                            STM_PIN_INVERTED(bestEntry->function));
 }
 
-static FORCE_INLINE void pwm_enable_clock(const TIM_TypeDef *tim)
-{
-    switch (reinterpret_cast<uintptr_t>(tim)) {
-        case TIM2_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM2EN);  break;
-        case TIM3_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM3EN);  break;
-        case TIM4_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM4EN);  break;
-#ifdef TIM5_BASE
-        case TIM5_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM5EN);  break;
-#endif
-#ifdef TIM6_BASE
-        case TIM6_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM6EN);  break;
-#endif
-#ifdef TIM7_BASE
-        case TIM7_BASE:  setMask(RCC->APB1ENR1, RCC_APB1ENR1_TIM7EN);  break;
-#endif
-        case TIM1_BASE:  setMask(RCC->APB2ENR, RCC_APB2ENR_TIM1EN);    break;
-#ifdef TIM8_BASE
-        case TIM8_BASE:  setMask(RCC->APB2ENR, RCC_APB2ENR_TIM8EN);    break;
-#endif
-#ifdef TIM15_BASE
-        case TIM15_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM15EN);   break;
-#endif
-#ifdef TIM16_BASE
-        case TIM16_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM16EN);   break;
-#endif
-#ifdef TIM17_BASE
-        case TIM17_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM17EN);   break;
-#endif
-#ifdef TIM20_BASE
-        case TIM20_BASE: setMask(RCC->APB2ENR, RCC_APB2ENR_TIM20EN);   break;
-#endif
-        default: break;
-    }
-}
-
-static FORCE_INLINE uint32_t pwm_get_timer_clock(const TIM_TypeDef *tim)
-{
-    bool isApb2 = false;
-    switch (reinterpret_cast<uintptr_t>(tim)) {
-        case TIM1_BASE:
-#ifdef TIM8_BASE
-        case TIM8_BASE:
-#endif
-#ifdef TIM15_BASE
-        case TIM15_BASE:
-#endif
-#ifdef TIM16_BASE
-        case TIM16_BASE:
-#endif
-#ifdef TIM17_BASE
-        case TIM17_BASE:
-#endif
-#ifdef TIM20_BASE
-        case TIM20_BASE:
-#endif
-            isApb2 = true;
-            break;
-        default:
-            isApb2 = false;
-            break;
-    }
-
-    if (isApb2) {
-        const uint32_t pclk2 = HAL_RCC_GetPCLK2Freq();
-        const uint32_t ppre2 = (RCC->CFGR & RCC_CFGR_PPRE2_Msk) >> RCC_CFGR_PPRE2_Pos;
-        return (ppre2 >= 4U) ? (pclk2 * 2U) : pclk2;
-    }
-
-    const uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
-    const uint32_t ppre1 = (RCC->CFGR & RCC_CFGR_PPRE1_Msk) >> RCC_CFGR_PPRE1_Pos;
-    return (ppre1 >= 4U) ? (pclk1 * 2U) : pclk1;
-}
-
-static FORCE_INLINE void pwm_init(const PwmPin *pw, const int pin, const uint32_t freq, const uint32_t resolution)
+static FORCE_INLINE void pwm_init(const PwmPin *pw, const uint32_t freq, const uint32_t resolution)
 {
     if (pw->ccr == nullptr) {
         return;
     }
 
-    const PinName pn = digitalPinToPinName(pin);
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, LOW);
+    // Hold the pad low until the timer takes it over.
+    const PinName pad = static_cast<PinName>(pw->mappedPin & PNAME_MASK);
+    pinMode(pinNametoDigitalPin(pad), OUTPUT);
+    digitalWriteFast(pad, LOW);
 
 #if defined(HRTIM1)
     if (pw->backend == PWM_BACKEND_HRTIM && pw->hrtimTimer != nullptr) {
         (void)freq;
-        setMask(RCC->APB2ENR, RCC_APB2ENR_HRTIM1EN);
+        __HAL_RCC_HRTIM1_CLK_ENABLE();
 
         // HRTIM cannot drive its outputs until the DLL is calibrated. Do the
         // one-shot calibration + enable periodic recalibration the first time
@@ -305,9 +254,9 @@ static FORCE_INLINE void pwm_init(const PwmPin *pw, const int pin, const uint32_
         return;
     }
 
-    pwm_enable_clock(pw->timer);
+    tim_clock_enable(pw->timer);
 
-    const uint32_t timerClk = pwm_get_timer_clock(pw->timer);
+    const uint32_t timerClk = tim_clock_hz(pw->timer);
     const uint32_t periodTicks = freq * (resolution + 1);
     if (timerClk < periodTicks || periodTicks == 0U) {
         pw->timer->PSC = 0;
@@ -329,14 +278,8 @@ static FORCE_INLINE void pwm_init(const PwmPin *pw, const int pin, const uint32_
         setBit(pw->timer->CCER, ch * 4 + 3);  // CCxNP: invert complementary polarity
     }
 
-    if (pw->timer == TIM1
-#ifdef TIM8
-        || pw->timer == TIM8
-#endif
-#ifdef TIM20
-        || pw->timer == TIM20
-#endif
-    ) {
+    // TIM1/8/15/16/17/20: outputs stay off until the main output enable is set.
+    if (IS_TIM_BREAK_INSTANCE(pw->timer)) {
         setMask(pw->timer->BDTR, TIM_BDTR_MOE);
     }
 

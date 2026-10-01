@@ -4,6 +4,8 @@
 #include "helpers/Constants.h"
 #include "optimizations/optimizations.h"
 
+#if MCU_HAS_CORDIC
+
 #define Q31_SCALE 2147483648.0f
 #define Q31_INV   (1.0f / Q31_SCALE)
 #define LN2_F     0.69314718f
@@ -203,3 +205,53 @@ float cordic_sqrt(const float x)
 
     return ldexpf(from_q31(cordic_compute(csr, to_q31(frac))), exp / 2);
 }
+
+#else
+
+void cordic_sin_cos(const float angle_rad, float *sin_out, float *cos_out)
+{
+    *sin_out = sinf(angle_rad);
+    *cos_out = cosf(angle_rad);
+}
+
+float cordic_sin(const float angle_rad) { return sinf(angle_rad); }
+float cordic_cos(const float angle_rad) { return cosf(angle_rad); }
+
+float cordic_atan2(const float y, const float x)
+{
+    if (x == 0.0f && y == 0.0f) return 0.0f;
+    return atan2f(y, x);
+}
+
+void cordic_atan2_mod(const float y, const float x, float *angle_out, float *mod_out)
+{
+    *angle_out = cordic_atan2(y, x);
+    *mod_out = hypotf(x, y);
+}
+
+float cordic_modulus(const float y, const float x) { return hypotf(x, y); }
+float cordic_atan(const float x) { return atanf(x); }
+
+void cordic_sinh_cosh(const float x, float *sinh_out, float *cosh_out)
+{
+    *sinh_out = sinhf(x);
+    *cosh_out = coshf(x);
+}
+
+float cordic_sinh(const float x) { return sinhf(x); }
+float cordic_cosh(const float x) { return coshf(x); }
+float cordic_atanh(const float x) { return atanhf(x); }
+
+float cordic_ln(const float x)
+{
+    if (x <= 0.0f) return -__builtin_inff();
+    return logf(x);
+}
+
+float cordic_sqrt(const float x)
+{
+    if (x <= 0.0f) return 0.0f;
+    return sqrtf(x);
+}
+
+#endif

@@ -2,7 +2,8 @@
 #define BUCKY_GPIO_H
 
 #include <Arduino.h>
-#include <stm32g4xx.h>
+
+#include "hardware/io/mcu.h"
 
 #include "optimizations/bitboard.h"
 #include "optimizations/optimizations.h"
@@ -12,13 +13,17 @@ typedef struct {
     uint16_t mask;
 } GpioPin;
 
-static FORCE_INLINE GpioPin gpio_pin_init(const int pin)
+static FORCE_INLINE GpioPin gpio_pin_init(const PinName pn)
 {
-    const PinName pn = digitalPinToPinName(pin);
     GpioPin gp;
-    gp.port = get_GPIO_Port(STM_PORT(pn));
+    gp.port = set_GPIO_Port_Clock(STM_PORT(pn));
     gp.mask = 1U << STM_PIN(pn);
     return gp;
+}
+
+static FORCE_INLINE GpioPin gpio_pin_init(const int pin)
+{
+    return gpio_pin_init(digitalPinToPinName(pin));
 }
 
 static FORCE_INLINE void gpio_mode(const GpioPin gp, const int mode)
