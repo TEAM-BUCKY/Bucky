@@ -19,7 +19,6 @@ static FORCE_INLINE float clampSpeed(const float speed) {
     return clampf(speed, -100.0f, 100.0f);
 }
 
-// Start the pin stopped and register it for sync so all timer counters can be aligned.
 static void initPwm(PwmPin& pw, const PinName pin) {
     pw = pwm_pin_init(pin);
     pwm_init(&pw, MOTOR_PWM_FREQ_HZ, MOTOR_PWM_RESOLUTION);
@@ -37,6 +36,9 @@ void MotorDriver::init(const float minSpeed, const float maxSpeed, const Encoder
         m = Motor{};
         m.beginTimeMs = currentTime;
         m.encoderIndex = i;
+
+        DBG_PRINT_SUBJECT(DEBUG_SUBJ_MOTOR, "Initializing motor ");
+        DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, i);
 
         initPwm(m.motor.inA, pins[i].inA);
         initPwm(m.motor.inB, pins[i].inB);
@@ -185,5 +187,48 @@ void MotorDriver::driveMotorsDirect(const float m1Speed, const float m2Speed, co
         m.totalSpeed = fabsf(speed);
         m.motor.currentSpeed = speed;
         m.beginTimeMs = now;
+    }
+}
+
+void MotorDriver::getEncoderSpeeds(float out[3]) const
+{
+    if (!encodersEnabled) {
+        for (uint8_t i = 0; i < MOTOR_COUNT; i++)
+            out[i] = motors[i].motor.currentSpeed;
+        return;
+    }
+
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        encoder_update_speed(i);
+        const float ticksPerPercent = maxTicksPerSec[i] / 100.0f;
+        out[i] = encoder_get_speed(i) / ticksPerPercent;
+    }
+}
+
+void MotorDriver::getEncoderTicks(uint16_t out[3]) const
+{
+    if (!encodersEnabled) {
+        for (uint8_t i = 0; i < MOTOR_COUNT; i++)
+            out[i] = 0;
+        return;
+    }
+
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++)
+        out[i] = encoder_get_ticks(i);
+}
+
+void MotorDriver::getEncoderValues(MotorEncoderValue out[3]) const
+{
+    if (!encodersEnabled) {
+        for (uint8_t i = 0; i < MOTOR_COUNT; i++)
+            out[i] = {0, 0};
+        return;
+    }
+
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        encoder_update_speed(i);
+        const float ticksPerPercent = maxTicksPerSec[i] / 100.0f;
+        out[i].ticks = encoder_get_ticks(i);
+        out[i].speed = encoder_get_speed(i) / ticksPerPercent;
     }
 }

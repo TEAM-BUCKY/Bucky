@@ -12,11 +12,17 @@ extern "C" void USB_IRQHandler(void);
 static constexpr uint16_t TX_MASK = UsbSerialPort::TX_SIZE - 1U;
 static_assert((UsbSerialPort::TX_SIZE & TX_MASK) == 0, "TX_SIZE must be a power of two");
 
-// Every CDC queue operation happens in the USB interrupt: the core's own
-// handler runs first (it finishes IN transfers and starts queued packets),
-// then the ring is moved into the freed queue space. The main loop only fills
-// the ring and pends this interrupt, so the two never touch the CDC queue at
-// the same time and nothing ever polls.
+// The CDC queue has a single owner at a time, enforced by masking USB_IRQn
+// rather than by only ever running inside the interrupt. The core's handler
+// still runs first on a real interrupt (it finishes IN transfers and starts
+// queued packets) and drain() then moves the ring into the freed queue space.
+//
+// write() must NOT pend USB_IRQn to get the same effect: that invokes the
+// core's HAL_PCD_IRQHandler with no hardware event pending, and while the
+// device is still enumerating that re-enters the control transfer state
+// machine and the host never gets its descriptors ("device descriptor read,
+// error -71"). Hosts vary in how much of this they tolerate. So drain() is
+// called directly with the interrupt held off instead.
 void UsbSerialPort::onUsbIrq(void* ctx) {
     USB_IRQHandler();
     static_cast<UsbSerialPort*>(ctx)->drain();
@@ -75,7 +81,12 @@ size_t UsbSerialPort::write(const uint8_t* data, size_t len) {
 
     __DMB();   // bytes land before the interrupt can see the new head
     txHead = head;
-    NVIC_SetPendingIRQ(USB_IRQn);
+
+    /* Hold off only the USB interrupt, so drain() still has the CDC queue to
+     * itself, without forging a USB event. */
+    NVIC_DisableIRQ(USB_IRQn);
+    drain();
+    NVIC_EnableIRQ(USB_IRQn);
     return len;
 }
 

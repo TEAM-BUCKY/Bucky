@@ -16,8 +16,13 @@ typedef struct {
     Vector     original;
 } IrqSlot;
 
-/* VTOR requires the table on a 128/512-byte boundary depending on the core. */
-static Vector ram_vectors[VECTOR_COUNT] __attribute__((aligned(512)));
+/* ARMv8-M requires the vector table to be naturally aligned to a power of two
+ * at least as large as the table itself (128 bytes minimum). The table is
+ * 4*(16+MCU_IRQ_COUNT) bytes: 472 on G4, which 512 covers, but 588 on H5,
+ * which needs 1024. Use 1024 for both so H5 cannot straddle the boundary. */
+static Vector ram_vectors[VECTOR_COUNT] __attribute__((aligned(1024)));
+_Static_assert(sizeof(ram_vectors) <= 1024,
+               "vector table outgrew its alignment; raise both to the next power of two");
 static IrqSlot slots[MCU_IRQ_COUNT];
 static bool relocated = false;
 

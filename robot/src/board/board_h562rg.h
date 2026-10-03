@@ -10,6 +10,7 @@
 
 #define BOARD_HAS_BLUETOOTH 1
 #define BOARD_HAS_GPORTS 1
+#define BOARD_HAS_BUTTONS 1
 
 // _ALTn suffixes pick the timer when a pad has several (see PeripheralPins.c of
 // the H562R(G-I)T variant). Without them the core's first match wins, e.g.
@@ -23,6 +24,9 @@ constexpr const char* NAME = "H562RG";
 constexpr MotorPin MOTOR1 = {PB_14_ALT2, PB_15_ALT2};   // TIM12_CH1 / TIM12_CH2
 constexpr MotorPin MOTOR2 = {PA_9, PA_10};              // TIM1_CH2  / TIM1_CH3
 constexpr MotorPin MOTOR3 = {PB_6, PC_2};               // TIM4_CH1  / TIM4_CH4
+
+constexpr PinName BUTTON1 = PB_0;
+constexpr PinName BUTTON2 = PB_1;
 
 // ---- Encoders (hardware quadrature) ----
 constexpr EncoderPins ENCODERS[3] = {

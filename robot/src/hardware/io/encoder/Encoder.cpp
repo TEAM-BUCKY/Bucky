@@ -1,5 +1,6 @@
 #include "Encoder.h"
 
+#include "debug.h"
 #include "hardware/io/irq/IRQ.h"
 #include "hardware/io/timer/Timer.h"
 
@@ -11,9 +12,8 @@ constexpr uint8_t ENCODER_EXTI_PRIORITY = 1;
 // roughly 24 counter-clock periods (~100 ns at 250 MHz, ~140 ns at 170 MHz).
 constexpr uint32_t ENCODER_INPUT_FILTER = 0x6U;
 
-// ---------------------------------------------------------------- TIMER ---
-
 static bool try_init_timer(EncoderState& e, const EncoderPins& pins) {
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_ENCODER, "Trying timer");
     uint8_t chA = 0, chB = 0;
     TIM_TypeDef* timA = tim_from_pin(pins.pinA, &chA, nullptr);
     TIM_TypeDef* timB = tim_from_pin(pins.pinB, &chB, nullptr);
@@ -50,11 +50,12 @@ static bool try_init_timer(EncoderState& e, const EncoderPins& pins) {
     e.backend   = EncoderBackend::Timer;
     e.timer     = tim;
     e.lastCount = 0;
+
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_ENCODER, "Timer initialized");
+
     return true;
 }
 
-// Fold the hardware counter into the 32-bit tick total. Needs to run at least
-// once per 32767 ticks, which every speed update easily does.
 static FORCE_INLINE void sample_timer(EncoderState& e) {
     const auto count = static_cast<uint16_t>(e.timer->CNT);
     const auto delta = static_cast<int16_t>(count - e.lastCount);
@@ -65,18 +66,11 @@ static FORCE_INLINE void sample_timer(EncoderState& e) {
     }
 }
 
-// ----------------------------------------------------------------- EXTI ---
-
 static void encoder_exti_isr(void* ctx) {
     EncoderState& e = *static_cast<EncoderState*>(ctx);
     const uint8_t a = gpio_read(e.gpioA);
     const uint8_t b = gpio_read(e.gpioB);
 
-    // Count edges on whichever pin owns the EXTI line for this encoder. The
-    // other pin is sampled to decode direction. This keeps every encoder at a
-    // fixed 2x quadrature resolution and means each motor only needs one EXTI
-    // line — so no two encoders can collide on the same line (e.g. PA2/PB2
-    // both on EXTI2).
     if (e.hasInterruptA && a != e.lastA)
         e.ticks += (a == b) ? -1 : 1;
     else if (e.hasInterruptB && b != e.lastB)
@@ -88,6 +82,7 @@ static void encoder_exti_isr(void* ctx) {
 }
 
 static void init_exti(EncoderState& e, const EncoderPins& pins) {
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_ENCODER, "Falling back to EXTI");
     e.gpioA = gpio_pin_init(pins.pinA);
     e.gpioB = gpio_pin_init(pins.pinB);
     gpio_mode(e.gpioA, INPUT_PULLUP);
@@ -96,16 +91,12 @@ static void init_exti(EncoderState& e, const EncoderPins& pins) {
     e.lastA = gpio_read(e.gpioA);
     e.lastB = gpio_read(e.gpioB);
 
-    // Prefer A as the edge-counting pin; fall back to B only if A's EXTI line
-    // is already claimed by another encoder. Never both — see encoder_exti_isr().
     e.hasInterruptA = exti_attach(pins.pinA, EXTI_BOTH, encoder_exti_isr, &e, ENCODER_EXTI_PRIORITY);
     e.hasInterruptB = !e.hasInterruptA
                    && exti_attach(pins.pinB, EXTI_BOTH, encoder_exti_isr, &e, ENCODER_EXTI_PRIORITY);
 
     e.backend = (e.hasInterruptA || e.hasInterruptB) ? EncoderBackend::Exti : EncoderBackend::None;
 }
-
-// ------------------------------------------------------------------ API ---
 
 void encoder_init(const uint8_t index, const EncoderPins& pins) {
     if (index >= ENCODER_MAX) return;

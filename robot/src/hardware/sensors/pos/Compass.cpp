@@ -20,8 +20,8 @@ bool Compass::tick() {
 
         case CompassState::CHECK_ID: {
             const uint8_t id = readReg(LIS2MDL_WHO_AM_I_REG);
-            DBG_PRINT("Compass WHO_AM_I: 0x");
-            DBG_PRINTLN(id, HEX);
+            DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Compass WHO_AM_I: 0x");
+            DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, id, HEX);
             if (id != 0x40) {
                 // Cold-boot I2C sometimes returns 0x00 on the first one or two
                 // reads; stay in BOOT_WAIT and retry a few times before giving up.

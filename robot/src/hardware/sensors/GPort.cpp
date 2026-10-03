@@ -19,13 +19,12 @@ bool GPort::begin(const GPortHardware& hw, const GSensorKind kind, const GPortTi
     if (kind == GSensorKind::None) return true;
 
     frameLen  = kind == GSensorKind::Line ? MAX_FRAME : SENSORS;
-    bufferLen = 2 * frameLen;   // a published frame stays intact for one more loop
+    bufferLen = 2 * frameLen;   // A frame stays intact for one more loop
     dma       = hw.dma;
     synced    = false;
     frameSeq  = 0;
     desyncs   = 0;
 
-    // ---- ADC + DMA: stream one conversion per clock pulse ----
     auto* adc = static_cast<ADC_TypeDef*>(pinmap_peripheral(hw.adcPin, PinMap_ADC));
     if (adc == nullptr) return false;
     const uint32_t channel = STM_PIN_CHANNEL(pinmap_function(hw.adcPin, PinMap_ADC));
@@ -41,6 +40,14 @@ bool GPort::begin(const GPortHardware& hw, const GSensorKind kind, const GPortTi
     const AdcTriggerEdge sampleEdge = hw.muxAdvanceEdge == GClockEdge::Falling
                                     ? ADC_TRIGGER_RISING : ADC_TRIGGER_FALLING;
     adc_init_triggered(adc, channel, ADC_EXTSEL_FROM_HAL(hw.adcTrigger), timing.adcSampleTime, sampleEdge);
+
+    const GpioPin resetGpio = gpio_pin_init(hw.resetPin);
+    gpio_mode(resetGpio, INPUT_PULLDOWN);
+    gpio_write(resetGpio, 0);
+    delay(1);
+    gpio_write(resetGpio, 1);
+    delay(1);
+    gpio_write(resetGpio, 0);
 
     if (!exti_attach(hw.resetPin, hw.resetEdge, onReset, this, GPORT_RESET_PRIORITY))
         return false;
@@ -96,6 +103,11 @@ void GPort::setLineOrder(const LineColor order[4]) {
     for (uint8_t i = 0; i < 4; i++) lineOrder[i] = order[i];
 }
 
+uint8_t translatePosition(const uint8_t pos) {
+    if (pos < 8) return 7 - pos;
+    return pos;
+}
+
 bool GPort::readFrame(uint16_t* out) const {
     while (true) {
         const uint32_t seq = frameSeq;
@@ -103,12 +115,10 @@ bool GPort::readFrame(uint16_t* out) const {
 
         uint32_t idx = (frameEnd + bufferLen - frameLen) % bufferLen;
         for (uint32_t i = 0; i < frameLen; i++) {
-            out[i] = buffer[idx];
+            out[translatePosition(i)] = buffer[idx];
             if (++idx == bufferLen) idx = 0;
         }
 
-        // DMA only overwrites this frame once the next loop is complete, which
-        // also bumps the sequence: retry in that case.
         if (frameSeq == seq) return true;
     }
 }

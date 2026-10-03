@@ -4,6 +4,8 @@
 
 #include "hardware/io/irq/IRQ.h"
 
+#include "debug.h"
+
 static GpioPin echoGpio[SONAR_COUNT];
 static PinName echoPinNames[SONAR_COUNT];
 
@@ -107,14 +109,16 @@ bool Sonar::isReadComplete() const {
 
 SonarReading Sonar::processRead() {
     reading = false;
+    DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Processing sonar read: ");
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, micros());
 
     SonarReading r;
     for (int i = 0; i < SONAR_COUNT; i++) {
-        // Only sensors whose ISR/TIM1 capture actually fired produce a real
-        // distance. A timeout leaves done[i]=false with duration[i]=0 — feed
-        // that straight into 0.017 and downstream wall-avoidance would treat
-        // the dead sensor as "wall at 0 mm" and push maximum repulsion.
         r.valid[i] = (echoPinNames[i] != NC) && done[i];
+        DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Sonar ");
+        DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, i);
+        DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, " distance: ");
+        DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, r.distance[i]);
         r.distance[i] = r.valid[i] ? 0.017f * duration[i] : 0.0f;
     }
 

@@ -13,8 +13,8 @@ void Accelerometer::begin(I2CDMABus& busRef) {
         if (id == 0x33) break;
         delay(20);
     }
-    DBG_PRINT("Accel WHO_AM_I: 0x");
-    DBG_PRINTLN(id, HEX);
+    DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Accel WHO_AM_I: 0x");
+    DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, id, HEX);
     if (id != 0x33) {
         ok = false;
         return;
@@ -40,6 +40,8 @@ bool Accelerometer::read(float& ax_g, float& ay_g, float& az_g) const {
     // Left-justified 12-bit samples, little endian.
     auto toG = [&](const uint8_t i) {
         const auto raw = static_cast<int16_t>(combineBytes(buf[i + 1], buf[i]));
+        DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Raw value: ");
+        DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, raw);
         return (raw >> 4) * MG_PER_LSB * 0.001f;
     };
     ax_g = toG(0);

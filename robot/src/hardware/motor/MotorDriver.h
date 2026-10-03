@@ -24,6 +24,12 @@ struct MotorPI {
     float integral = 0.0f;
 };
 
+struct MotorEncoderValue
+{
+    uint16_t ticks = 0;
+    float speed = 0;
+};
+
 struct Motor {
     MotorPwm motor;
     float beginSpeed = 0;
@@ -110,6 +116,10 @@ public:
     void setMaxTicksPerSec(const uint8_t motor, const float tps) {
         if (motor < MOTOR_COUNT) maxTicksPerSec[motor] = tps;
     }
+
+    void getEncoderSpeeds(float out[MOTOR_COUNT]) const;
+    void getEncoderTicks(uint16_t out[MOTOR_COUNT]) const;
+    void getEncoderValues(MotorEncoderValue out[MOTOR_COUNT]) const;
 };
 
 #endif //BUCKY_MOTORDRIVER_H

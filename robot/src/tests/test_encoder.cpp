@@ -15,19 +15,14 @@ void testEncoder(const TestContext& ctx) {
 
         for (uint8_t i = 0; i < 3; i++)
             encoder_update_speed(i);
+        MotorEncoderValue encoderValues[3];
+        ctx.motorDriver.getEncoderValues(encoderValues);
 
         if (millis() - lastPrint >= 500) {
-            const int32_t t0 = encoder_get_ticks(0);
-            const int32_t t1 = encoder_get_ticks(1);
-            const int32_t t2 = encoder_get_ticks(2);
-            const float s0 = encoder_get_speed(0);
-            const float s1 = encoder_get_speed(1);
-            const float s2 = encoder_get_speed(2);
-
-            DBG_PRINTLN(
-                "M1: " + String(t0) + "t " + String(s0, 1) + "t/s  "
-                "M2: " + String(t1) + "t " + String(s1, 1) + "t/s  "
-                "M3: " + String(t2) + "t " + String(s2, 1) + "t/s");
+            DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_ENCODER,
+                "M1: " + String(encoderValues[0].ticks) + "t " + String(encoderValues[0].speed, 1) + "t/s  "
+                "M2: " + String(encoderValues[1].ticks) + "t " + String(encoderValues[1].speed, 1) + "t/s  "
+                "M3: " + String(encoderValues[2].ticks) + "t " + String(encoderValues[2].speed, 1) + "t/s");
 
             lastPrint = millis();
         }
