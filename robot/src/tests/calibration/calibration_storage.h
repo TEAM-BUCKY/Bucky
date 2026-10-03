@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-// EEPROM layout shared by testCalibrate, testCompassCalibrate and loadCalibration().
-
 #define CALIBRATION_MAGIC 0xCA1B0003
 
 constexpr uint8_t NUM_DIRECTIONS = 12;

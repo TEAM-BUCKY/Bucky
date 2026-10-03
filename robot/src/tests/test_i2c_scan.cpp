@@ -15,8 +15,6 @@ static void scanBus(const char* name, const I2CDMABus& bus) {
             DBG_PRINT(addr, HEX);
 
             switch (addr) {
-                case 0x10: DBG_PRINT("  (TLA2528 ADC1)"); break;
-                case 0x14: DBG_PRINT("  (TLA2528 ADC2)"); break;
                 case 0x19: DBG_PRINT("  (Unknown - Accel?)"); break;
                 case 0x1E: DBG_PRINT("  (LIS2MDL Compass)"); break;
                 default: break;

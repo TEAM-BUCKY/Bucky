@@ -82,7 +82,6 @@ public:
 
     [[nodiscard]] uint32_t desyncCount() const { return desyncs; }
 
-    bool readFrame(uint16_t* out) const;
 
     bool readIR(uint16_t out[SENSORS]) const;
     bool readLine(LineFrame& out) const;
@@ -104,6 +103,8 @@ private:
     volatile uint32_t frameEnd = 0;
     volatile uint32_t frameSeq = 0;
     volatile uint32_t desyncs = 0;
+
+    bool readFrame(uint16_t* out) const;
 };
 
 #endif // BUCKY_GPORT_H

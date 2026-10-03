@@ -87,10 +87,8 @@ void setupEnvironment() {
     init();
     setupEnvironment();
 
-#ifdef BOARD_HAS_BUTTONS
     button1.begin(board::BUTTON1);
     button2.begin(board::BUTTON2);
-#endif
 
 
 #ifdef RUN_TEST
@@ -101,10 +99,10 @@ void setupEnvironment() {
 
     uint32_t lastTick = millis();
     while (true) {
-#ifdef BOARD_HAS_BUTTONS
+
         if (button1.pressed()) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 1 pressed");
         if (button2.pressed()) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 2 pressed");
-#endif
+
         if (millis() - lastTick >= 1000) {
             lastTick += 1000;
             DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Main loop running...");

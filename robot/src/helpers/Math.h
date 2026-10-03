@@ -3,7 +3,7 @@
 
 #include <cstddef>
 
-#include "Constants.h"
+#include "constants.h"
 #include "optimizations/logic.h"
 #include "optimizations/optimizations.h"
 

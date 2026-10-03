@@ -6,8 +6,6 @@
 #include "helpers/Math.h"
 #include "optimizations/logic.h"
 
-// Float noise can produce tiny non-zero commands (e.g. -0.00 in logs).
-// Treat a small band around zero as stop to avoid commanding MIN_SPEED.
 constexpr float STOP_DEADBAND = 0.05f;
 
 constexpr uint32_t MOTOR_PWM_FREQ_HZ = 5000;
@@ -16,7 +14,7 @@ constexpr uint32_t MOTOR_PWM_RESOLUTION = 3399;
 constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
 
 static FORCE_INLINE float clampSpeed(const float speed) {
-    return clampf(speed, -100.0f, 100.0f);
+    return clamp(speed, -100.0f, 100.0f);
 }
 
 static void initPwm(PwmPin& pw, const PinName pin) {
@@ -117,7 +115,7 @@ void MotorDriver::updateMotor(Motor& motor) const
     const float measuredSpeed = encoder_get_speed(motor.encoderIndex) / ticksPerPercent;
     const float error = setpoint - measuredSpeed;
 
-    motor.pi.integral = clampf(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
+    motor.pi.integral = clamp(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
     const float correction = kP * error + kI * motor.pi.integral;
 
     setMotorSpeed<stage>(motor.motor, clampSpeed(setpoint + correction));

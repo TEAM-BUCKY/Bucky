@@ -103,6 +103,8 @@ void GPort::setLineOrder(const LineColor order[4]) {
     for (uint8_t i = 0; i < 4; i++) lineOrder[i] = order[i];
 }
 
+// Due to design constraints the first 8 channels were flipped.
+// This is for both the Line Sensor Controller boards and the IR Sensor Controller boards.
 uint8_t translatePosition(const uint8_t pos) {
     if (pos < 8) return 7 - pos;
     return pos;
@@ -123,10 +125,20 @@ bool GPort::readFrame(uint16_t* out) const {
     }
 }
 
+/**
+ * Reads the IR sensor data
+ * @param out Reference to an array where the sensor data will be stored. The array should have a size of SENSORS.
+ * @return True if the sensor kind is IR and the frame was successfully read; false otherwise.
+ */
 bool GPort::readIR(uint16_t out[SENSORS]) const {
     return sensorKind == GSensorKind::IR && readFrame(out);
 }
 
+/**
+ * Reads the line sensor data
+ * @param out Reference to a LineFrame structure where the sensor data will be stored.
+ * @return True if the sensor kind is Line and the frame was successfully read; false otherwise.
+ */
 bool GPort::readLine(LineFrame& out) const {
     if (sensorKind != GSensorKind::Line) return false;
 

@@ -16,12 +16,6 @@ void testHoldHeading(const TestContext& ctx) {
 
         const float rotation = ctx.compass.computeRotation(0);
 
-        // Pure rotation: all three wheels at the same tangential sign
-        // around body center. M1 and M3 have flipped direction pins on
-        // this board, so to produce the same *physical* sign on all three
-        // wheels, the M1 and M3 software channels are negated. M2 passes
-        // through. driveRadians does the same compensation internally for
-        // the driveVector path.
         ctx.motorDriver.driveMotorsDirect(-rotation, rotation, -rotation);
         ctx.motorDriver.syncUpdateAllMotors();
 
