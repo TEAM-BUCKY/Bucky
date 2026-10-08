@@ -23,7 +23,7 @@ static bool attachEcho(const PinName pin, const int idx) {
 }
 
 static void echoISR(void* ctx) {
-    const auto idx = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+    const auto idx = reinterpret_cast<intptr_t>(ctx);
     if (gpio_read(echoGpio[idx]))
         riseTime[idx] = micros();
     else {
@@ -32,9 +32,6 @@ static void echoISR(void* ctx) {
     }
 }
 
-// PA10 shares EXTI line 10 with PC10 on the G474 board. Only one port can drive
-// that line, so PA10 falls back to TIM1_CH3 input capture. Timer ticks at 1 MHz so CCR3 is
-// directly in microseconds, matching micros()-based timestamps used elsewhere.
 static void pa10CaptureCallback() {
     const uint32_t captured = TIM1->CCR3;
     if ((GPIOA->IDR & (1u << 10)) != 0) {
@@ -59,7 +56,6 @@ void Sonar::begin(const SonarPins& pins) {
     gpio_mode(trigGpio, OUTPUT);
     gpio_low(trigGpio);
 
-    // Claim EXTI lines first so PA10 only takes the timer path when PC10 owns line 10.
     for (int i = 0; i < SONAR_COUNT; i++) {
         echoPinNames[i] = pins.echoPins[i];
         if (echoPinNames[i] == NC) continue;

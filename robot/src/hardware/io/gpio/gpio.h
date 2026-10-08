@@ -65,8 +65,6 @@ static FORCE_INLINE void gpio_toggle(const GpioPin gp)
     toggleMask(gp.port->ODR, gp.mask);
 }
 
-// Drive the pad as a low GPIO output, e.g. until a peripheral takes it over.
-// Any _ALTn suffix is ignored.
 static FORCE_INLINE void gpio_hold_low(const PinName pn)
 {
     const auto pad = static_cast<PinName>(pn & PNAME_MASK);

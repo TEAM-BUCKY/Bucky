@@ -27,8 +27,6 @@ static void fastEEPROMPut(const uint32_t addr, const T& value) {
 #define CAL_LOG_MAGIC     0xCA106001
 #define CAL_LOG_ADDR      512
 
-constexpr float SIN_60 = MotorDriver::SIN_60;
-
 // Diagnostic log written unconditionally at the end of every run so calibration
 // can be done without a laptop attached and reviewed later via testCalibrationDump.
 struct CalibrationLog {
@@ -81,7 +79,7 @@ struct CalibrationLog {
     bool dirValid;
 };
 
-bool loadCalibration(MotorDriver& md, Compass& compass) {
+bool loadCalibration(Motors& md, Compass& compass) {
     StoredCalibration cal = {};
     EEPROM.get(0, cal);
 
@@ -103,7 +101,7 @@ bool loadCalibration(MotorDriver& md, Compass& compass) {
 // Compute omni-drive motor speeds and apply via driveMotorsDirect (no smooth ramp).
 // Uses the same inverse kinematics as driveRadians.
 // After this, syncUpdateAllMotors will apply PI feedback if gains are non-zero.
-static void driveDirectDegrees(MotorDriver& md, const float degrees, const float scale, const float rotation) {
+static void driveDirectDegrees(Motors& md, const float degrees, const float scale, const float rotation) {
     const float rad = Math::degreesToRadians(degrees);
     float sinR, cosR;
     cordic_sin_cos(rad, &sinR, &cosR);
@@ -112,12 +110,12 @@ static void driveDirectDegrees(MotorDriver& md, const float degrees, const float
     // are physically flipped on this board; their entire computed output
     // is negated so physical wheels match the kinematic formula. M2 is
     // normal. driveMotorsDirect clamps to ±100.
-    float raw[MotorDriver::MOTOR_COUNT];
-    MotorDriver::wheelSpeeds(sinR, cosR, scale, rotation, raw);
+    float raw[Motors::MOTOR_COUNT];
+    Motors::wheelSpeeds(sinR, cosR, scale, rotation, raw);
     md.driveMotorsDirect(-raw[0], raw[1], -raw[2]);
 }
 
-static void updateLoop(MotorDriver& md, const uint32_t durationMs) {
+static void updateLoop(Motors& md, const uint32_t durationMs) {
     const uint32_t start = millis();
     while (millis() - start < durationMs) {
         md.syncUpdateAllMotors();
@@ -125,7 +123,7 @@ static void updateLoop(MotorDriver& md, const uint32_t durationMs) {
     }
 }
 
-static void measureSpeeds(MotorDriver& md, float outSpeeds[3]) {
+static void measureSpeeds(Motors& md, float outSpeeds[3]) {
     constexpr int SAMPLE_PERIOD_MS = 50;
     constexpr int TOTAL_SAMPLES = 40;
     constexpr int DISCARD = 6;
@@ -428,7 +426,7 @@ void testCalibrate(const TestContext& ctx) {
     // Accel cross-check disabled: DMA I2C reads after flash writes cause hard-faults
     // on this MCU. The encoder-based calibration is sufficient.
     float ax0 = 0, ay0 = 0, az0 = 0;
-    const bool accelOk = false;
+    constexpr bool accelOk = false;
     DBG_PRINTLN("  Accel cross-check disabled (DMA/flash conflict)");
     log.accelBias[0] = ax0;
     log.accelBias[1] = ay0;
@@ -476,7 +474,8 @@ void testCalibrate(const TestContext& ctx) {
             delay(10);
         }
         if (accelOk) {
-            accelRawAngle[i] = Math::radiansToDegrees(atan2f(vyAcc, vxAcc));
+            // Clockwise from accel +y, same convention as thetaCmd
+            accelRawAngle[i] = Math::radiansToDegrees(atan2f(vxAcc, vyAcc));
             accelVelMag[i]   = sqrtf(vxAcc * vxAcc + vyAcc * vyAcc);
         }
         log.dirAccelRawDeg[i] = accelRawAngle[i];
@@ -507,8 +506,6 @@ void testCalibrate(const TestContext& ctx) {
         ctx.motorDriver.driveMotorsDirect(0, 0, 0);
         updateLoop(ctx.motorDriver, DIR_STOP_MS);
 
-        // Drive back toward center (opposite direction) to stay within ~15cm.
-        // Use driveDegrees with 0 rotation to avoid compass dependency during return.
         {
             const float returnTheta = thetaCmd + 180.0f;
             const uint32_t retStart = millis();
@@ -521,40 +518,35 @@ void testCalibrate(const TestContext& ctx) {
             updateLoop(ctx.motorDriver, DIR_RETURN_SETTLE_MS);
         }
 
-        // Convert to signed PWM% using per-motor max.
         float mPct[3];
         for (uint8_t k = 0; k < 3; k++) {
             const float avg = sums[k] / static_cast<float>(validCnt);
             mPct[k] = 100.0f * avg / result.maxTicksPerSec[k];
         }
 
-        // Forward kinematics: recover v·s and rotation (rotation term cancels in vy/vx).
-        const float vyS = (mPct[0] - 2.0f * mPct[1] + mPct[2]) / 3.0f;
-        const float vxS = (mPct[2] - mPct[0]) / (2.0f * SIN_60);
+        // Forward kinematics (inverse of wheelSpeeds): x = right (sin), y = forward (cos)
+        const float vxS = (mPct[0] - 2.0f * mPct[1] + mPct[2]) / 3.0f;
+        const float vyS = (mPct[2] - mPct[0]) / (2.0f * _SIN_60_F);
 
         float angleRad, magPct;
-        cordic_atan2_mod(vyS, vxS, &angleRad, &magPct);
+        cordic_atan2_mod(vxS, vyS, &angleRad, &magPct);
         const float actualDeg = Math::radiansToDegrees(angleRad);
 
-        // Offset wrapped to [-180, 180]
         float offsetDeg = thetaCmd - actualDeg;
         offsetDeg = Math::wrapDegrees(offsetDeg + 180.0f) - 180.0f;
 
-        // Scale multiplier: output * sMul -> actual speed ~= commanded.
         float sMul = (magPct > 1.0f) ? (BASELINE_SCALE / magPct) : 3.0f;
         if (sMul < 0.3f) sMul = 0.3f;
         if (sMul > 3.0f) sMul = 3.0f;
 
-        // Saturation guard (post-hoc): if any wheel ran too hot, cancellation breaks.
         const float maxAbs = fmaxf(fmaxf(fabsf(mPct[0]), fabsf(mPct[1])), fabsf(mPct[2]));
-        const bool  satOk  = (maxAbs < 95.0f);
+        const bool  satOk  = maxAbs < 95.0f;
 
         result.dirScale[i]     = sMul;
         result.dirOffsetDeg[i] = offsetDeg;
 
-        // In-range validation
-        const bool scaleOk  = (sMul >= 0.6f && sMul <= 1.6f);
-        const bool offsetOk = (fabsf(offsetDeg) <= 25.0f);
+        const bool scaleOk  = sMul >= 0.6f && sMul <= 1.6f;
+        const bool offsetOk = fabsf(offsetDeg) <= 25.0f;
         if (!satOk || !scaleOk || !offsetOk) result.dirValid = false;
 
         for (uint8_t k = 0; k < 3; k++) log.dirMotorPct[i][k] = mPct[k];
@@ -608,7 +600,7 @@ void testCalibrate(const TestContext& ctx) {
             const float accelFrameDeg = Math::radiansToDegrees(atan2f(sumSin, sumCos));
             log.accelFrameDeg        = accelFrameDeg;
             log.phase5_accelFrameOk  = true;
-            DBG_PRINTLN("  Accel frame offset (accel-X vs robot-forward): " +
+            DBG_PRINTLN("  Accel frame offset (accel-Y vs robot-forward): " +
                         String(accelFrameDeg, 1) + " deg (" + String(frameN) +
                         "/" + String(NUM_DIRECTIONS) + " dirs with motion)");
             DBG_PRINTLN("  Accel xcheck: theta | accel_dir | accel_off | enc_off | |v| m/s");

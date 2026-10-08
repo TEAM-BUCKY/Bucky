@@ -7,8 +7,6 @@
 #include "optimizations/logic.h"
 #include "optimizations/optimizations.h"
 
-constexpr float PI_F = _PI_F;
-constexpr float INV_PI_F = _INV_PI_F;
 
 namespace Math
 {
@@ -338,30 +336,24 @@ namespace Math
 
 	FORCE_INLINE float radiansToDegrees(const float radians)
 	{
-		return radians * (180.0f / PI_F);
+		return radians * (180.0f / _PI_F);
 	}
 
 	FORCE_INLINE float degreesToRadians(const float degrees)
 	{
-		return degrees * (PI_F / 180.0f);
+		return degrees * (_PI_F / 180.0f);
 	}
 
-	// Bounded single-step wrap. All callers pass values in ±2π (atan2 output ±
-	// small offset), so one conditional step is always sufficient. A second
-	// pass is kept as a cheap safety net for edge cases (inputs up to ±5π).
-	// Unlike the previous while-loop form, both branches are predictably
-	// not-taken in the steady state — no pipeline stalls on Cortex-M4.
 	FORCE_INLINE float wrapRadians(float radians)
 	{
-		constexpr float kTwoPi = 2.0f * PI_F;
-		if (radians >  PI_F) radians -= kTwoPi;
-		else if (radians < -PI_F) radians += kTwoPi;
-		if (radians >  PI_F) radians -= kTwoPi;
-		else if (radians < -PI_F) radians += kTwoPi;
+		constexpr float kTwoPi = 2.0f * _PI_F;
+		if (radians >  _PI_F) radians -= kTwoPi;
+		else if (radians < -_PI_F) radians += kTwoPi;
+		if (radians >  _PI_F) radians -= kTwoPi;
+		else if (radians < -_PI_F) radians += kTwoPi;
 		return radians;
 	}
 
-	// Wrap into ±180 (one step, inputs within ±540).
 	FORCE_INLINE float wrapSignedDegrees(float degrees)
 	{
 		if (degrees > 180.0f) degrees -= 360.0f;

@@ -5,6 +5,7 @@
 
 #include "hardware/io/mcu.h"
 #include "hardware/io/dma/DMA.h"
+#include "hardware/io/gpio/gpio.h"
 #include "hardware/io/irq/IRQ.h"
 
 enum class GSensorKind : uint8_t {
@@ -81,7 +82,14 @@ public:
     [[nodiscard]] bool hasNewFrame(const uint32_t lastSequence) const { return frameSeq != lastSequence; }
 
     [[nodiscard]] uint32_t desyncCount() const { return desyncs; }
+    [[nodiscard]] uint32_t resetCount() const { return resets; }
+    [[nodiscard]] LineColor lineColorAt(const uint8_t sweep) const { return lineOrder[sweep]; }
 
+    // Manual clocking: take the clock pin from its timer and step the mux by
+    // hand (e.g. to hold the line LEDs on a colour). Frames stop while held.
+    bool holdClock();
+    void stepClock() const;
+    bool releaseClock();
 
     bool readIR(uint16_t out[SENSORS]) const;
     bool readLine(LineFrame& out) const;
@@ -92,6 +100,9 @@ private:
     static bool startClock(const GPortHardware& hw, uint32_t rateHz);
 
     GSensorKind sensorKind = GSensorKind::None;
+    const GPortHardware* hardware = nullptr;
+    GPortTiming portTiming = {};
+    GpioPin clockGpio = {};
     DmaChannel* dma = nullptr;
     uint32_t frameLen = 0;
     uint32_t bufferLen = 0;
@@ -103,6 +114,8 @@ private:
     volatile uint32_t frameEnd = 0;
     volatile uint32_t frameSeq = 0;
     volatile uint32_t desyncs = 0;
+    volatile uint32_t resets = 0;
+    volatile bool clockHeld = false;
 
     bool readFrame(uint16_t* out) const;
 };

@@ -1,24 +1,28 @@
 #ifndef BUCKY_TESTS_H
 #define BUCKY_TESTS_H
 
-#include "hardware/motor/MotorDriver.h"
+#include "hardware/motor/Motors.h"
 #include "hardware/sensors/pos/Compass.h"
 #include "hardware/sensors/pos/Accelerometer.h"
 #include "hardware/sensors/pos/Sonar.h"
 #include "hardware/io/i2c/I2CDMA.h"
+#include "hardware/motor/Kicker.h"
 #include "hardware/sensors/GPort.h"
 
 struct TestContext {
-    MotorDriver& motorDriver;
+    Motors& motorDriver;
+    Kicker& kicker;
     Compass& compass;
     Accelerometer& accel;
     Sonar& sonar;
     I2CDMABus& i2c;
-    GPort* irPort;   // nullptr when no G port carries the IR ring
+    GPort* irPort;     // nullptr when no G port carries the IR ring
+    GPort* linePort;   // nullptr when no G port carries the line sensors
 };
 
 void testHoldHeading(const TestContext& ctx);
 void testIR(const TestContext& ctx);
+void testLine(const TestContext& ctx);
 void testI2CScan(const TestContext& ctx);
 void testDriveForward(const TestContext& ctx);
 void testSonar(const TestContext& ctx);
@@ -35,6 +39,6 @@ void testStrategyFSM(const TestContext& ctx);
 
 // Load calibration from EEPROM (saved by testCalibrate / testCompassCalibrate).
 // Returns true if valid calibration was found and applied.
-bool loadCalibration(MotorDriver& md, Compass& compass);
+bool loadCalibration(Motors& md, Compass& compass);
 
 #endif //BUCKY_TESTS_H

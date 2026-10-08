@@ -16,10 +16,6 @@ typedef struct {
     Vector     original;
 } IrqSlot;
 
-/* ARMv8-M requires the vector table to be naturally aligned to a power of two
- * at least as large as the table itself (128 bytes minimum). The table is
- * 4*(16+MCU_IRQ_COUNT) bytes: 472 on G4, which 512 covers, but 588 on H5,
- * which needs 1024. Use 1024 for both so H5 cannot straddle the boundary. */
 static Vector ram_vectors[VECTOR_COUNT] __attribute__((aligned(1024)));
 _Static_assert(sizeof(ram_vectors) <= 1024,
                "vector table outgrew its alignment; raise both to the next power of two");
@@ -73,8 +69,6 @@ void irq_detach(const IRQn_Type irqn)
     slots[n].handler = NULL;
     slots[n].ctx     = NULL;
 }
-
-/* ---------------------------------------------------------------- EXTI --- */
 
 typedef struct {
     IrqHandler handler;
@@ -173,7 +167,7 @@ bool exti_attach(const PinName pin, const ExtiEdge edge, const IrqHandler handle
     const uint32_t bit  = 1UL << line;
 
     GPIO_TypeDef* gpio = set_GPIO_Port_Clock(port);
-    clearField(gpio->MODER, 3U, line * 2U);   /* input, keep existing pull */
+    clearField(gpio->MODER, 3U, line * 2U);
 
     const uint32_t primask = irq_lock();
 
@@ -213,7 +207,6 @@ void exti_detach(const PinName pin)
     clearBit(exti_used, line);
 
 #if defined(MCU_FAMILY_G4)
-    /* Shared vectors stay attached while another line on them is in use. */
     if (exti_used & exti_dispatch_ctx(line)) return;
 #endif
     irq_detach(exti_irqn(line));

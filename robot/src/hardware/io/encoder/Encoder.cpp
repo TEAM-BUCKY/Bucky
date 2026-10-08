@@ -8,8 +8,6 @@ static EncoderState encoders[ENCODER_MAX];
 
 constexpr uint8_t ENCODER_EXTI_PRIORITY = 1;
 
-// Input filter on TI1/TI2: fSAMPLING = fCK_INT / 4, N = 6. Rejects glitches of
-// roughly 24 counter-clock periods (~100 ns at 250 MHz, ~140 ns at 170 MHz).
 constexpr uint32_t ENCODER_INPUT_FILTER = 0x6U;
 
 static bool try_init_timer(EncoderState& e, const EncoderPins& pins) {
@@ -28,16 +26,13 @@ static bool try_init_timer(EncoderState& e, const EncoderPins& pins) {
     tim_stop(tim);
 
     tim->PSC = 0;
-    tim->ARR = 0xFFFFU;   // 16-bit wrap on every timer keeps the delta math uniform
+    tim->ARR = 0xFFFFU;
 
-    // CC1S = CC2S = 01: IC1 on TI1, IC2 on TI2, both filtered.
     tim->CCMR1 = TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0
                | ENCODER_INPUT_FILTER << TIM_CCMR1_IC1F_Pos
                | ENCODER_INPUT_FILTER << TIM_CCMR1_IC2F_Pos;
     tim->CCER = 0;        // non-inverted inputs
 
-    // SMS = 001: encoder mode 1, count on TI1 edges, direction from TI2 level.
-    // Up when TI1 rises with TI2 low, matching the previous EXTI decoder's sign.
     tim->SMCR = (tim->SMCR & ~TIM_SMCR_SMS_Msk) | TIM_SMCR_SMS_0;
 
     tim->CNT = 0;

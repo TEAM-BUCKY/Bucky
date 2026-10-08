@@ -18,6 +18,10 @@ bool GPort::begin(const GPortHardware& hw, const GSensorKind kind, const GPortTi
     sensorKind = kind;
     if (kind == GSensorKind::None) return true;
 
+    hardware   = &hw;
+    portTiming = timing;
+    clockHeld  = false;
+
     frameLen  = kind == GSensorKind::Line ? MAX_FRAME : SENSORS;
     bufferLen = 2 * frameLen;   // A frame stays intact for one more loop
     dma       = hw.dma;
@@ -84,6 +88,12 @@ bool GPort::startClock(const GPortHardware& hw, const uint32_t rateHz) {
 
 void GPort::onReset(void* ctx) {
     GPort& p = *static_cast<GPort*>(ctx);
+    ++p.resets;
+    if (p.clockHeld) {       // stepped by hand: the DMA position means nothing
+        p.synced = false;
+        return;
+    }
+
     const uint32_t pos = (p.bufferLen - dma_remaining(p.dma)) % p.bufferLen;
 
     if (p.synced) {
@@ -99,15 +109,40 @@ void GPort::onReset(void* ctx) {
     p.lastResetPos = pos;
 }
 
+bool GPort::holdClock() {
+    if (hardware == nullptr || clockHeld) return false;
+    clockHeld = true;
+    clockGpio = gpio_pin_init(hardware->clockPin);
+    gpio_low(clockGpio);
+    gpio_mode(clockGpio, OUTPUT);
+    return true;
+}
+
+// One high pulse: the mux advances on whichever of its two edges it uses.
+void GPort::stepClock() const {
+    gpio_high(clockGpio);
+    delayMicroseconds(1);
+    gpio_low(clockGpio);
+    delayMicroseconds(1);
+}
+
+bool GPort::releaseClock() {
+    if (!clockHeld) return false;
+    synced    = false;
+    clockHeld = false;
+    return startClock(*hardware, portTiming.sampleRateHz);
+}
+
 void GPort::setLineOrder(const LineColor order[4]) {
     for (uint8_t i = 0; i < 4; i++) lineOrder[i] = order[i];
 }
 
 // Due to design constraints the first 8 channels were flipped.
 // This is for both the Line Sensor Controller boards and the IR Sensor Controller boards.
-uint8_t translatePosition(const uint8_t pos) {
-    if (pos < 8) return 7 - pos;
-    return pos;
+// Every colour sweep goes through the same mux, so the flip repeats each SENSORS samples.
+uint32_t translatePosition(const uint32_t pos) {
+    const uint32_t ch = pos % GPort::SENSORS;
+    return ch < 8 ? pos - ch + (7 - ch) : pos;
 }
 
 bool GPort::readFrame(uint16_t* out) const {

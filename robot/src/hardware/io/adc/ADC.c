@@ -25,8 +25,6 @@ ADC_Common_TypeDef* adc_common(const ADC_TypeDef* adc)
 
 void adc_set_sync_clock(const ADC_TypeDef* adc, const uint32_t ckmode)
 {
-    // CKMODE may only change while every ADC on the common block is disabled,
-    // so skip the write when a sibling ADC already set the same clock.
     ADC_Common_TypeDef* common = adc_common(adc);
     const uint32_t ccr = (common->CCR & ~ADC_CCR_CKMODE_Msk) | ckmode << ADC_CCR_CKMODE_Pos;
     if (common->CCR != ccr) common->CCR = ccr;
@@ -47,11 +45,9 @@ void adc_init_triggered(ADC_TypeDef* adc, const uint32_t channel, const uint32_t
                         const AdcTriggerEdge edge) {
     clearMask(adc->CR, ADC_CR_DEEPPWD);
 
-    // Enable internal voltage regulator
     setMask(adc->CR, ADC_CR_ADVREGEN);
     delayMicroseconds(20); // tADCVREG_STUP
 
-    // Single-ended calibration
     clearMask(adc->CR, ADC_CR_ADCALDIF);
     setMask(adc->CR, ADC_CR_ADCAL);
     while (testMask(adc->CR, ADC_CR_ADCAL)) {}

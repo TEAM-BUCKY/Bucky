@@ -52,10 +52,9 @@ struct SpeedRange {
     float scale = 1;
 };
 
-class MotorDriver {
+class Motors {
 public:
     static constexpr uint8_t MOTOR_COUNT = 3;
-    static constexpr float SIN_60 = 0.8660254037844f;
 
     // Omni-wheel inverse kinematics: wheel speeds (in % before clamping) for a
     // heading given as sin/cos, a translation scale and a rotation term.
@@ -81,7 +80,7 @@ private:
     static void drive(Motor& motor, float speed, float totalSpeed);
 
 public:
-    MotorDriver(const MotorPin m1, const MotorPin m2, const MotorPin m3) : pins{m1, m2, m3} {}
+    Motors(const MotorPin m1, const MotorPin m2, const MotorPin m3) : pins{m1, m2, m3} {}
 
     void init(float minSpeed = MIN_SPEED, float maxSpeed = MAX_SPEED,
               const EncoderPins enc[MOTOR_COUNT] = nullptr);
