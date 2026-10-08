@@ -83,7 +83,6 @@ IRQn_Type dma_irqn(const DmaChannel* ch)
 
 #elif defined(MCU_FAMILY_H5)
 
-/* ---------------------------------------------------------------- H5 ----- */
 
 #define GPDMA_CHANNELS  8U
 
@@ -92,8 +91,6 @@ typedef struct {
     uint8_t index;
 } ChannelInfo;
 
-/* One self-referencing linked-list item per channel for circular transfers:
- * reloads CBR1, the incrementing address (CSAR or CDAR) and CLLR itself. */
 static uint32_t ll_items[2 * GPDMA_CHANNELS][3];
 
 static ChannelInfo channel_info(const DmaChannel* ch)

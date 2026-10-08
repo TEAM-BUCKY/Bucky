@@ -23,8 +23,6 @@ bool Compass::tick() {
             DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Compass WHO_AM_I: 0x");
             DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, id, HEX);
             if (id != 0x40) {
-                // Cold-boot I2C sometimes returns 0x00 on the first one or two
-                // reads; stay in BOOT_WAIT and retry a few times before giving up.
                 if (whoAmIRetries < 5) {
                     whoAmIRetries++;
                     state = CompassState::BOOT_WAIT;
@@ -34,7 +32,7 @@ bool Compass::tick() {
                 state = CompassState::FAILED;
                 break;
             }
-            // Soft reset
+
             writeReg(LIS2MDL_CFG_REG_A, 0x20);
             state = CompassState::RESET_WAIT;
             stateStart = millis();
@@ -68,9 +66,6 @@ bool Compass::tick() {
                 sampleCount++;
                 stateStart = millis();
                 if (sampleCount >= 10) {
-                    // startHeading is captured by reset() after calibration
-                    // is loaded — sampling here runs with default offX/Y=0,
-                    // scaleX/Y=1 and would anchor to an uncalibrated heading.
                     lastTime = millis();
                     lastError = 0;
                     lastDerivative = 0;
@@ -123,10 +118,6 @@ float Compass::computeRotation(const float targetDegrees) {
 
     const float error = Math::wrapSignedDegrees(getOffset() - targetDegrees);
 
-    // Dirty-D: one-pole IIR on the derivative to keep magnetometer noise
-    // (±0.5-1°) from driving the motors at the rated kd. Skip the state
-    // update on zero-dt ticks — otherwise alpha=1 with rawDeriv=0 wipes
-    // the filter whenever two calls land in the same millisecond.
     if (dtS > 0.0f) {
         const float rawDeriv = (error - lastError) / dtS;
         const float alpha    = dtS / (derivTau + dtS);

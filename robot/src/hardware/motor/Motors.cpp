@@ -1,4 +1,4 @@
-#include "MotorDriver.h"
+#include "Motors.h"
 #include "debug.h"
 #include "hardware/io/cordic/cordic.h"
 #include <cmath>
@@ -24,7 +24,7 @@ static void initPwm(PwmPin& pw, const PinName pin) {
     pwm_sync_register(&pw);
 }
 
-void MotorDriver::init(const float minSpeed, const float maxSpeed, const EncoderPins enc[MOTOR_COUNT])
+void Motors::init(const float minSpeed, const float maxSpeed, const EncoderPins enc[MOTOR_COUNT])
 {
     changeSpeed(minSpeed, maxSpeed);
 
@@ -63,7 +63,7 @@ void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const
 }
 
 template<bool stage>
-void MotorDriver::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
+void Motors::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
 {
     if (fabsf(targetSpeed) <= STOP_DEADBAND) {
         writeMotorSpeed<stage>(motor, 0, 0);
@@ -92,7 +92,7 @@ float getSmoothFunction(const float begin, const float target, const float total
 }
 
 template<bool stage>
-void MotorDriver::updateMotor(Motor& motor) const
+void Motors::updateMotor(Motor& motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
     const float setpoint = getSmoothFunction(motor.beginSpeed, motor.targetSpeed, motor.totalSpeed, timeSinceBeginSmooth);
@@ -121,16 +121,16 @@ void MotorDriver::updateMotor(Motor& motor) const
     setMotorSpeed<stage>(motor.motor, clampSpeed(setpoint + correction));
 }
 
-void MotorDriver::updateAllMotors() {
+void Motors::updateAllMotors() {
     for (Motor& m : motors) updateMotor<false>(m);
 }
 
-void MotorDriver::syncUpdateAllMotors() {
+void Motors::syncUpdateAllMotors() {
     for (Motor& m : motors) updateMotor<true>(m);
     pwm_commit();
 }
 
-void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed) {
+void Motors::drive(Motor& motor, const float speed, const float totalSpeed) {
     DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, "Motor drive: beginSpeed=" + String(motor.beginSpeed) + ", targetSpeed=" + String(motor.targetSpeed) + ", totalSpeed=" + String(motor.totalSpeed));
     if (motor.targetSpeed == speed && motor.totalSpeed == totalSpeed)
         return;
@@ -140,18 +140,18 @@ void MotorDriver::drive(Motor& motor, const float speed, const float totalSpeed)
     motor.beginTimeMs = micros();
 }
 
-void MotorDriver::wheelSpeeds(const float sinHeading, const float cosHeading, const float scale,
+void Motors::wheelSpeeds(const float sinHeading, const float cosHeading, const float scale,
                               const float rotation, float out[MOTOR_COUNT]) {
-    out[0] = (0.5f * sinHeading - SIN_60 * cosHeading) * scale + rotation;
+    out[0] = (0.5f * sinHeading - _SIN_60_F * cosHeading) * scale + rotation;
     out[1] = -sinHeading * scale + rotation;
-    out[2] = (0.5f * sinHeading + SIN_60 * cosHeading) * scale + rotation;
+    out[2] = (0.5f * sinHeading + _SIN_60_F * cosHeading) * scale + rotation;
 }
 
-void MotorDriver::driveDegrees(const float degrees, const float scale, const float rotation) {
+void Motors::driveDegrees(const float degrees, const float scale, const float rotation) {
     driveRadians(Math::degreesToRadians(degrees), scale, rotation);
 }
 
-void MotorDriver::driveRadians(const float radians, const float scale, const float rotation) {
+void Motors::driveRadians(const float radians, const float scale, const float rotation) {
     const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
 
     float sinRadians, cosRadians;
@@ -166,14 +166,15 @@ void MotorDriver::driveRadians(const float radians, const float scale, const flo
     DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, "Drive: radians=" + String(radians) + ", scale=" + String(scale) + ", rotation=" + String(rotation));
 }
 
-void MotorDriver::driveVector(const VectorXY vector, const float rotation) {
+void Motors::driveVector(const VectorXY vector, const float rotation) {
     float angleRad, magnitude;
-    cordic_atan2_mod(vector.y, vector.x, &angleRad, &magnitude);
+    // Angles are clockwise from +y (forward): angle = atan2(x, y)
+    cordic_atan2_mod(vector.x, vector.y, &angleRad, &magnitude);
 
     driveRadians(angleRad, magnitude, rotation);
 }
 
-void MotorDriver::driveMotorsDirect(const float m1Speed, const float m2Speed, const float m3Speed) {
+void Motors::driveMotorsDirect(const float m1Speed, const float m2Speed, const float m3Speed) {
     const float speeds[MOTOR_COUNT] = {m1Speed, m2Speed, m3Speed};
     const uint32_t now = micros();
 
@@ -188,7 +189,7 @@ void MotorDriver::driveMotorsDirect(const float m1Speed, const float m2Speed, co
     }
 }
 
-void MotorDriver::getEncoderSpeeds(float out[3]) const
+void Motors::getEncoderSpeeds(float out[3]) const
 {
     if (!encodersEnabled) {
         for (uint8_t i = 0; i < MOTOR_COUNT; i++)
@@ -203,7 +204,7 @@ void MotorDriver::getEncoderSpeeds(float out[3]) const
     }
 }
 
-void MotorDriver::getEncoderTicks(uint16_t out[3]) const
+void Motors::getEncoderTicks(uint16_t out[3]) const
 {
     if (!encodersEnabled) {
         for (uint8_t i = 0; i < MOTOR_COUNT; i++)
@@ -215,7 +216,7 @@ void MotorDriver::getEncoderTicks(uint16_t out[3]) const
         out[i] = encoder_get_ticks(i);
 }
 
-void MotorDriver::getEncoderValues(MotorEncoderValue out[3]) const
+void Motors::getEncoderValues(MotorEncoderValue out[3]) const
 {
     if (!encodersEnabled) {
         for (uint8_t i = 0; i < MOTOR_COUNT; i++)

@@ -6,7 +6,6 @@
 void Accelerometer::begin(I2CDMABus& busRef) {
     bus = &busRef;
 
-    // Cold-boot I2C sometimes returns 0x00 on the first couple of reads.
     uint8_t id = 0;
     for (uint8_t attempt = 0; attempt < 6; attempt++) {
         id = readReg(LSM303AGR_WHO_AM_I);
@@ -20,9 +19,7 @@ void Accelerometer::begin(I2CDMABus& busRef) {
         return;
     }
 
-    // 100 Hz, X/Y/Z enabled, normal power mode.
     writeReg(LSM303AGR_CTRL_REG1_A, 0x57);
-    // BDU=1, ±2g, high-resolution (12-bit).
     writeReg(LSM303AGR_CTRL_REG4_A, 0x88);
     ok = true;
 }
@@ -37,7 +34,6 @@ bool Accelerometer::read(float& ax_g, float& ay_g, float& az_g) const {
 
     if (!i2c_dma_wait_timeout(bus, 10)) return false;
 
-    // Left-justified 12-bit samples, little endian.
     auto toG = [&](const uint8_t i) {
         const auto raw = static_cast<int16_t>(combineBytes(buf[i + 1], buf[i]));
         DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Raw value: ");

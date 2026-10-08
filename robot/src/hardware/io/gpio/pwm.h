@@ -13,7 +13,6 @@
 #include "optimizations/optimizations.h"
 
 #if !defined(HRTIM1)
-// Keeps PwmPin's layout identical on families without HRTIM (e.g. STM32H5).
 typedef struct HrtimTimerUnavailable HRTIM_Timerx_TypeDef;
 #endif
 
@@ -135,8 +134,6 @@ static FORCE_INLINE PwmPin pwm_pin_from_map(const PinName mappedPin, TIM_TypeDef
     return pw;
 }
 
-// Exact lookup: `pn` may carry an _ALTn suffix to choose the timer, e.g.
-// PB_14_ALT2 selects TIM12_CH1 instead of the default TIM1_CH2N.
 static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
 {
 #if defined(HRTIM1)
@@ -162,7 +159,6 @@ static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
     return pwm_pin_from_map(pn, timer, channel, complementary);
 }
 
-// Arduino pin number: prefer an advanced timer among every _ALTn entry of the pad.
 static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
 {
     const PinName pn = digitalPinToPinName(pin);
@@ -228,9 +224,6 @@ static FORCE_INLINE void pwm_init_hrtim(const PwmPin *pw, const uint32_t resolut
 }
 #endif
 
-// Start PWM with a period of (resolution + 1) counts. TIMx runs those at
-// freq * (resolution + 1) Hz as far as the prescaler allows; HRTIM ignores
-// freq and counts at its own clock.
 static FORCE_INLINE void pwm_init(const PwmPin *pw, const uint32_t freq, const uint32_t resolution)
 {
     if (pw->ccr == nullptr) {

@@ -2,41 +2,53 @@
 #define ROBOT_BUTTON_H
 
 #include "hardware/io/gpio/gpio.h"
+#include "hardware/io/irq/IRQ.h"
 
 class Button {
 public:
-    void begin(const PinName pin) {
+    bool begin(const PinName pin) {
         gpio = gpio_pin_init(pin);
-        gpio_mode(gpio, INPUT_PULLDOWN);   // pressed pulls the pad to ground
-        level = stable = gpio_read(gpio);
+        gpio_mode(gpio, INPUT_PULLDOWN);   // pressed pulls the pad to 3.3 V
+        stable = gpio_read(gpio);
         changed = millis();
+        pending = false;
+        return exti_attach(pin, EXTI_BOTH, onEdge, this, BUTTON_EXTI_PRIORITY);
     }
 
-    // True once per press, after the level has been settled for the debounce window.
     [[nodiscard]] bool pressed() {
-        const int now = gpio_read(gpio);
-        if (now != level) {
-            level = now;
-            changed = millis();
-            return false;
-        }
-        if (now != stable && millis() - changed >= DEBOUNCE_MS) {
-            stable = now;
-            return now == 0;
-        }
-        return false;
+        const uint32_t primask = irq_lock();
+        if (millis() - changed >= DEBOUNCE_MS) accept(gpio_read(gpio), millis());
+        const bool result = pending;
+        pending = false;
+        irq_restore(primask);
+        return result;
     }
 
 private:
     static constexpr uint32_t DEBOUNCE_MS = 25;
+    static constexpr uint8_t BUTTON_EXTI_PRIORITY = 6;
 
-    GpioPin  gpio{};
-    int      level  = 1;
-    int      stable = 1;
-    uint32_t changed = 0;
+    GpioPin gpio{};
+    volatile int stable = 0;
+    volatile uint32_t changed = 0;
+    volatile bool pending = false;
+
+    void accept(const int level, const uint32_t now) {
+        if (level == stable) return;
+        stable = level;
+        changed = now;
+        if (level == 1) pending = true;
+    }
+
+    static void onEdge(void* ctx) {
+        auto* self = static_cast<Button*>(ctx);
+        const uint32_t now = millis();
+        if (now - self->changed < DEBOUNCE_MS) return;   // contact bounce
+        self->accept(gpio_read(self->gpio), now);
+    }
 };
 
-Button button1;
-Button button2;
+inline Button button1;
+inline Button button2;
 
 #endif //ROBOT_BUTTON_H

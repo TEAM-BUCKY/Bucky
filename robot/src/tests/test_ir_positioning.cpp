@@ -85,8 +85,8 @@ void testIRPositioning(const TestContext& ctx)
                 const float w = v * v;
                 const float angleRad = Math::degreesToRadians(
                     ANGLE_PER_SENSOR_DEG * static_cast<float>(ch));
-                sx += w * cosf(angleRad);
-                sy += w * sinf(angleRad);
+                sx += w * sinf(angleRad);
+                sy += w * cosf(angleRad);
                 totalW += w;
                 ++n;
             }
@@ -96,7 +96,7 @@ void testIRPositioning(const TestContext& ctx)
                 bearingDegOut = 0.0f;
                 return false;
             }
-            bearingDegOut = Math::radiansToDegrees(atan2f(sy, sx));
+            bearingDegOut = Math::radiansToDegrees(atan2f(sx, sy));
             return true;
         };
 

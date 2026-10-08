@@ -49,7 +49,6 @@ static void i2c_enable_fmp(const I2C_TypeDef* i2c, const PinName sda, const PinN
     else if (i2c == I2C2) setMask(SYSCFG->CFGR1, SYSCFG_CFGR1_I2C2_FMP);
     else if (i2c == I2C3) setMask(SYSCFG->CFGR1, SYSCFG_CFGR1_I2C3_FMP);
 #elif defined(MCU_FAMILY_H5)
-    /* H5 only has FM+ drivers on PB6..PB9; other pads run at standard drive. */
     (void)i2c;
     __HAL_RCC_SBS_CLK_ENABLE();
     const PinName pins[2] = {sda, scl};

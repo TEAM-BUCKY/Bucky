@@ -3,10 +3,10 @@
 
 #include "hardware/io/i2c/I2CDMA.h"
 #include "hardware/io/encoder/Encoder.h"
-#include "hardware/motor/MotorDriver.h"
+#include "hardware/motor/Motors.h"
 #include "hardware/sensors/pos/Sonar.h"
 
-namespace board {
+namespace Board {
 
 constexpr const char* NAME = "G474RE";
 

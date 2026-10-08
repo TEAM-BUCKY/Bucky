@@ -6,6 +6,7 @@ The better iteration of Goaly Robot
 - Hardware
   - Pcb
 - Software
+  - Conventions
 
 - History
 
@@ -27,4 +28,28 @@ The better iteration of Goaly Robot
 
 # Software
 
+## Conventions
+All code uses the same frame, angle and ordering conventions. Code that doesn't follow them is a bug.
 
+- **Axes**: `y` = forward, `x` = right. This holds for both the robot frame and the field frame (field `y` points toward the opponent goal).
+- **Angles**: clockwise positive, `0` = forward (`+y`).
+  - Direction of angle `a`: `(x, y) = (sin a, cos a)`
+  - Angle of a vector: `a = atan2(x, y)` (**not** `atan2(y, x)`)
+- **Rotation**: positive rotation = clockwise.
+- **Ordering**: everything is numbered clockwise, seen from above: motors, IR sensors, sonars, line sensors.
+  - IR sensor 0 and sonar 0 face straight forward (`0°`); the following sensors go clockwise (IR sensor `i` is at `i * 360° / count`, sonars are front, right, back, left).
+- **Units**: distances in cm. The EKF/strategy code uses radians; compass/drive helpers use degrees (convert with `Math::degreesToRadians`).
+
+### Motors
+Seen from the robot's perspective, numbered clockwise:
+
+| Motor | Position | Angle |
+|-------|----------|-------|
+| M1    | right    | 60°   |
+| M2    | back     | 180°  |
+| M3    | left     | 300°  |
+
+A positive wheel speed in `Motors::wheelSpeeds` means the wheel pushes the robot clockwise.
+
+### Compass / accelerometer (LSM303AGR)
+Mount the chip facing up, with `x` to the right and `y` to the front. Its axes then match the robot frame, and the compass heading increases clockwise.
