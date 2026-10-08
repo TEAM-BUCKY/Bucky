@@ -11,7 +11,7 @@
 
 struct TestContext {
     Motors& motorDriver;
-    Kicker& kicker;
+    Kicker* kicker;   // nullptr when the board has no kicker
     Compass& compass;
     Accelerometer& accel;
     Sonar& sonar;

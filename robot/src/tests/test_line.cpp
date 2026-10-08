@@ -61,6 +61,7 @@ void testLine(const TestContext& ctx) {
     uint32_t lastPrintMs = 0;
 
     while (true) {
+
         if (button1.pressed()) {
             DBG_PRINTLN("Calibrating white...");
             if (line.calibrateWhite()) printWhite(line);

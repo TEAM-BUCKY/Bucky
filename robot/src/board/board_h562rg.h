@@ -11,6 +11,7 @@
 #define BOARD_HAS_BLUETOOTH 1
 #define BOARD_HAS_GPORTS 1
 #define BOARD_HAS_BUTTONS 1
+#define BOARD_HAS_KICKER 1
 
 namespace Board {
 

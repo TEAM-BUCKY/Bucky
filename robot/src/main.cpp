@@ -20,7 +20,9 @@ I2CDMABus sensorI2C;
 Compass compass;
 Accelerometer accel;
 Sonar sonar;
+#ifdef BOARD_HAS_KICKER
 Kicker kicker(Board::KICKER);
+#endif
 
 #ifdef BOARD_HAS_GPORTS
 GPort gPort1;
@@ -67,7 +69,9 @@ void setupEnvironment() {
     analogReadResolution(12);
 
     motorDriver.init(MIN_SPEED, MAX_SPEED, Board::ENCODERS);
+#ifdef BOARD_HAS_KICKER
     kicker.init();
+#endif
 
     sonar.begin(Board::SONAR);
 
@@ -97,24 +101,35 @@ void setupEnvironment() {
     init();
     setupEnvironment();
 
+#ifdef BOARD_HAS_BUTTONS
     if (!button1.begin(Board::BUTTON1)) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 1 EXTI line taken");
     if (!button2.begin(Board::BUTTON2)) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 2 EXTI line taken");
+#endif
 
 
 #ifdef RUN_TEST
     dbg.setBlocking(true);   // test reports are long; let them arrive complete
-    const TestContext ctx = {motorDriver, kicker, compass, accel, sonar, sensorI2C, irPort(), linePort()};
+    #ifdef BOARD_HAS_KICKER
+    Kicker* const kickerPtr = &kicker;
+#else
+    Kicker* const kickerPtr = nullptr;
+#endif
+    const TestContext ctx = {motorDriver, kickerPtr, compass, accel, sonar, sensorI2C, irPort(), linePort()};
     RUN_TEST(ctx);
 #endif
+#ifdef BOARD_HAS_KICKER
     kicker.kick(1.0f);
+#endif
     motorDriver.driveMotorsDirect(100, 0, 0);
 
     uint32_t lastTick = millis();
     while (true) {
         motorDriver.syncUpdateAllMotors();
 
+#ifdef BOARD_HAS_BUTTONS
         if (button1.pressed()) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 1 pressed");
         if (button2.pressed()) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 2 pressed");
+#endif
 
         if (millis() - lastTick >= 1000) {
             lastTick += 1000;
