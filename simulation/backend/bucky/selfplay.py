@@ -9,6 +9,7 @@ to the 23-dim single-agent observation → a 27-dim opponent-aware observation.
 from __future__ import annotations
 import numpy as np
 
+from bucky.game.geometry import ray_to_arena
 from bucky.obs import (
     LEGACY_OBS_DIM,
     OBS_DIM,
@@ -17,7 +18,7 @@ from bucky.obs import (
     build_observation,
 )
 from bucky.physics.backend import PhysicsState
-from bucky.physics.python_backend import ARENA_HALF_X, ARENA_HALF_Y, ROBOT_RADIUS
+from bucky.physics.python_backend import ROBOT_RADIUS
 
 # 4 ultrasonic beams, body-fixed: forward, left, right, back.
 SONAR_BEAMS = (0.0, np.pi / 2, -np.pi / 2, np.pi)
@@ -155,15 +156,7 @@ def reflect_state(state: PhysicsState) -> PhysicsState:
 # ── sonar sensor model ───────────────────────────────────────────────────────
 def _ray_to_arena(pos: np.ndarray, direction: np.ndarray) -> float:
     """Distance from ``pos`` along unit ``direction`` to the arena wall box."""
-    ts = []
-    for axis, half in ((0, ARENA_HALF_X), (1, ARENA_HALF_Y)):
-        d = direction[axis]
-        if abs(d) > 1e-9:
-            bound = np.copysign(half, d)
-            t = (bound - pos[axis]) / d
-            if t > 0:
-                ts.append(t)
-    return min(ts) if ts else MAX_SONAR_RANGE
+    return ray_to_arena(pos, direction, MAX_SONAR_RANGE)
 
 
 def sonar_ranges(

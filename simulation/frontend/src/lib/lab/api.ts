@@ -32,6 +32,8 @@ export interface SensorInfo {
 export interface ExperimentInfo {
 	name: string;
 	module_kind: string;
+	/** module_kind plus kinds that can stand in for it (e.g. "firmware" programs). */
+	accepts_kinds?: string[];
 	doc: string;
 	params: Record<string, ParamSpec>;
 }
@@ -161,4 +163,10 @@ export function toFieldTheta(h: number): number {
 
 export function defaults(spec: Record<string, ParamSpec>): Record<string, ParamValue> {
 	return Object.fromEntries(Object.entries(spec).map(([k, p]) => [k, Array.isArray(p.default) ? [...p.default] : p.default]));
+}
+
+/** True when `exp` can test modules of `kind`. */
+export function acceptsKind(exp: ExperimentInfo, kind: string | undefined): boolean {
+	if (!kind) return false;
+	return exp.module_kind === kind || (exp.accepts_kinds ?? []).includes(kind);
 }

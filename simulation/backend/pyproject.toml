@@ -28,7 +28,11 @@ dependencies = [
 
 [project.optional-dependencies]
 learners-extra = ["d3rlpy>=2.0"]
-dev = ["pytest>=8.0", "ruff>=0.4", "httpx>=0.27"]
+dev = ["pytest>=8.0", "ruff>=0.4", "httpx>=0.27", "pybind11>=2.13.6"]
+# Software-in-the-loop firmware simulator (bucky.firmware): builds robot/sim with CMake.
+firmware = ["pybind11>=2.13.6"]
+# Live pygame viewer for the firmware simulator (python -m bucky.firmware.viewer).
+viewer = ["pygame-ce>=2.4"]
 
 [tool.ruff]
 line-length = 100
@@ -67,4 +71,5 @@ packages = ["bucky", "app"]
 dev = [
     "pytest>=9.1.0",
     "httpx>=0.27",
+    "pybind11>=2.13.6",
 ]

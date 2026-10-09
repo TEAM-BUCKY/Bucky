@@ -8,6 +8,10 @@ Usage:
     uv run python scripts/lab.py sweep bisector --grid ball_step_cm=10 --param speed=0.4
     uv run python scripts/lab.py sweep bisector --variant fast:speed=0.8 --variant slow:speed=0.3
     uv run python scripts/lab.py replay bisector --ball 0 0 --robot 0 40
+
+The real firmware (robot/src, see bucky/firmware) runs as modules of kind "firmware", one per
+program (main_loop, firmware, testDriveForward, …):
+    uv run python scripts/lab.py sweep testDriveForward --kind firmware --grid ball_step_cm=60
 """
 from __future__ import annotations
 

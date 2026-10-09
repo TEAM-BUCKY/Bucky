@@ -153,6 +153,23 @@ run, so no restart is needed. Extension points: new sensors go in `bucky/lab/sen
 (`@register_sensor`), and new module kinds plus their scoring go in `bucky/lab/experiments/`
 (`@register_experiment`).
 
+### The real firmware in the lab
+
+`bucky.firmware` compiles the robot's own C++ (`robot/src`, unmodified) against a simulated
+STM32H562 board and runs it in the same physics, with simulated readings for every sensor
+(compass, accelerometer, sonar, IR ring, line ring, encoders, buttons). Each firmware program
+(`main_loop`, `testDriveForward`, `testHoldHeading`, …) is a lab module of kind `firmware`:
+
+```bash
+uv run python -m bucky.firmware.build -v                                    # needs g++ + cmake
+uv run python scripts/lab.py sweep testDriveForward --kind firmware --grid ball_step_cm=60
+uv run --extra viewer python -m bucky.firmware.viewer --program testIRPositioning
+uv run pytest tests/test_firmware_*.py
+```
+
+How it works, the Python API and the assumptions still to verify on the robot:
+[`robot/sim/README.md`](../../robot/sim/README.md).
+
 ## Export ONNX
 
 ```bash

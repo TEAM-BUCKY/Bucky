@@ -24,6 +24,13 @@ from bucky.lab.params import Configurable, describe_params
 class Experiment(Configurable):
     name: ClassVar[str] = ""
     module_kind: ClassVar[str] = ""
+    #: Other module kinds that can stand in for ``module_kind`` (e.g. a firmware program that
+    #: drives the robot can be scored like a drive module).
+    also_accepts: ClassVar[tuple[str, ...]] = ()
+
+    @classmethod
+    def accepts(cls, kind: str) -> bool:
+        return kind == cls.module_kind or kind in cls.also_accepts
 
     def scenarios(self) -> list[dict]:
         raise NotImplementedError
@@ -67,8 +74,9 @@ def get_experiment(name: str) -> type[Experiment]:
 
 def list_experiments(kind: str | None = None) -> list[dict]:
     return [
-        {"name": n, "module_kind": c.module_kind, "doc": (c.__doc__ or "").strip(),
+        {"name": n, "module_kind": c.module_kind,
+         "accepts_kinds": [c.module_kind, *c.also_accepts], "doc": (c.__doc__ or "").strip(),
          "params": describe_params(c.params)}
         for n, c in sorted(_EXPERIMENTS.items())
-        if kind is None or c.module_kind == kind
+        if kind is None or c.accepts(kind)
     ]

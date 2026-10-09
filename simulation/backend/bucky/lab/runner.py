@@ -4,6 +4,10 @@ Work is split into chunks and fanned out over a process pool. Workers re-run
 :func:`bucky.lab.registry.discover` and look the module up by ``(kind, name)``, so user modules
 never need to be picklable. Default workers = half the CPUs: this machine also runs the
 production trainer.
+
+Firmware programs (kind ``"firmware"``, see :mod:`bucky.firmware.lab`) always run in fresh
+``spawn``ed worker processes, one chunk each, so a firmware hang can never take down the caller
+(e.g. the web server) and every chunk starts from clean firmware globals.
 """
 from __future__ import annotations
 
@@ -23,9 +27,17 @@ def default_workers() -> int:
     return max(1, (os.cpu_count() or 2) // 2)
 
 
+FIRMWARE_KIND = "firmware"
+FIRMWARE_CHUNK = 16
+
+
 def build_executor(kind: str, name: str, params: dict | None, sensor_params: dict | None,
                    seed: int) -> Executor:
     module = registry.get_module(kind, name)(**(params or {}))
+    if kind == FIRMWARE_KIND:
+        from bucky.firmware.lab import FirmwareExecutor
+
+        return FirmwareExecutor(module, seed=seed)
     return Executor([module], sensor_params=sensor_params, seed=seed)
 
 
@@ -61,8 +73,14 @@ def run_sweep(
     registry.discover()
     module_cls = registry.get_module(kind, name=module)
     exp_cls = get_experiment(experiment)
-    if exp_cls.module_kind != kind:
+    if not exp_cls.accepts(kind):
         raise ValueError(f"experiment {experiment!r} tests {exp_cls.module_kind!r} modules")
+    firmware = kind == FIRMWARE_KIND
+    if firmware:
+        from bucky.firmware.build import ensure_built
+
+        ensure_built()   # once, here, rather than racing in every worker
+        chunk_size = min(chunk_size, FIRMWARE_CHUNK)
     exp = exp_cls(**(grid or {}))
     scenarios = exp.scenarios()
     base = dict(params or {})
@@ -84,13 +102,19 @@ def run_sweep(
     workers = workers or default_workers()
     t0 = time.time()
     records: list[dict] = []
-    if workers <= 1 or len(jobs) <= 1:
+    if not firmware and (workers <= 1 or len(jobs) <= 1):
         for job in jobs:
             records += _run_chunk(job)
             if progress:
                 progress(len(records), total)
     else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        if firmware:
+            from bucky.firmware.process import firmware_pool
+
+            pool_cm = firmware_pool(min(workers, len(jobs)))
+        else:
+            pool_cm = ProcessPoolExecutor(max_workers=workers)
+        with pool_cm as pool:
             futures = [pool.submit(_run_chunk, job) for job in jobs]
             for fut in as_completed(futures):
                 records += fut.result()
@@ -115,7 +139,22 @@ def run_sweep(
 def replay(module: str, scenario: dict, *, kind: str = "drive",
            experiment: str = "drive_approach", params: dict | None = None,
            grid: dict | None = None, sensor_params: dict | None = None, seed: int = 0) -> dict:
-    """Re-run one scenario with tracing on (same seed as in the sweep → identical result)."""
+    """Re-run one scenario with tracing on (same seed as in the sweep → identical result).
+    Firmware programs replay in a fresh, killable process (see :mod:`bucky.firmware.process`)."""
+    if kind == FIRMWARE_KIND:
+        from bucky.firmware.build import ensure_built
+        from bucky.firmware.process import run_isolated
+
+        ensure_built()
+        return run_isolated(_replay_local, module, scenario, kind=kind, experiment=experiment,
+                            params=params, grid=grid, sensor_params=sensor_params, seed=seed)
+    return _replay_local(module, scenario, kind=kind, experiment=experiment, params=params,
+                         grid=grid, sensor_params=sensor_params, seed=seed)
+
+
+def _replay_local(module: str, scenario: dict, *, kind: str, experiment: str,
+                  params: dict | None, grid: dict | None, sensor_params: dict | None,
+                  seed: int) -> dict:
     registry.discover()
     exp = get_experiment(experiment)(**(grid or {}))
     ex = build_executor(kind, module, params, sensor_params, seed=seed + int(scenario.get("id", 0)))

@@ -19,6 +19,7 @@
 		labApi,
 		toField,
 		toFieldTheta,
+		acceptsKind,
 		type ExperimentInfo,
 		type LabModuleInfo,
 		type ParamValue,
@@ -45,7 +46,7 @@
 	let seed = $state(0);
 
 	const mod = $derived(modules.find((m) => `${m.kind}/${m.name}` === moduleKey));
-	const experiment = $derived(experiments.find((e) => e.module_kind === mod?.kind));
+	const experiment = $derived(experiments.find((e) => acceptsKind(e, mod?.kind)));
 	const modSensors = $derived(sensors.filter((s) => mod?.sensors.includes(s.name)));
 
 	async function load() {
@@ -75,7 +76,7 @@
 		const m = modules.find((x) => `${x.kind}/${x.name}` === key);
 		if (!m) return;
 		params = defaults(m.params);
-		const exp = experiments.find((e) => e.module_kind === m.kind);
+		const exp = experiments.find((e) => acceptsKind(e, m.kind));
 		grid = exp ? defaults(exp.params) : {};
 		sensorParams = Object.fromEntries(
 			sensors.filter((s) => m.sensors.includes(s.name)).map((s) => [s.name, defaults(s.params)])
