@@ -1,9 +1,21 @@
-"""Bucky Lab integration: the firmware's programs as lab modules of kind ``"firmware"``.
+"""Bucky Lab integration: the firmware's programs as lab modules.
 
-Every program (``main_loop``, ``firmware``, ``testDriveForward``, …) is registered as a module,
-so the lab's experiments, sweeps, replays and dashboard run the *real* firmware::
+Each program is registered under the kind that says how it can be graded
+(:func:`bucky.firmware.programs.program_role`):
+
+* ``"firmware"`` — programs that drive the robot (``main_loop``, ``testDriveForward``, …), scored
+  by the driving experiments (drive_approach);
+* ``"firmware_sensor"`` — programs that report a sensor (``testIR``, ``testIRPositioning``,
+  ``testSonar``, ``testCompass``, ``testLine``), scored by sensor_check against the truth;
+* programs with nothing to grade (I2C scan, calibration) are left out.
+
+::
 
     uv run python scripts/lab.py sweep testDriveForward --kind firmware --grid ball_step_cm=60
+    uv run python scripts/lab.py sweep testIRPositioning --kind firmware_sensor \
+        --experiment sensor_check
+
+The firmware's EKF is a module too (kind ``"ekf"``, see :mod:`bucky.firmware.ekf_bench`).
 
 A firmware module has no Python ``step``: :class:`FirmwareExecutor` replaces the lab's executor,
 feeding the physics truth through the sensor models into the simulated board and the board's
@@ -16,11 +28,14 @@ from typing import ClassVar
 
 from bucky.firmware.build import firmware_available
 from bucky.firmware.hardware import RobotHardwareConfig
-from bucky.firmware.programs import BUILTINS, list_programs
+from bucky.firmware.programs import BUILTINS, list_programs, program_role
 from bucky.lab.executor import StepResult
 from bucky.lab.modules import LabModule
 from bucky.lab.params import Param
 from bucky.lab.registry import register
+
+FIRMWARE_KIND = "firmware"
+FIRMWARE_SENSOR_KIND = "firmware_sensor"
 
 
 class FirmwareProgram(LabModule):
@@ -66,14 +81,20 @@ def _register_programs() -> None:
     if not firmware_available():
         return
     for name in list_programs():
+        role = program_role(name)
+        if role is None:
+            continue
         doc = BUILTINS.get(name, f"robot/src/tests: {name}(ctx) after the real boot")
         cls = type(f"Firmware_{name}", (FirmwareProgram,),
-                   {"name": name, "program": name, "__doc__": doc,
-                    "__module__": __name__})
+                   {"name": name, "program": name, "__doc__": doc, "__module__": __name__,
+                    "kind": FIRMWARE_KIND if role == "drive" else FIRMWARE_SENSOR_KIND})
         register(cls)
 
 
 _register_programs()
+
+if firmware_available():
+    from bucky.firmware import ekf_bench  # noqa: E402,F401  (registers the "ekf" module)
 
 
 class FirmwareExecutor:

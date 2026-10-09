@@ -27,14 +27,19 @@ def default_workers() -> int:
     return max(1, (os.cpu_count() or 2) // 2)
 
 
-FIRMWARE_KIND = "firmware"
+#: Module kinds that run the compiled firmware (bucky.firmware): isolated worker processes.
+FIRMWARE_KINDS = ("firmware", "firmware_sensor", "ekf")
 FIRMWARE_CHUNK = 16
 
 
 def build_executor(kind: str, name: str, params: dict | None, sensor_params: dict | None,
                    seed: int) -> Executor:
     module = registry.get_module(kind, name)(**(params or {}))
-    if kind == FIRMWARE_KIND:
+    if kind == "ekf":
+        from bucky.firmware.ekf_bench import EkfBench
+
+        return EkfBench(module, seed=seed)
+    if kind in FIRMWARE_KINDS:
         from bucky.firmware.lab import FirmwareExecutor
 
         return FirmwareExecutor(module, seed=seed)
@@ -75,7 +80,7 @@ def run_sweep(
     exp_cls = get_experiment(experiment)
     if not exp_cls.accepts(kind):
         raise ValueError(f"experiment {experiment!r} tests {exp_cls.module_kind!r} modules")
-    firmware = kind == FIRMWARE_KIND
+    firmware = kind in FIRMWARE_KINDS
     if firmware:
         from bucky.firmware.build import ensure_built
 
@@ -141,7 +146,7 @@ def replay(module: str, scenario: dict, *, kind: str = "drive",
            grid: dict | None = None, sensor_params: dict | None = None, seed: int = 0) -> dict:
     """Re-run one scenario with tracing on (same seed as in the sweep → identical result).
     Firmware programs replay in a fresh, killable process (see :mod:`bucky.firmware.process`)."""
-    if kind == FIRMWARE_KIND:
+    if kind in FIRMWARE_KINDS:
         from bucky.firmware.build import ensure_built
         from bucky.firmware.process import run_isolated
 

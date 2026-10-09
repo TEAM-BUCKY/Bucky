@@ -29,7 +29,7 @@
 		type SweepRecord,
 		type SweepResult
 	} from '$lib/lab/api';
-	import { METRICS, domainFor, metricDef, metricValue, rampColor } from '$lib/lab/metrics';
+	import { domainFor, metricDef, metricsFor, metricValue, rampColor } from '$lib/lab/metrics';
 
 	// ── catalogue ────────────────────────────────────────────────────────────
 	let modules = $state<LabModuleInfo[]>([]);
@@ -154,7 +154,19 @@
 	let metricKey = $state('success');
 	let variantIdx = $state(0);
 	let selectedBall = $state<string | null>(null);
-	const def = $derived(metricDef(metricKey));
+	// The experiment the shown result came from (its metrics), falling back to the selected one.
+	const resultExperiment = $derived(experiments.find((e) => e.name === result?.experiment) ?? experiment);
+	// Its metrics, minus those the shown result has no values for (they depend on the program).
+	const metricDefs = $derived.by(() => {
+		const all = metricsFor(resultExperiment);
+		const v = result?.variants[0]?.overall;
+		const have = v ? all.filter((m) => metricValue(v, m.key) !== null) : all;
+		return have.length ? have : all;
+	});
+	const def = $derived(metricDef(metricKey, metricDefs));
+	$effect(() => {
+		if (!metricDefs.some((m) => m.key === metricKey)) metricKey = metricDefs[0].key;
+	});
 	const variant = $derived(result?.variants[variantIdx] ?? null);
 	const fieldMode = $derived(result?.grid.mode === 'field');
 
@@ -163,12 +175,22 @@
 	const cells = $derived.by<Cell[]>(() => {
 		if (!variant || !result) return [];
 		if (fieldMode) {
+			// Several runs can start at one spot (headings, paths): show their mean, and replay
+			// the worst of them on click.
 			const size = Number(result.grid.robot_step_cm) * 10;
-			return variant.records.map((r) => {
-				const p = toField(r.scenario.robot);
-				const v = metricValue(r.metrics, metricKey);
-				return { key: String(r.scenario.id), ...p, size, value: v, rec: r,
-					tip: `robot ${(p.x / 10).toFixed(0)}, ${(p.y / 10).toFixed(0)} cm · ${def.label}: ${v === null ? '–' : def.format(v)}` };
+			const groups = new Map<string, SweepRecord[]>();
+			for (const r of variant.records) {
+				const k = r.scenario.robot.map((c) => c.toFixed(3)).join(',');
+				groups.set(k, [...(groups.get(k) ?? []), r]);
+			}
+			return [...groups].map(([k, recs]) => {
+				const p = toField(recs[0].scenario.robot);
+				const vals = recs.map((r) => metricValue(r.metrics, metricKey)).filter((v): v is number => v !== null);
+				const v = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+				const worst = recs.reduce((a, b) => (Number(b.metrics.score ?? 0) < Number(a.metrics.score ?? 0) ? b : a));
+				const n = recs.length > 1 ? ` (mean of ${recs.length}, click = worst)` : '';
+				return { key: k, ...p, size, value: v, rec: worst,
+					tip: `robot ${(p.x / 10).toFixed(0)}, ${(p.y / 10).toFixed(0)} cm · ${def.label}: ${v === null ? '–' : def.format(v)}${n}` };
 			});
 		}
 		const size = Number(result.grid.ball_step_cm) * 10;
@@ -268,7 +290,14 @@
 	const trail = $derived(
 		replay ? replay.trace.slice(0, frame + 1).map((f) => toField(f.r)).map((p) => `${p.x},${p.y}`).join(' ') : ''
 	);
-	const markColors: Record<string, string> = { A: '#fab219', C: '#ffffff' };
+	// Replay marks: A/C drive targets; E/EH/EB the EKF's robot, heading and ball estimate;
+	// seen/peak/heading what a sensor program reported; S0–S3 sonar echoes; L* line hits.
+	const markColors: Record<string, string> = {
+		A: '#fab219', C: '#ffffff', E: '#4fd1c5', EH: '#4fd1c5', EB: '#f6ad55',
+		seen: '#f6ad55', peak: '#f6ad55', heading: '#faf089'
+	};
+	const markColor = (name: string) =>
+		markColors[name] ?? (name.startsWith('S') ? '#63b3ed' : name.startsWith('L') ? '#ffffff' : '#e66767');
 
 	const fieldData = $derived.by(() => {
 		if (cur) {
@@ -300,7 +329,7 @@
 	});
 
 	const moduleItems = $derived(modules.map((m) => ({ value: `${m.kind}/${m.name}`, label: `${m.name} · ${m.kind}` })));
-	const metricItems = METRICS.map((m) => ({ value: m.key, label: m.label }));
+	const metricItems = $derived(metricDefs.map((m) => ({ value: m.key, label: m.label })));
 	const progress = $derived(job && job.total ? (100 * job.done) / job.total : 0);
 </script>
 
@@ -506,8 +535,15 @@
 										{#if name === 'A'}
 											<line x1={toField(cur.r).x} y1={toField(cur.r).y} x2={f.x} y2={f.y} stroke={markColors.A} stroke-width="5" stroke-dasharray="18 12" />
 										{/if}
-										<circle cx={f.x} cy={f.y} r="22" fill="none" stroke={markColors[name] ?? '#e66767'} stroke-width="8" />
-										<circle cx={f.x} cy={f.y} r="6" fill={markColors[name] ?? '#e66767'} />
+										{#if name === 'EH' && cur.m.E}
+											<line x1={toField(cur.m.E).x} y1={toField(cur.m.E).y} x2={f.x} y2={f.y} stroke={markColor(name)} stroke-width="8" />
+										{:else if name.startsWith('S') || name === 'seen' || name === 'heading'}
+											<line x1={toField(cur.r).x} y1={toField(cur.r).y} x2={f.x} y2={f.y} stroke={markColor(name)} stroke-width="4" stroke-dasharray="14 10" opacity="0.8" />
+										{/if}
+										{#if name !== 'EH'}
+											<circle cx={f.x} cy={f.y} r="22" fill="none" stroke={markColor(name)} stroke-width="8" />
+											<circle cx={f.x} cy={f.y} r="6" fill={markColor(name)} />
+										{/if}
 									{/each}
 								{/if}
 							{/snippet}
@@ -544,11 +580,23 @@
 							{#each [0.1, 0.25, 0.5, 1, 2] as s (s)}<option value={s}>{s}×</option>{/each}
 						</select>
 						<span class="text-muted-foreground">
-							<span style="color: {markColors.A}">●</span> A target
-							<span class="ml-2">○</span> C behind
-							· {replay.metrics.success ? `behind in ${Number(replay.metrics.time_s).toFixed(2)} s` : 'never got behind'}
-							{replay.metrics.wrong_touch ? '· touched ball first' : ''}
-							{replay.metrics.out_of_bounds ? '· went out' : ''}
+							{#if lastRequest?.experiment === 'ekf_tracking'}
+								<span style="color: {markColors.E}">●</span> EKF robot
+								<span class="ml-2" style="color: {markColors.EB}">●</span> EKF ball
+								· {metricDefs.filter((m) => ['pos_rmse_cm', 'heading_rmse_deg', 'ball_rmse_cm'].includes(m.key))
+									.map((m) => { const v = metricValue(replay!.metrics, m.key); return `${m.label} ${v === null ? '–' : m.format(v)}`; })
+									.join(' · ')}
+							{:else if lastRequest?.experiment === 'sensor_check'}
+								<span style="color: {markColors.seen}">●</span> what the program reports
+								· score {Number(replay.metrics.score).toFixed(1)}
+								{typeof replay.metrics.note === 'string' ? `· ${replay.metrics.note}` : ''}
+							{:else}
+								<span style="color: {markColors.A}">●</span> A target
+								<span class="ml-2">○</span> C behind
+								· {replay.metrics.success ? `behind in ${Number(replay.metrics.time_s).toFixed(2)} s` : 'never got behind'}
+								{replay.metrics.wrong_touch ? '· touched ball first' : ''}
+								{replay.metrics.out_of_bounds ? '· went out' : ''}
+							{/if}
 						</span>
 						<Button variant="ghost" size="xs" onclick={() => { pause(); replay = null; }}>Close</Button>
 					</Card.Root>
@@ -558,7 +606,7 @@
 			<!-- right: results -->
 			<div class="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto [&>*]:shrink-0">
 				{#if result}
-					<SweepSummary {result} bind:variantIdx onReplay={startReplay} />
+					<SweepSummary {result} experiment={resultExperiment} bind:variantIdx onReplay={startReplay} />
 				{:else}
 					<Card.Root>
 						<Card.Content class="flex flex-col gap-2 pt-4 font-mono text-[11px] text-muted-foreground">

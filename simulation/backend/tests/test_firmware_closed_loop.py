@@ -104,5 +104,5 @@ def test_firmware_modules_are_listed():
 
     registry.discover()
     names = {m["name"] for m in registry.list_modules("firmware")}
-    assert {"main_loop", "firmware", "testDriveForward"} <= names
+    assert {"main_loop", "testDriveForward", "testHoldHeading"} <= names
     assert any(e["name"] == "drive_approach" for e in list_experiments("firmware"))

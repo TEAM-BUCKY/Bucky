@@ -16,6 +16,35 @@ _RUN_TEST = re.compile(r"^[ \t]*#[ \t]*define[ \t]+RUN_TEST[ \t]+([A-Za-z_]\w*)[
                        re.M)
 
 
+#: What the lab can grade a program on:
+#:   "drive"  — it moves the robot → driving experiments (drive_approach)
+#:   "sensor" — it reports what a sensor sees → sensor_check
+#:   None     — nothing to grade in the lab (needs a human, or only talks to the bus)
+#: Programs not listed are assumed to drive.
+PROGRAM_ROLE: dict[str, str | None] = {
+    "main_loop": "drive",
+    "testDriveForward": "drive",
+    "testHoldHeading": "drive",
+    "testEncoder": "drive",
+    "testIR": "sensor",
+    "testIRPositioning": "sensor",
+    "testSonar": "sensor",
+    "testCompass": "sensor",
+    "testLine": "sensor",
+    "testI2CScan": None,
+    "testCalibrate": None,
+    "testCalibrationDump": None,
+    "testCompassCalibrate": None,
+}
+
+
+def program_role(name: str) -> str | None:
+    """See :data:`PROGRAM_ROLE`. ``"firmware"`` takes the role of the test its RUN_TEST runs."""
+    if name == "firmware":
+        name = run_test_symbol() or "main_loop"
+    return PROGRAM_ROLE.get(name, "drive")
+
+
 def test_programs() -> list[str]:
     """Every ``void testXxx(const TestContext&)`` defined under robot/src/tests."""
     names: set[str] = set()
