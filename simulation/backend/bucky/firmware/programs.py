@@ -1,0 +1,34 @@
+"""Which firmware programs exist — read from the sources, so listing never needs a build."""
+from __future__ import annotations
+
+import re
+
+from bucky.firmware.build import firmware_dir
+
+#: Built-in entries besides the test programs.
+BUILTINS = {
+    "firmware": "main() exactly as built (runs main.cpp's RUN_TEST, if it sets one)",
+    "main_loop": "main() with the RUN_TEST call skipped: the real main loop",
+}
+
+_TEST_DEF = re.compile(r"void\s+(test\w*)\s*\(\s*const\s+TestContext\s*&[^)]*\)\s*\{")
+_RUN_TEST = re.compile(r"^[ \t]*#[ \t]*define[ \t]+RUN_TEST[ \t]+([A-Za-z_]\w*)[ \t]*(?://.*)?$",
+                       re.M)
+
+
+def test_programs() -> list[str]:
+    """Every ``void testXxx(const TestContext&)`` defined under robot/src/tests."""
+    names: set[str] = set()
+    for path in sorted((firmware_dir() / "tests").rglob("*.cpp")):
+        names.update(_TEST_DEF.findall(path.read_text(errors="replace")))
+    return sorted(names)
+
+
+def run_test_symbol() -> str:
+    """The test main.cpp's ``#define RUN_TEST`` names ('' when none)."""
+    m = _RUN_TEST.search((firmware_dir() / "main.cpp").read_text(errors="replace"))
+    return m.group(1) if m else ""
+
+
+def list_programs() -> list[str]:
+    return [*BUILTINS, *test_programs()]
