@@ -37,10 +37,23 @@ class BuildError(RuntimeError):
 
 
 def robot_dir() -> Path:
+    """The firmware repo's ``robot/`` directory. In the repo that is ``<root>/robot`` next to
+    ``simulation/``; deployments that ship only the backend (the Docker image's ``/app``) have
+    none, and get a path that does not exist (callers check, see :func:`firmware_available`)."""
     env = os.environ.get("BUCKY_ROBOT_DIR")
     if env:
         return Path(env).resolve()
-    return Path(__file__).resolve().parents[4] / "robot"
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "robot"
+        if (candidate / "src" / "main.cpp").is_file():
+            return candidate
+    return here.parent / "_no_robot_dir"
+
+
+def firmware_available() -> bool:
+    """True when the firmware sources are present (False in backend-only deployments)."""
+    return (firmware_dir() / "main.cpp").is_file()
 
 
 def sim_dir() -> Path:

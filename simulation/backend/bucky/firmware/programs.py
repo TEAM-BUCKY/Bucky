@@ -26,7 +26,10 @@ def test_programs() -> list[str]:
 
 def run_test_symbol() -> str:
     """The test main.cpp's ``#define RUN_TEST`` names ('' when none)."""
-    m = _RUN_TEST.search((firmware_dir() / "main.cpp").read_text(errors="replace"))
+    main = firmware_dir() / "main.cpp"
+    if not main.is_file():
+        return ""
+    m = _RUN_TEST.search(main.read_text(errors="replace"))
     return m.group(1) if m else ""
 
 

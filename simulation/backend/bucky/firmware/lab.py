@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import ClassVar
 
-from bucky.firmware.build import firmware_dir
+from bucky.firmware.build import firmware_available
 from bucky.firmware.hardware import RobotHardwareConfig
 from bucky.firmware.programs import BUILTINS, list_programs
 from bucky.lab.executor import StepResult
@@ -63,7 +63,7 @@ class FirmwareProgram(LabModule):
 
 def _register_programs() -> None:
     # Deployments that ship only simulation/backend (the Docker image) have no firmware tree.
-    if not (firmware_dir() / "main.cpp").is_file():
+    if not firmware_available():
         return
     for name in list_programs():
         doc = BUILTINS.get(name, f"robot/src/tests: {name}(ctx) after the real boot")
