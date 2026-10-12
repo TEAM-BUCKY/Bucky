@@ -40,7 +40,7 @@ struct EKFNoise
     float sonarPos = 3.0f;        // cm, x/y derived from sonar (-> R)
     float compassTheta = 0.05f;   // rad, LIS2MDL heading (-> R)
     float encoderSpeed = 5.0f;    // cm/s, robot frame speed from encoders (-> R)
-    float encoderOmega = 0.1f;    // rad/s, turn rate from encoders (-> R)
+    float encoderOmega = 0.2f;    // rad/s, turn rate from encoders: per-wheel speed estimate is a few % off (-> R)
     float irAngle = 0.1f;         // rad, IR ball angle (-> R)
     float irDistance = 5.0f;      // cm, IR ball distance noise floor (-> R)
     float irDistanceRel = 0.2f;   // fraction of distance, IR range is 1/sqrt(amplitude) so error grows with range
@@ -77,7 +77,8 @@ class EKF
     enum Index : std::size_t { X = 0, Y = 1, THETA = 2, OMEGA = 3, VX = 4, VY = 5, BX = 6, BY = 7, BVX = 8, BVY = 9 };
 
     public:
-    enum Sensor : uint8_t { SONAR = 0, COMPASS = 1, ENCODER = 2, IR = 3, SENSOR_COUNT = 4 };
+    // One per measurement row, so an outlier on one row is not reset by its in-range sibling
+    enum Sensor : uint8_t { SONAR_X, SONAR_Y, COMPASS, ENCODER, IR_ANGLE, IR_DISTANCE, SENSOR_COUNT };
 
     private:
     Math::Vector<N> x = {};

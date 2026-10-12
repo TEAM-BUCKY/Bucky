@@ -318,32 +318,47 @@ void bind_firmware(py::module_& m) {
         .def_readonly("ballX", &State::ballX).def_readonly("ballY", &State::ballY)
         .def_readonly("ballSpeedX", &State::ballSpeedX).def_readonly("ballSpeedY", &State::ballSpeedY)
         .def_readonly("robotX", &State::robotX).def_readonly("robotY", &State::robotY)
-        .def_readonly("robotTheta", &State::robotTheta)
+        .def_readonly("robotTheta", &State::robotTheta).def_readonly("robotOmega", &State::robotOmega)
         .def_readonly("speedX", &State::speedX).def_readonly("speedY", &State::speedY);
     py::class_<EKFNoise>(m, "EKFNoise")
         .def(py::init<>())
-        .def_readwrite("accel", &EKFNoise::accel).def_readwrite("thetaDrift", &EKFNoise::thetaDrift)
+        .def_readwrite("accel", &EKFNoise::accel).def_readwrite("accelSpinGain", &EKFNoise::accelSpinGain)
+        .def_readwrite("angularAccel", &EKFNoise::angularAccel).def_readwrite("thetaDrift", &EKFNoise::thetaDrift)
+        .def_readwrite("omegaInit", &EKFNoise::omegaInit)
         .def_readwrite("ballAccel", &EKFNoise::ballAccel).def_readwrite("ballSpeedInit", &EKFNoise::ballSpeedInit)
         .def_readwrite("sonarPos", &EKFNoise::sonarPos).def_readwrite("compassTheta", &EKFNoise::compassTheta)
-        .def_readwrite("encoderSpeed", &EKFNoise::encoderSpeed).def_readwrite("irAngle", &EKFNoise::irAngle)
-        .def_readwrite("irDistance", &EKFNoise::irDistance);
+        .def_readwrite("encoderSpeed", &EKFNoise::encoderSpeed).def_readwrite("encoderOmega", &EKFNoise::encoderOmega)
+        .def_readwrite("irAngle", &EKFNoise::irAngle)
+        .def_readwrite("irDistance", &EKFNoise::irDistance).def_readwrite("irDistanceRel", &EKFNoise::irDistanceRel);
+    py::class_<EKFModel>(m, "EKFModel")
+        .def(py::init<>())
+        .def_readwrite("imuOffsetX", &EKFModel::imuOffsetX).def_readwrite("imuOffsetY", &EKFModel::imuOffsetY)
+        .def_readwrite("ballFrictionTau", &EKFModel::ballFrictionTau)
+        .def_readwrite("gateChi2", &EKFModel::gateChi2).def_readwrite("maxRejects", &EKFModel::maxRejects);
+    py::enum_<EKF::Sensor>(m, "EKFSensor")
+        .value("SONAR_X", EKF::SONAR_X).value("SONAR_Y", EKF::SONAR_Y).value("COMPASS", EKF::COMPASS)
+        .value("ENCODER", EKF::ENCODER).value("IR_ANGLE", EKF::IR_ANGLE)
+        .value("IR_DISTANCE", EKF::IR_DISTANCE);
     py::class_<EKF>(m, "EKF")
         .def(py::init<>())
         .def("init", &EKF::init, py::arg("robotX"), py::arg("robotY"), py::arg("robotTheta"),
              py::arg("positionStd") = 20.0f, py::arg("thetaStd") = 0.3f)
         .def("setNoise", &EKF::setNoise)
+        .def("setModel", &EKF::setModel)
         .def("predict", &EKF::predict)
         .def("updatePosition", &EKF::updatePosition)
         .def("updateHeading", &EKF::updateHeading)
         .def("updateSpeed", &EKF::updateSpeed)
         .def("updateBall", &EKF::updateBall)
         .def("getState", &EKF::getState)
+        .def("getRejectCount", &EKF::getRejectCount)
         .def("getCovariance", [](const EKF& e) {
             const auto& c = e.getCovariance();
-            py::array_t<float> a({9, 9});
+            constexpr int n = static_cast<int>(sizeof(c.m) / sizeof(c.m[0]));
+            py::array_t<float> a({n, n});
             auto r = a.mutable_unchecked<2>();
-            for (int i = 0; i < 9; i++)
-                for (int j = 0; j < 9; j++) r(i, j) = c[i][j];
+            for (int i = 0; i < n; i++)
+                for (int j = 0; j < n; j++) r(i, j) = c[i][j];
             return a;
         })
         .def("writeTo", &EKF::writeTo);

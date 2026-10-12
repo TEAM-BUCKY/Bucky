@@ -26,10 +26,16 @@ import pytest
 from bucky.firmware import glue, sensors
 from bucky.firmware import kinematics as kin
 
-X, Y, TH, VX, VY, BX, BY, BVX, BVY = range(9)
-N = 9
+X, Y, TH, W, VX, VY, BX, BY, BVX, BVY = range(10)
+N = 10
+ROBOT = [X, Y, TH, VX, VY]     # the robot block graded for consistency (NEES)
 G_CM = 981.0
 PI_F = float(np.float32(3.14159265358979))
+NOISE_KEYS = ("accel", "accelSpinGain", "angularAccel", "thetaDrift", "omegaInit", "ballAccel",
+              "ballSpeedInit", "sonarPos", "compassTheta", "encoderSpeed", "encoderOmega",
+              "irAngle", "irDistance", "irDistanceRel")
+MODEL_KEYS = ("imuOffsetX", "imuOffsetY", "ballFrictionTau", "gateChi2", "maxRejects")
+SONAR_X, SONAR_Y, COMPASS, ENCODER, IR_ANGLE, IR_DISTANCE = range(6)   # EKF::Sensor
 
 
 # ── independent reference model ──────────────────────────────────────────────────────────────
@@ -45,66 +51,84 @@ def wrap(a: float) -> float:
 
 
 def noise_dict(n) -> dict:
-    return {k: float(getattr(n, k)) for k in ("accel", "thetaDrift", "ballAccel", "ballSpeedInit",
-                                               "sonarPos", "compassTheta", "encoderSpeed",
-                                               "irAngle", "irDistance")}
+    return {k: float(getattr(n, k)) for k in NOISE_KEYS}
+
+
+def model_dict(m) -> dict:
+    return {k: float(getattr(m, k)) for k in MODEL_KEYS}
 
 
 class RefEKF:
     """The EKF.h model in float64. Written from the model description (state, f, h, Q, R), not
-    by transliterating EKF.cpp: F comes from :func:`jacobian`-checked formulas and the update
-    is the textbook scalar-sequential Kalman update."""
+    by transliterating EKF.cpp: F and H come from finite differences of f and h, and the update
+    is the textbook scalar-sequential Kalman update with an innovation gate."""
 
-    def __init__(self, noise: dict, field_wh: tuple[float, float]) -> None:
+    def __init__(self, noise: dict, field_wh: tuple[float, float], model: dict) -> None:
         self.n = noise
+        self.m = model
         self.field_w, self.field_h = field_wh   # DigitalField.h FIELD_WIDTH / FIELD_HEIGHT
         self.x = np.zeros(N)
         self.P = np.zeros((N, N))
         self.ball_init = False
+        self.consecutive = [0] * 6
 
     def init(self, x, y, th, positionStd=20.0, thetaStd=0.3) -> None:   # noqa: N803 (C++ names)
         pos_std, th_std = positionStd, thetaStd
         n = self.n
         self.x = np.zeros(N)
         self.x[[X, Y, TH]] = x, y, wrap(th)
-        self.P = np.diag([pos_std ** 2, pos_std ** 2, th_std ** 2, n["encoderSpeed"] ** 2,
-                          n["encoderSpeed"] ** 2, self.field_w ** 2, self.field_h ** 2,
-                          n["ballSpeedInit"] ** 2, n["ballSpeedInit"] ** 2])
+        self.P = np.diag([pos_std ** 2, pos_std ** 2, th_std ** 2, n["omegaInit"] ** 2,
+                          n["encoderSpeed"] ** 2, n["encoderSpeed"] ** 2, self.field_w ** 2,
+                          self.field_h ** 2, n["ballSpeedInit"] ** 2, n["ballSpeedInit"] ** 2])
         self.ball_init = False
+        self.consecutive = [0] * 6
 
-    @staticmethod
-    def f(x: np.ndarray, ax_g: float, ay_g: float, dt: float) -> np.ndarray:
-        """Motion model: robot-frame acceleration → field frame, constant-acceleration step;
-        ball at constant velocity."""
-        th = x[TH]
-        a_right, a_fwd = ax_g * G_CM, ay_g * G_CM
+    def f(self, x: np.ndarray, ax_g: float, ay_g: float, dt: float) -> np.ndarray:
+        """Motion model: robot-frame acceleration (minus the centripetal acceleration an
+        off-centre IMU feels) → field frame, constant-acceleration step; constant turn rate;
+        ball rolling with exponential friction. θ is not wrapped here (see predict)."""
+        th, w = x[TH], x[W]
+        a_right = ax_g * G_CM + w * w * self.m["imuOffsetX"]
+        a_fwd = ay_g * G_CM + w * w * self.m["imuOffsetY"]
         af = a_right * np.array([math.cos(th), -math.sin(th)]) + \
             a_fwd * np.array([math.sin(th), math.cos(th)])
+        tau = self.m["ballFrictionTau"]
+        decay = math.exp(-dt / tau) if tau > 0 else 1.0
         out = x.copy()
         out[[X, Y]] += x[[VX, VY]] * dt + 0.5 * dt * dt * af
         out[[VX, VY]] += af * dt
+        out[TH] += w * dt
         out[[BX, BY]] += x[[BVX, BVY]] * dt
+        out[[BVX, BVY]] *= decay
         return out
 
     def predict(self, ax_g, ay_g, dt) -> None:
         F = numeric_jacobian(lambda s: self.f(s, ax_g, ay_g, dt), self.x)
+        w = self.x[W]
         self.x = self.f(self.x, ax_g, ay_g, dt)
+        self.x[TH] = wrap(self.x[TH])
         n, h2 = self.n, 0.5 * dt * dt
+        qa = (n["accel"] * (1.0 + n["accelSpinGain"] * abs(w))) ** 2
         Q = np.zeros((N, N))
-        for p, v, q in ((X, VX, n["accel"] ** 2), (Y, VY, n["accel"] ** 2),
+        for p, v, q in ((X, VX, qa), (Y, VY, qa), (TH, W, n["angularAccel"] ** 2),
                         (BX, BVX, n["ballAccel"] ** 2), (BY, BVY, n["ballAccel"] ** 2)):
             Q[p, p] += h2 * h2 * q
             Q[p, v] += h2 * dt * q
             Q[v, p] += h2 * dt * q
             Q[v, v] += dt * dt * q
-        Q[TH, TH] = n["thetaDrift"] ** 2 * dt
+        Q[TH, TH] += n["thetaDrift"] ** 2 * dt
         self.P = F @ self.P @ F.T + Q
 
-    def _update(self, h, innovation, var) -> None:
+    def _update(self, h, innovation, var, sensor) -> None:
         Ph = self.P @ h
         s = float(h @ Ph) + var
         if s <= 0:
             return
+        if sensor != ENCODER and innovation ** 2 > self.m["gateChi2"] * s:
+            if self.consecutive[sensor] < self.m["maxRejects"]:
+                self.consecutive[sensor] += 1
+                return
+        self.consecutive[sensor] = 0
         K = Ph / s
         self.x = self.x + K * innovation
         self.x[TH] = wrap(self.x[TH])
@@ -118,16 +142,23 @@ class RefEKF:
 
     def update_position(self, x, y) -> None:
         r = self.n["sonarPos"] ** 2
-        self._update(self._unit(X), x - self.x[X], r)
-        self._update(self._unit(Y), y - self.x[Y], r)
+        self._update(self._unit(X), x - self.x[X], r, SONAR_X)
+        self._update(self._unit(Y), y - self.x[Y], r, SONAR_Y)
 
     def update_heading(self, th) -> None:
-        self._update(self._unit(TH), wrap(th - self.x[TH]), self.n["compassTheta"] ** 2)
+        self._update(self._unit(TH), wrap(th - self.x[TH]), self.n["compassTheta"] ** 2, COMPASS)
 
-    def update_speed(self, vx, vy) -> None:
+    @staticmethod
+    def h_speed(x: np.ndarray) -> np.ndarray:
+        """Encoder measurement model: field velocity seen in the robot frame (right, forward)."""
+        return body_from_field(x[[VX, VY]], x[TH])
+
+    def update_speed(self, vx, vy, w) -> None:
         r = self.n["encoderSpeed"] ** 2
-        self._update(self._unit(VX), vx - self.x[VX], r)
-        self._update(self._unit(VY), vy - self.x[VY], r)
+        for i, z in enumerate((vx, vy)):                 # relinearise after each row
+            H = numeric_jacobian(self.h_speed, self.x)
+            self._update(H[i], z - self.h_speed(self.x)[i], r, ENCODER)
+        self._update(self._unit(W), w - self.x[W], self.n["encoderOmega"] ** 2, ENCODER)
 
     @staticmethod
     def h_ball(x: np.ndarray) -> np.ndarray:
@@ -137,11 +168,12 @@ class RefEKF:
 
     def update_ball(self, angle, dist) -> None:
         n = self.n
+        dist_std = max(n["irDistance"], n["irDistanceRel"] * dist)
         if not self.ball_init:
             fa = self.x[TH] + angle
             self.x[[BX, BY]] = self.x[X] + dist * math.sin(fa), self.x[Y] + dist * math.cos(fa)
             self.x[[BVX, BVY]] = 0.0
-            pos_var = n["irDistance"] ** 2 + dist * dist * n["irAngle"] ** 2
+            pos_var = dist_std ** 2 + dist * dist * n["irAngle"] ** 2
             for b in (BX, BY, BVX, BVY):
                 self.P[b, :] = 0.0
                 self.P[:, b] = 0.0
@@ -151,9 +183,9 @@ class RefEKF:
             self.ball_init = True
             return
         H = numeric_jacobian(self.h_ball, self.x)
-        self._update(H[0], wrap(angle - self.h_ball(self.x)[0]), n["irAngle"] ** 2)
+        self._update(H[0], wrap(angle - self.h_ball(self.x)[0]), n["irAngle"] ** 2, IR_ANGLE)
         H = numeric_jacobian(self.h_ball, self.x)       # relinearise after the bearing row
-        self._update(H[1], dist - self.h_ball(self.x)[1], n["irDistance"] ** 2)
+        self._update(H[1], dist - self.h_ball(self.x)[1], dist_std ** 2, IR_DISTANCE)
 
 
 def numeric_jacobian(fn, x: np.ndarray, eps: float = 1e-6) -> np.ndarray:
@@ -170,7 +202,7 @@ def numeric_jacobian(fn, x: np.ndarray, eps: float = 1e-6) -> np.ndarray:
 
 def state_vec(ekf) -> np.ndarray:
     s = ekf.getState()
-    return np.array([s.robotX, s.robotY, s.robotTheta, s.speedX, s.speedY,
+    return np.array([s.robotX, s.robotY, s.robotTheta, s.robotOmega, s.speedX, s.speedY,
                      s.ballX, s.ballY, s.ballSpeedX, s.ballSpeedY], dtype=float)
 
 
@@ -185,10 +217,12 @@ def assert_valid_covariance(P: np.ndarray) -> None:
     assert np.min(np.linalg.eigvalsh((P + P.T) / 2)) > -1e-3 * max(1.0, np.max(np.abs(P)))
 
 
-def pair(fw, x=10.0, y=-20.0, th=0.3, **kw):
+def pair(fw, x=10.0, y=-20.0, th=0.3, model=None, **kw):
     ekf = fw.EKF()
+    model = model or fw.EKFModel()
+    ekf.setModel(model)
     ekf.init(x, y, th, **kw)
-    ref = RefEKF(noise_dict(fw.EKFNoise()), (fw.FIELD_WIDTH, fw.FIELD_HEIGHT))
+    ref = RefEKF(noise_dict(fw.EKFNoise()), (fw.FIELD_WIDTH, fw.FIELD_HEIGHT), model_dict(model))
     ref.init(x, y, th, **kw)
     return ekf, ref
 
@@ -242,11 +276,13 @@ def test_set_noise_is_used(fw):
 
 class TestAccelerometerPredict:
     def test_matches_reference(self, fw):
-        ekf, ref = pair(fw)
+        model = fw.EKFModel()
+        model.imuOffsetX, model.imuOffsetY = 2.0, -3.0     # off-centre IMU: centripetal term
+        ekf, ref = pair(fw, model=model)
         ekf.updateBall(0.4, 80.0)
         ref.update_ball(0.4, 80.0)
-        ekf.updateSpeed(30.0, -10.0)
-        ref.update_speed(30.0, -10.0)
+        ekf.updateSpeed(30.0, -10.0, 1.5)
+        ref.update_speed(30.0, -10.0, 1.5)
         rng = np.random.default_rng(1)
         for _ in range(50):
             ax, ay, dt = rng.normal(0, 0.3), rng.normal(0, 0.3), float(rng.uniform(0.002, 0.02))
@@ -277,7 +313,7 @@ class TestAccelerometerPredict:
     def test_constant_velocity_and_ball(self, fw):
         ekf = fw.EKF()
         ekf.init(0.0, 0.0, 0.0)
-        ekf.updateSpeed(20.0, 10.0)
+        ekf.updateSpeed(20.0, 10.0, 0.0)
         ekf.updateBall(0.0, 100.0)
         v0 = state_vec(ekf)
         for _ in range(50):
@@ -288,18 +324,58 @@ class TestAccelerometerPredict:
 
     def test_jacobian(self, fw):
         """EKF.cpp's F (via the reference) equals the finite-difference Jacobian of f."""
-        x = np.array([10, -5, 0.7, 30, -12, 40, 60, 5, -3], float)
+        x = np.array([10, -5, 0.7, 2.0, 30, -12, 40, 60, 5, -3], float)
         ax, ay, dt = 0.3, -0.2, 0.02
+        ox, oy, tau = 2.0, -3.0, 2.0
+        model = fw.EKFModel()
+        model.imuOffsetX, model.imuOffsetY, model.ballFrictionTau = ox, oy, tau
+        ref = RefEKF(noise_dict(fw.EKFNoise()), (1.0, 1.0), model_dict(model))
         h2 = 0.5 * dt * dt
-        a_r, a_f = ax * G_CM, ay * G_CM
-        afx = math.cos(x[TH]) * a_r + math.sin(x[TH]) * a_f
-        afy = -math.sin(x[TH]) * a_r + math.cos(x[TH]) * a_f
+        c, s, w = math.cos(x[TH]), math.sin(x[TH]), x[W]
+        a_r, a_f = ax * G_CM + w * w * ox, ay * G_CM + w * w * oy
+        afx = c * a_r + s * a_f
+        afy = -s * a_r + c * a_f
+        dafx_dw = 2 * w * (c * ox + s * oy)
+        dafy_dw = 2 * w * (-s * ox + c * oy)
+        decay = math.exp(-dt / tau)
         F = np.eye(N)                              # exactly as written in EKF::predict
-        F[X, VX] = F[Y, VY] = F[BX, BVX] = F[BY, BVY] = dt
+        F[X, VX] = F[Y, VY] = F[BX, BVX] = F[BY, BVY] = F[TH, W] = dt
         F[X, TH], F[Y, TH] = h2 * afy, -h2 * afx
         F[VX, TH], F[VY, TH] = afy * dt, -afx * dt
-        np.testing.assert_allclose(F, numeric_jacobian(lambda s: RefEKF.f(s, ax, ay, dt), x),
-                                   atol=1e-6)
+        F[X, W], F[Y, W] = h2 * dafx_dw, h2 * dafy_dw
+        F[VX, W], F[VY, W] = dafx_dw * dt, dafy_dw * dt
+        F[BVX, BVX] = F[BVY, BVY] = decay
+        np.testing.assert_allclose(F, numeric_jacobian(lambda v: ref.f(v, ax, ay, dt), x),
+                                   atol=1e-5)
+
+    def test_turn_rate_advances_heading(self, fw):
+        ekf = fw.EKF()
+        ekf.init(0.0, 0.0, 0.0)
+        ekf.updateSpeed(0.0, 0.0, 2.0)
+        w = ekf.getState().robotOmega
+        assert w > 1.9
+        for _ in range(10):
+            ekf.predict(0.0, 0.0, 0.01)
+        assert ekf.getState().robotTheta == pytest.approx(w * 0.1, abs=1e-4)
+
+    def test_centripetal_lever_arm_is_removed(self, fw):
+        """Spinning in place with the IMU 5 cm right of the centre: the IMU feels ω²r towards the
+        centre, which must not be integrated into a robot speed."""
+        model = fw.EKFModel()
+        model.imuOffsetX = 5.0
+        ekf = fw.EKF()
+        ekf.setModel(model)
+        ekf.init(0.0, 0.0, 0.0)
+        w = 3.0
+        for _ in range(20):
+            ekf.updateSpeed(0.0, 0.0, w)
+        th = ekf.getState().robotTheta
+        for _ in range(50):
+            ekf.predict(-w * w * 5.0 / G_CM, 0.0, 0.01)      # centripetal, towards the centre
+            th += w * 0.01
+            ekf.updateHeading(wrap(th))
+        s = ekf.getState()
+        assert math.hypot(s.speedX, s.speedY) < 1.0
 
     def test_uncertainty_grows(self, fw):
         ekf = fw.EKF()
@@ -345,8 +421,8 @@ class TestCompassHeading:
         ekf.init(0.0, 0.0, 0.0)
         var0 = ekf.getCovariance()[TH, TH]
         for _ in range(30):
-            ekf.updateHeading(1.0)
-        assert ekf.getState().robotTheta == pytest.approx(1.0, abs=0.01)
+            ekf.updateHeading(0.8)                 # 0.8 rad: inside the 3 σ gate of the prior
+        assert ekf.getState().robotTheta == pytest.approx(0.8, abs=0.01)
         assert ekf.getCovariance()[TH, TH] < var0 / 20
 
     def test_wraps_across_pi(self, fw):
@@ -410,8 +486,22 @@ class TestSonarPosition:
         """One reading with prior σ = 20 cm and sonar σ = 3 cm moves 400 / (400 + 9) of the way."""
         ekf = fw.EKF()
         ekf.init(0.0, 0.0, 0.0)
-        ekf.updatePosition(100.0, 0.0)
-        assert ekf.getState().robotX == pytest.approx(100.0 * 400 / 409, rel=1e-4)
+        ekf.updatePosition(50.0, 0.0)
+        assert ekf.getState().robotX == pytest.approx(50.0 * 400 / 409, rel=1e-4)
+
+    def test_outlier_is_gated_then_accepted(self, fw):
+        """A reading far outside 3 σ (the sonar hitting the opponent) is dropped; one that keeps
+        coming back is accepted after maxRejects tries, so a lost filter still recovers."""
+        ekf = fw.EKF()
+        ekf.init(0.0, 0.0, 0.0, positionStd=2.0)
+        max_rejects = fw.EKFModel().maxRejects
+        for _ in range(max_rejects):
+            ekf.updatePosition(80.0, 0.0)
+        assert ekf.getState().robotX == 0.0
+        assert ekf.getRejectCount(fw.EKFSensor.SONAR_X) == max_rejects
+        assert ekf.getRejectCount(fw.EKFSensor.SONAR_Y) == 0
+        ekf.updatePosition(80.0, 0.0)                          # an ordinary update: P / (P + R)
+        assert ekf.getState().robotX == pytest.approx(80.0 * 4 / 13, rel=1e-4)
 
     def test_position_correction_feeds_velocity_after_predict(self, fw):
         """Position and velocity become correlated through predict, so repeated position fixes
@@ -447,7 +537,7 @@ class TestSonarPosition:
 class TestEncoderSpeed:
     def test_matches_reference(self, fw):
         ekf, ref = pair(fw)
-        for z in ((20.0, 5.0), (25.0, 4.0), (-10.0, 0.0)):
+        for z in ((20.0, 5.0, 0.5), (25.0, 4.0, 0.8), (-10.0, 0.0, -1.0)):
             ekf.updateSpeed(*z)
             ref.update_speed(*z)
             ekf.predict(0.0, 0.1, 0.02)
@@ -456,16 +546,17 @@ class TestEncoderSpeed:
 
     def test_converges(self, fw):
         """init() starts the speed at 0 with σ = encoderSpeed — exactly the weight of one
-        encoder reading — so n identical readings land n/(n+1) of the way."""
+        encoder reading — so n identical readings land n/(n+1) of the way (heading pinned, so
+        the reading cannot be explained by rotating the speed instead)."""
         ekf = fw.EKF()
-        ekf.init(0.0, 0.0, 0.0)
+        ekf.init(0.0, 0.0, 0.0, thetaStd=1e-4)
         for _ in range(20):
-            ekf.updateSpeed(-35.0, 60.0)
+            ekf.updateSpeed(-35.0, 60.0, 0.0)
         s = ekf.getState()
-        assert (s.speedX, s.speedY) == pytest.approx((-35.0 * 20 / 21, 60.0 * 20 / 21), rel=1e-4)
+        assert (s.speedX, s.speedY) == pytest.approx((-35.0 * 20 / 21, 60.0 * 20 / 21), rel=1e-3)
         for _ in range(50):                    # predict lets the speed move again
             ekf.predict(0.0, 0.0, 0.02)
-            ekf.updateSpeed(-35.0, 60.0)
+            ekf.updateSpeed(-35.0, 60.0, 0.0)
         s = ekf.getState()
         assert (s.speedX, s.speedY) == pytest.approx((-35.0, 60.0), abs=0.5)
 
@@ -473,9 +564,28 @@ class TestEncoderSpeed:
         ekf = fw.EKF()
         ekf.init(0.0, 0.0, 0.0, positionStd=1.0)
         for _ in range(50):
-            ekf.updateSpeed(0.0, 80.0)
+            ekf.updateSpeed(0.0, 80.0, 0.0)
             ekf.predict(0.0, 0.0, 0.02)
         assert ekf.getState().robotY == pytest.approx(80.0, abs=4.0)
+
+    def test_robot_frame_speed_is_rotated_by_heading(self, fw):
+        """Robot facing field +x (θ = 90°) driving forward: field speed is +x."""
+        ekf = fw.EKF()
+        ekf.init(0.0, 0.0, math.radians(90), thetaStd=1e-3)
+        for _ in range(30):
+            ekf.updateSpeed(0.0, 40.0, 0.0)
+        s = ekf.getState()
+        assert (s.speedX, s.speedY) == pytest.approx((40.0, 0.0), abs=1.5)
+
+    def test_jacobian(self, fw):
+        """The rows written in EKF::updateSpeed equal the finite-difference Jacobian of
+        h(x) = R(θ)^T v."""
+        x = np.array([10, -5, 0.7, 1.0, 30, -12, 40, 60, 5, -3], float)
+        c, s = math.cos(x[TH]), math.sin(x[TH])
+        rows = np.zeros((2, N))
+        rows[0, [VX, VY, TH]] = c, -s, -s * x[VX] - c * x[VY]
+        rows[1, [VX, VY, TH]] = s, c, c * x[VX] - s * x[VY]
+        np.testing.assert_allclose(rows, numeric_jacobian(RefEKF.h_speed, x), atol=1e-6)
 
     @pytest.mark.parametrize("th_deg", [0.0, 35.0, -120.0])
     def test_pipeline_from_the_chip(self, sim, hw, th_deg):
@@ -499,10 +609,34 @@ class TestEncoderSpeed:
             for i in range(3):
                 sim.encoder_update_speed(i)
             ekf.predict(0.0, 0.0, 0.02)
-            v = glue.encoder_field_velocity([sim.encoder_get_speed(i) for i in range(3)], th, enc)
-            ekf.updateSpeed(float(v[0]), float(v[1]))
+            ekf.updateHeading(th)
+            ekf.updateSpeed(*glue.encoder_body_twist(
+                [sim.encoder_get_speed(i) for i in range(3)], enc))
         s = ekf.getState()
         assert (s.speedX, s.speedY) == pytest.approx(tuple(v_field), abs=1.0)
+        # The firmware's per-wheel speed estimate is a few % off, which leaks into ω.
+        assert s.robotOmega == pytest.approx(0.0, abs=0.3)
+
+    def test_pipeline_turn_rate_from_the_chip(self, sim, hw):
+        """Spinning in place: wheel ticks → glue → ω in the filter (clockwise positive)."""
+        enc = sensors.EncoderModel()
+        w = 2.0
+        for i in range(3):
+            sim.encoder_init(i)
+        hw.set_encoder_rates(sensors.encoder_rates(kin.wheel_rim_speeds(np.zeros(2), w), enc))
+        for _ in range(30):
+            sim.sim.advance_ns(20_000_000)
+            for i in range(3):
+                sim.encoder_update_speed(i)
+        ekf = sim.EKF()
+        ekf.init(0.0, 0.0, 0.0)
+        for _ in range(20):
+            sim.sim.advance_ns(20_000_000)
+            for i in range(3):
+                sim.encoder_update_speed(i)
+            ekf.updateSpeed(*glue.encoder_body_twist(
+                [sim.encoder_get_speed(i) for i in range(3)], enc))
+        assert ekf.getState().robotOmega == pytest.approx(w, abs=0.05)
 
 
 # ── IR ball: updateBall ──────────────────────────────────────────────────────────────────────
@@ -517,7 +651,8 @@ class TestIRBall:
         assert (s.ballSpeedX, s.ballSpeedY) == (0.0, 0.0)
         P = ekf.getCovariance()
         n = fw.EKFNoise()
-        assert P[BX, BX] == pytest.approx(n.irDistance ** 2 + 2500 * n.irAngle ** 2 + 400, rel=1e-4)
+        dist_std = max(n.irDistance, n.irDistanceRel * 50.0)
+        assert P[BX, BX] == pytest.approx(dist_std ** 2 + 2500 * n.irAngle ** 2 + 400, rel=1e-4)
         assert P[BX, X] == 0.0                            # ball/robot correlation reset
 
     def test_matches_reference(self, fw):
@@ -532,7 +667,7 @@ class TestIRBall:
     def test_jacobian(self, fw):
         """The angle and distance rows written in EKF::updateBall equal the finite-difference
         Jacobian of h(x) = [atan2(dx, dy) - θ, |d|]."""
-        x = np.array([10, -5, 0.7, 0, 0, 40, 60, 0, 0], float)
+        x = np.array([10, -5, 0.7, 0, 0, 0, 40, 60, 0, 0], float)
         dx, dy = x[BX] - x[X], x[BY] - x[Y]
         d2 = dx * dx + dy * dy
         d = math.sqrt(d2)
@@ -608,7 +743,8 @@ def scenario(T=8.0, dt=0.01):
         a = np.array([-60 * w * w * math.sin(w * t), -160 * w * w * math.sin(2 * w * t)])
         th = 0.4 * math.sin(0.5 * t)
         ball = np.array([-80.0 + 20.0 * t, 70.0])
-        yield t, {"p": p, "v": v, "a": a, "th": th, "ball": ball, "bv": np.array([20.0, 0.0])}
+        yield t, {"p": p, "v": v, "a": a, "th": th, "w": 0.2 * math.cos(0.5 * t), "ball": ball,
+                  "bv": np.array([20.0, 0.0])}
 
 
 def run_fusion(fw, rng, sensors_on=("accel", "compass", "sonar", "encoder", "ir"), dt=0.01):
@@ -629,20 +765,20 @@ def run_fusion(fw, rng, sensors_on=("accel", "compass", "sonar", "encoder", "ir"
             z = tr["p"] + rng.normal(0, n.sonarPos, 2)
             ekf.updatePosition(float(z[0]), float(z[1]))
         if "encoder" in sensors_on and k % 2 == 0:                       # 50 Hz
-            z = tr["v"] + rng.normal(0, n.encoderSpeed, 2)
-            ekf.updateSpeed(float(z[0]), float(z[1]))
+            z = body_from_field(tr["v"], tr["th"]) + rng.normal(0, n.encoderSpeed, 2)
+            ekf.updateSpeed(float(z[0]), float(z[1]), tr["w"] + rng.normal(0, n.encoderOmega))
         if "ir" in sensors_on and k % 3 == 0:                            # ~33 Hz
             d = tr["ball"] - tr["p"]
             ekf.updateBall(math.atan2(d[0], d[1]) - tr["th"] + rng.normal(0, n.irAngle),
                            float(np.hypot(*d)) + rng.normal(0, n.irDistance))
         if t >= 2.0:                                                     # after convergence
             x = state_vec(ekf)
-            truth = np.array([*tr["p"], tr["th"], *tr["v"], *tr["ball"], *tr["bv"]])
+            truth = np.array([*tr["p"], tr["th"], tr["w"], *tr["v"], *tr["ball"], *tr["bv"]])
             e = x - truth
             e[TH] = wrap(e[TH])
             errs.append(e)
-            P = ekf.getCovariance()[:5, :5]
-            nees.append(float(e[:5] @ np.linalg.solve(P, e[:5])))
+            P = ekf.getCovariance()[np.ix_(ROBOT, ROBOT)]
+            nees.append(float(e[ROBOT] @ np.linalg.solve(P, e[ROBOT])))
         assert_valid_covariance(ekf.getCovariance())
     return ekf, np.array(errs), np.array(nees)
 
@@ -683,11 +819,15 @@ class TestWholeFilter:
         assert ekf_dr.getCovariance()[X, X] > 4 * ekf_all.getCovariance()[X, X]
         assert np.sqrt(np.mean(errs_dr[:, VX] ** 2)) < 6.0     # speed still pinned by encoders
 
-    def test_no_compass_heading_drifts_but_is_admitted(self, fw):
+    def test_no_compass_heading_stays_honest(self, fw):
+        """Without the compass the heading is still observable (robot-frame encoder speed vs the
+        sonar/accelerometer field motion), less sure, and the error matches the claimed σ."""
+        ekf_all, _, _ = run_fusion(fw, np.random.default_rng(9))
         ekf, errs, _ = run_fusion(fw, np.random.default_rng(9),
                                   sensors_on=("accel", "sonar", "encoder", "ir"))
-        n = fw.EKFNoise()
-        assert ekf.getCovariance()[TH, TH] > n.compassTheta ** 2   # uncertainty grew
+        var = ekf.getCovariance()[TH, TH]
+        assert var > ekf_all.getCovariance()[TH, TH]
+        assert np.sqrt(np.mean(errs[:, TH] ** 2)) < 3.0 * math.sqrt(var)
 
     def test_whole_filter_matches_reference(self, fw):
         """The full fused run, step for step, equals the float64 reference model."""
@@ -708,7 +848,8 @@ class TestWholeFilter:
                 z = tr["p"] + rng.normal(0, n.sonarPos, 2)
                 ekf.updatePosition(*z)
                 ref.update_position(*z)
-                zv = tr["v"] + rng.normal(0, n.encoderSpeed, 2)
+                zv = (*(body_from_field(tr["v"], tr["th"]) + rng.normal(0, n.encoderSpeed, 2)),
+                      tr["w"] + rng.normal(0, n.encoderOmega))
                 ekf.updateSpeed(*zv)
                 ref.update_speed(*zv)
             if k % 3 == 0:
@@ -719,11 +860,6 @@ class TestWholeFilter:
         assert_matches(ekf, ref, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "EKF has no angular-rate state and models heading as a slow random walk (thetaDrift = "
-    "0.05 rad/sqrt(s)): turning at 90 deg/s it trails a perfect compass by ~12 deg while "
-    "reporting sigma ~1 deg. Add omega to the state (or raise thetaDrift / feed the gyro or "
-    "encoder rotation) and remove this marker."))
 def test_heading_keeps_up_with_a_turning_robot(fw):
     """Perfect compass at 50 Hz, robot turning at 90°/s: the heading error should stay within
     3 σ of what the filter itself claims."""

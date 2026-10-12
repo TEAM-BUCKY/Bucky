@@ -67,8 +67,9 @@ def test_ekf_basics(fw):
     assert ekf.getState().robotX == pytest.approx(30.0, abs=1.0)
     ekf.updateHeading(0.5)
     assert 0.0 < ekf.getState().robotTheta <= 0.5
-    # Ball straight ahead (bearing 0) at 50 cm, robot facing +y.
-    ekf.updateHeading(0.0)
+    # Ball straight ahead (bearing 0) at 50 cm, robot facing +y. Re-init: snapping the compass
+    # back from 0.5 rad would be gated as an outlier (EKFModel::gateChi2).
+    ekf.init(30.0, 20.0, 0.0)
     for _ in range(10):
         ekf.updateHeading(0.0)
         ekf.updateBall(0.0, 50.0)

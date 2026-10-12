@@ -147,9 +147,11 @@ bool EKF::updateScalar(const Math::Vector<N>& h, const float innovation, const f
         s += h[i] * PhT[i];
     if (s <= 0.0f) return false;
 
-    // Innovation gate: drop outliers (sonar hitting the opponent, IR reflections).
+    // Innovation gate: drop outliers (sonar hitting the opponent, IR reflections, magnetic spikes).
+    // Encoders are not gated: slip biases them rather than producing outliers, and a collision is
+    // exactly when the speed jumps far outside the predicted spread.
     // After maxRejects in a row the filter is more likely wrong than the sensor, so accept again.
-    if (innovation * innovation > model.gateChi2 * s)
+    if (sensor != ENCODER && innovation * innovation > model.gateChi2 * s)
     {
         ++rejectCount[sensor];
         if (consecutiveRejects[sensor] < model.maxRejects)
@@ -197,8 +199,8 @@ bool EKF::updateIdentity(const std::size_t i, const float innovation, const floa
 void EKF::updatePosition(const float robotX, const float robotY)
 {
     const float r = noise.sonarPos * noise.sonarPos;
-    updateIdentity(X, robotX - x[X], r, SONAR);
-    updateIdentity(Y, robotY - x[Y], r, SONAR);
+    updateIdentity(X, robotX - x[X], r, SONAR_X);
+    updateIdentity(Y, robotY - x[Y], r, SONAR_Y);
     syncState();
 }
 
@@ -279,7 +281,7 @@ void EKF::updateBall(const float angle, const float distance)
         h[BX] = dy / d2;
         h[BY] = -dx / d2;
         const float predicted = std::atan2(dx, dy) - x[THETA];
-        updateScalar(h, Math::wrapRadians(angle - predicted), noise.irAngle * noise.irAngle, IR);
+        updateScalar(h, Math::wrapRadians(angle - predicted), noise.irAngle * noise.irAngle, IR_ANGLE);
     }
 
     // Distance row, relinearized around the angle-corrected state
@@ -293,7 +295,7 @@ void EKF::updateBall(const float angle, const float distance)
         h[Y] = -ey / e;
         h[BX] = ex / e;
         h[BY] = ey / e;
-        updateScalar(h, distance - e, distanceStd * distanceStd, IR);
+        updateScalar(h, distance - e, distanceStd * distanceStd, IR_DISTANCE);
     }
 
     syncState();

@@ -95,6 +95,16 @@ def test_encoder_field_velocity_round_trip():
         assert glue.encoder_field_velocity(rates, th, enc) == pytest.approx(v_field, abs=1e-6)
 
 
+def test_encoder_body_twist_round_trip():
+    from bucky.firmware import kinematics as kin
+
+    enc = sensors.EncoderModel()
+    for v_body, w in (((0.25, -0.4), 0.0), ((0.0, 0.0), 3.0), ((-0.1, 0.3), -1.5)):
+        rates = sensors.encoder_rates(kin.wheel_rim_speeds(np.array(v_body), w), enc)
+        assert glue.encoder_body_twist(rates, enc) == pytest.approx(
+            (v_body[0] * 100.0, v_body[1] * 100.0, w), abs=1e-6)
+
+
 # ── sensor_check ────────────────────────────────────────────────────────────────────────────
 
 SMALL = {"robot_step_cm": 60.0, "headings_deg": [0.0, 135.0], "duration_s": 1.5}
@@ -163,10 +173,6 @@ def test_ekf_tracks_while_driving(fw, motion):
         assert m["ball_rmse_cm"] < 15.0
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Same EKF limitation as tests/test_firmware_ekf.py::test_heading_keeps_up_with_a_turning_"
-    "robot: no angular-rate state, so a robot that turns continuously is tracked many degrees "
-    "behind while the filter claims ~1 deg."))
 @pytest.mark.parametrize("motion", ["turning", "spin"])
 def test_ekf_tracks_a_turning_robot(fw, motion):
     m = _ekf_run(motion)["metrics"]

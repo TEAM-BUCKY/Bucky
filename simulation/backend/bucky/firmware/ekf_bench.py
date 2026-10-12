@@ -9,7 +9,7 @@ Every 10 ms:
         Accelerometer::read  → EKF::predict           (every step)
         Compass::update      → EKF::updateHeading     (``compass_hz``; start heading + getOffset)
         Sonar (non-blocking) → glue.sonar_localize    → EKF::updatePosition (``sonar_hz``)
-        encoder_get_speed    → glue.encoder_field_velocity → EKF::updateSpeed (``encoder_hz``)
+        encoder_get_speed    → glue.encoder_body_twist → EKF::updateSpeed     (``encoder_hz``)
         GPort::readIR        → glue.ir_bearing_range  → EKF::updateBall (every new IR frame)
 
 and the estimate is compared with the truth after a settling time. The module (kind ``"ekf"``,
@@ -35,24 +35,32 @@ from bucky.physics.python_backend import MAX_LINEAR, MAX_OMEGA, TwoRobotPhysics
 
 DT = 0.01
 _PARKED_B = np.zeros(4)
-X, Y, TH, VX, VY, BX, BY, BVX, BVY = range(9)
+X, Y, TH, W, VX, VY, BX, BY, BVX, BVY = range(10)
+#: The robot block graded for consistency (NEES): x, y, θ, vx, vy.
+ROBOT = [X, Y, TH, VX, VY]
 
 #: EKFNoise defaults (strategy/EKF.h); tests/test_firmware_ekf.py checks they still match.
 EKF_NOISE_DEFAULTS = {
-    "accel": 0.05 * 981.0, "thetaDrift": 0.05, "ballAccel": 300.0, "ballSpeedInit": 100.0,
-    "sonarPos": 3.0, "compassTheta": 0.05, "encoderSpeed": 5.0, "irAngle": 0.1,
-    "irDistance": 10.0,
+    "accel": 0.05 * 981.0, "accelSpinGain": 0.5, "angularAccel": 20.0, "thetaDrift": 0.01,
+    "omegaInit": 1.0, "ballAccel": 300.0, "ballSpeedInit": 100.0, "sonarPos": 3.0,
+    "compassTheta": 0.05, "encoderSpeed": 5.0, "encoderOmega": 0.2, "irAngle": 0.1,
+    "irDistance": 5.0, "irDistanceRel": 0.2,
 }
 _NOISE_HELP = {
     "accel": "Accelerometer noise incl. vibration (σ, cm/s²) → Q",
-    "thetaDrift": "Heading random walk (rad/√s) → Q",
+    "accelSpinGain": "Accel σ grows by (1 + gain·|ω|) while turning (s/rad) → Q",
+    "angularAccel": "Unmodelled turn-rate change (σ, rad/s²) → Q",
+    "thetaDrift": "Heading random walk on top of ω (rad/√s) → Q",
+    "omegaInit": "Turn-rate uncertainty at init (σ, rad/s)",
     "ballAccel": "Unmodelled ball acceleration (σ, cm/s²) → Q",
     "ballSpeedInit": "Ball speed uncertainty on first sighting (σ, cm/s)",
     "sonarPos": "Sonar-derived x/y (σ, cm) → R",
     "compassTheta": "Compass heading (σ, rad) → R",
-    "encoderSpeed": "Encoder field speed (σ, cm/s) → R",
+    "encoderSpeed": "Encoder robot-frame speed (σ, cm/s) → R",
+    "encoderOmega": "Encoder turn rate (σ, rad/s) → R",
     "irAngle": "IR ball bearing (σ, rad) → R",
-    "irDistance": "IR ball distance (σ, cm) → R",
+    "irDistance": "IR ball distance noise floor (σ, cm) → R",
+    "irDistanceRel": "IR ball distance σ as a fraction of the distance → R",
 }
 
 
@@ -185,9 +193,9 @@ class EkfBench:
         for i in range(3):
             fw.encoder_update_speed(i)
         if p.use_encoders and self._every(p.encoder_hz):
-            v = glue.encoder_field_velocity([fw.encoder_get_speed(i) for i in range(3)],
-                                            st.robotTheta, self.cfg.encoders)
-            ekf.updateSpeed(float(v[0]), float(v[1]))
+            v = glue.encoder_body_twist([fw.encoder_get_speed(i) for i in range(3)],
+                                        self.cfg.encoders)
+            ekf.updateSpeed(*v)
             self.counts["encoder"] += 1
 
         if p.use_sonar:
@@ -218,14 +226,14 @@ class EkfBench:
 
     def estimate(self) -> np.ndarray:
         s = self.ekf.getState()
-        return np.array([s.robotX, s.robotY, s.robotTheta, s.speedX, s.speedY,
+        return np.array([s.robotX, s.robotY, s.robotTheta, s.robotOmega, s.speedX, s.speedY,
                          s.ballX, s.ballY, s.ballSpeedX, s.ballSpeedY], dtype=float)
 
     def truth_fw(self) -> np.ndarray:
         s = self.physics.state_a()
         return np.array([*frames.sim_to_fw_pos(s.robot_pos), frames.sim_to_fw_heading(
-            s.robot_heading), *frames.sim_to_fw_pos(s.robot_vel), *frames.sim_to_fw_pos(
-            s.ball_pos), *frames.sim_to_fw_pos(s.ball_vel)])
+            s.robot_heading), -float(s.robot_omega), *frames.sim_to_fw_pos(s.robot_vel),
+            *frames.sim_to_fw_pos(s.ball_pos), *frames.sim_to_fw_pos(s.ball_vel)])
 
 
 # ── scenarios: paths the robot follows ──────────────────────────────────────────────────────
@@ -377,19 +385,20 @@ class EkfTracking(Experiment):
             e = est - tru
             e[TH] = math.remainder(e[TH], math.tau)
             if ex.t >= p.settle_s:
-                errs.append(e[:5])
-                P = ex.ekf.getCovariance()[:5, :5]
+                er = e[ROBOT]
+                errs.append(er)
+                P = ex.ekf.getCovariance()[np.ix_(ROBOT, ROBOT)]
                 try:
-                    nees.append(float(e[:5] @ np.linalg.solve(P, e[:5])))
+                    nees.append(float(er @ np.linalg.solve(P, er)))
                 except np.linalg.LinAlgError:
                     pass
                 # Ball error only while the IR ring can see the ball (see sensor_check).
-                in_range = math.hypot(*(tru[5:7] - tru[:2])) <= ex.cfg.ir.range_k / 10.0
+                in_range = math.hypot(*(tru[BX:BY + 1] - tru[:2])) <= ex.cfg.ir.range_k / 10.0
                 ball_steps += 1
                 if in_range:
                     ball_visible += 1
                     if ex.counts["ir"]:
-                        ball_errs.append(e[5:9])
+                        ball_errs.append(e[BX:BVY + 1])
             if record:
                 s = ex.state()
                 th = est[TH]
@@ -397,7 +406,7 @@ class EkfTracking(Experiment):
                 marks = {"E": frames.fw_to_sim_pos(est[:2]).tolist(),
                          "EH": frames.fw_to_sim_pos(tip).tolist()}
                 if ex.counts["ir"]:
-                    marks["EB"] = frames.fw_to_sim_pos(est[5:7]).tolist()
+                    marks["EB"] = frames.fw_to_sim_pos(est[BX:BY + 1]).tolist()
                 trace.append({"t": round(ex.t, 3),
                               "r": [float(s.robot_pos[0]), float(s.robot_pos[1]),
                                     float(s.robot_heading)],

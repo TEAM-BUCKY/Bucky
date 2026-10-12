@@ -37,6 +37,17 @@ def ir_bearing_range(frame16, *, baseline: float = 100.0, threshold_ratio: float
     return math.atan2(float(w @ np.sin(ang)), float(w @ np.cos(ang))), range_k / math.sqrt(peak)
 
 
+def encoder_body_twist(tick_rates,
+                       enc: sensors.EncoderModel = sensors.EncoderModel()) -> tuple[float, float, float]:
+    """Encoder speeds (ticks/s, as encoder_get_speed reports) → rim speeds → body twist
+    (Motors::wheelSpeeds geometry): (right cm/s, forward cm/s, ω rad/s clockwise), what
+    EKF::updateSpeed takes."""
+    tps = np.asarray(tick_rates, dtype=float)
+    rim = tps / enc.ticks_per_rev * 2 * math.pi * enc.wheel_radius_m / np.asarray(enc.polarity)
+    vx, vy, w = kin.body_twist_from_wheels(rim)
+    return vx * 100.0, vy * 100.0, w
+
+
 def encoder_field_velocity(tick_rates, theta: float,
                            enc: sensors.EncoderModel = sensors.EncoderModel()) -> np.ndarray:
     """Encoder speeds (ticks/s, as encoder_get_speed reports) → rim speeds → body twist
