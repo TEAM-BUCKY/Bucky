@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pytest
 
+from bucky.game.field import ARENA_HALF_X, ARENA_HALF_Y, HALF_W, ROBOT_RADIUS
 from bucky.lab import registry
 from bucky.lab.executor import command_to_action
 from bucky.lab.experiments import get_experiment
@@ -128,12 +129,24 @@ def test_small_sweep_shape():
     assert rep["metrics"] == rec["metrics"]
 
 
-def test_sensor_stubs_and_noise():
+def test_sensors_and_noise():
     st = PhysicsState(np.zeros(2), np.zeros(2), 0.0, 0.0, np.array([0.5, 0.0]), np.zeros(2))
     truth = TruthState(state=st, t=0.0)
     rng = np.random.default_rng(0)
     assert get_sensor("ball")().read(truth, rng) == Vec2(0.0, 50.0)
     assert get_sensor("ball")(dropout=1.0).read(truth, rng) is None
-    for name in ("sonar", "line"):
-        with pytest.raises(NotImplementedError):
-            get_sensor(name)().read(truth, rng)
+
+    # Sonar: rim-to-wall distances along front / left / back / right (CCW) rays.
+    sonar = get_sensor("sonar")(noise_cm=0.0).read(truth, rng)
+    rim = ROBOT_RADIUS * 100
+    assert sonar == pytest.approx([ARENA_HALF_X * 100 - rim, ARENA_HALF_Y * 100 - rim,
+                                   ARENA_HALF_X * 100 - rim, ARENA_HALF_Y * 100 - rim])
+    assert get_sensor("sonar")(dropout=1.0).read(truth, rng) == [300.0] * 4
+
+    # Line: nothing at the centre spot; the front sensor sees the line near the +x edge.
+    line = get_sensor("line")()
+    assert not any(line.read(truth, rng))
+    near = PhysicsState(np.array([HALF_W - 0.085, 0.0]), np.zeros(2), 0.0, 0.0,
+                        np.zeros(2), np.zeros(2))
+    hits = line.read(TruthState(state=near, t=0.0), rng)
+    assert hits[0] and not hits[8]

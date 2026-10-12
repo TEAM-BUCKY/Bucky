@@ -32,7 +32,9 @@ def register(cls: type[LabModule]) -> type[LabModule]:
 
 
 def discover(user_dir: Path = USER_DIR) -> None:
-    """(Re)load every user module file."""
+    """(Re)load every user module file (and register the firmware's programs)."""
+    import bucky.firmware.lab  # noqa: F401  (kind "firmware": robot/src programs, no build needed)
+
     for key, cls in list(_MODULES.items()):
         if cls.__module__.startswith(_USER_PKG + "."):
             del _MODULES[key]

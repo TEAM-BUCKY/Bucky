@@ -15,7 +15,12 @@
 
 services:
   backend:
-    build: ./backend
+    build:
+      # Repo root, not ./backend: the image also carries the robot firmware (robot/src) and
+      # its simulator (robot/sim) so the Lab can run the real firmware. /.dockerignore
+      # whitelists what gets sent.
+      context: ..
+      dockerfile: simulation/backend/Dockerfile
     restart: unless-stopped
     # Variables come from the deployment environment: a local `.env` (auto-loaded by
     # `docker compose` for interpolation) or the stack env vars in Portainer/the CI UI.

@@ -66,6 +66,7 @@ class DriveApproach(Experiment):
 
     name = "drive_approach"
     module_kind = "drive"
+    also_accepts = ("firmware",)   # firmware programs that drive (bucky.firmware.lab)
     params = {
         "mode": Param("rings", options=("rings", "field"), help="What to sweep"),
         "ball_step_cm": Param(20.0, 5.0, 60.0, 5.0, "rings: ball grid spacing"),

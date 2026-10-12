@@ -1,0 +1,33 @@
+# Every global variable the firmware objects define, and how a simulated reboot resets it.
+# tests/test_firmware_programs.py fails when the firmware gains a global that is not listed here:
+# add it to firmware_reboot() (reboot.cpp) if it needs resetting, then list it.
+
+# main.cpp — destroyed and re-constructed by firmware_reboot()
+motorDriver
+sensorI2C
+compass
+accel
+sonar
+kicker
+gPort1
+gPort2
+host
+bluetooth
+# header-inline globals — re-constructed by firmware_reboot()
+dbg                                 # debug.h
+button1                             # hardware/sensors/Button.h
+button2
+pwm_sync                            # hardware/io/gpio/pwm.h
+# const board tables (never written)
+Board::G_PORT1
+Board::G_PORT2
+# file statics re-initialised by the firmware itself
+encoders                            # Encoder.cpp, by encoder_init()
+echoGpio                            # Sonar.cpp, by Sonar::begin()
+echoPinNames                        # Sonar.cpp, by Sonar::begin()
+riseTime                            # Sonar.cpp, by Sonar::startRead()
+duration                            # Sonar.cpp, by Sonar::startRead()
+done                                # Sonar.cpp, by Sonar::startRead()
+setupPA10TimerCapture()::tim1       # Sonar.cpp, function static; only on the G474 board (PA_10 echo)
+# compiler runtime
+DW.ref.__gxx_personality_v0

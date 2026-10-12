@@ -1,5 +1,5 @@
 // Metric catalogue + the sequential (single-hue, light→dark) colour ramp used by the Lab heatmap.
-import type { Metrics, Summary } from './api';
+import type { ExperimentInfo, MetricSpec, Metrics, Summary } from './api';
 
 export interface MetricDef {
 	key: string;
@@ -23,7 +23,45 @@ export const METRICS: MetricDef[] = [
 	{ key: 'score', label: 'Score', higherIsBetter: true, format: (v) => v.toFixed(1), domain: null }
 ];
 
-export const metricDef = (key: string) => METRICS.find((m) => m.key === key) ?? METRICS[0];
+export const metricDef = (key: string, defs: MetricDef[] = METRICS) =>
+	defs.find((m) => m.key === key) ?? defs[0];
+
+const UNIT_FORMAT: Record<string, (v: number) => string> = {
+	pct,
+	deg: (v) => `${v.toFixed(1)}°`,
+	cm: (v) => `${v.toFixed(1)} cm`,
+	'cm/s': (v) => `${v.toFixed(1)} cm/s`,
+	s: (v) => `${v.toFixed(2)} s`,
+	g: (v) => `${v.toFixed(3)} g`,
+	Hz: (v) => `${v.toFixed(1)} Hz`
+};
+
+function fromSpec(s: MetricSpec): MetricDef {
+	return {
+		key: s.key,
+		label: s.label,
+		higherIsBetter: s.higher_is_better,
+		format: UNIT_FORMAT[s.unit] ?? ((v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2))),
+		domain: s.domain ?? null
+	};
+}
+
+/** The metrics an experiment declares (bucky.lab.experiments.base.Experiment.metric_specs),
+ *  or the built-in drive metrics. */
+export function metricsFor(exp: ExperimentInfo | undefined | null): MetricDef[] {
+	return exp?.metrics?.length ? exp.metrics.map(fromSpec) : METRICS;
+}
+
+/** Columns for the summary tables. */
+export function summaryColumns(exp: ExperimentInfo | undefined | null): MetricDef[] {
+	if (exp?.metrics?.length) {
+		const cols = exp.metrics.filter((m) => m.summary).map(fromSpec);
+		return cols.length ? cols : exp.metrics.slice(0, 6).map(fromSpec);
+	}
+	return METRICS.filter((m) =>
+		['success', 'time_s', 'wrong_touch', 'path_eff', 'out_of_bounds', 'score'].includes(m.key)
+	);
+}
 
 /** Sequential blue ramp, steps 100→700 (dataviz reference palette). */
 const RAMP = [

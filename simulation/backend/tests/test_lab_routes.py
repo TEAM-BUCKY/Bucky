@@ -55,3 +55,23 @@ def test_lab_sweep_and_replay(tmp_path):
         assert rep.json()["metrics"] == rec["metrics"]
         bad = c.post("/api/lab/replay", json={"module": "nope", "scenario": rec["scenario"]})
         assert bad.status_code == 400
+
+
+def test_lab_modules_without_firmware_tree(monkeypatch):
+    """Backend-only deployments (the Docker image) have no robot/ next to the code: the lab must
+    still list its Python modules, just without the firmware programs."""
+    import importlib
+    import sys
+
+    from bucky.firmware import build
+
+    monkeypatch.setattr(build, "robot_dir", lambda: build.Path("/nonexistent/robot"))
+    monkeypatch.delitem(sys.modules, "bucky.firmware.lab", raising=False)
+    from bucky.lab import registry
+
+    for key in [k for k in registry._MODULES if k[0] == "firmware"]:
+        monkeypatch.delitem(registry._MODULES, key)
+    importlib.invalidate_caches()
+    registry.discover()
+    assert registry.list_modules("firmware") == []
+    assert registry.list_modules("drive")

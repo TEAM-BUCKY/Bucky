@@ -583,6 +583,10 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
             )
         except (KeyError, ValueError, NotImplementedError) as e:
             raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
+        except TimeoutError as e:   # a firmware program that never finished (bucky.firmware)
+            raise HTTPException(status_code=504, detail=str(e)) from e
+        except RuntimeError as e:   # firmware build / run failures
+            raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
 
     # ── competition brackets (round-robin tournaments) ───────────────────────────
     @router.post("/tournament")

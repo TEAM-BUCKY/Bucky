@@ -32,12 +32,28 @@ export interface SensorInfo {
 export interface ExperimentInfo {
 	name: string;
 	module_kind: string;
+	/** module_kind plus kinds that can stand in for it (e.g. "firmware" programs). */
+	accepts_kinds?: string[];
+	/** The experiment's own metrics; absent/empty → the built-in drive metrics. */
+	metrics?: MetricSpec[];
 	doc: string;
 	params: Record<string, ParamSpec>;
 }
 
+export interface MetricSpec {
+	key: string;
+	label: string;
+	higher_is_better: boolean;
+	/** "pct" (0..1 rate), "deg", "cm", "cm/s", "s", "g", "Hz" or "" */
+	unit: string;
+	domain?: [number, number] | null;
+	/** Show as a column in the summary tables. */
+	summary?: boolean;
+}
+
 export interface Scenario {
 	id: number;
+	motion?: string;
 	ball: [number, number]; // sim frame, metres
 	robot: [number, number];
 	heading: number;
@@ -45,7 +61,7 @@ export interface Scenario {
 	angle_deg?: number;
 }
 
-export type Metrics = Record<string, number | boolean | null>;
+export type Metrics = Record<string, number | boolean | string | null>;
 
 export interface SweepRecord {
 	variant: string;
@@ -63,6 +79,8 @@ export interface VariantResult {
 	worst: SweepRecord[];
 	by_ball?: (Summary & { ball: [number, number] })[];
 	by_angle?: (Summary & { angle_deg: number })[];
+	by_motion?: (Summary & { motion: string })[];
+	by_heading?: (Summary & { heading_deg: number })[];
 }
 
 export interface SweepResult {
@@ -161,4 +179,10 @@ export function toFieldTheta(h: number): number {
 
 export function defaults(spec: Record<string, ParamSpec>): Record<string, ParamValue> {
 	return Object.fromEntries(Object.entries(spec).map(([k, p]) => [k, Array.isArray(p.default) ? [...p.default] : p.default]));
+}
+
+/** True when `exp` can test modules of `kind`. */
+export function acceptsKind(exp: ExperimentInfo, kind: string | undefined): boolean {
+	if (!kind) return false;
+	return exp.module_kind === kind || (exp.accepts_kinds ?? []).includes(kind);
 }
