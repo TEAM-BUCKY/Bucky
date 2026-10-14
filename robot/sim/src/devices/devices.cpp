@@ -120,6 +120,7 @@ void GPortBoard::reset() {
     gen_++;
     samples_ = 0;
     resets_ = 0;
+    ir.reset(world().now_ns());
 }
 
 void GPortBoard::sync(const uint64_t now) {
@@ -160,15 +161,17 @@ void GPortBoard::advance_mux() {
     if (mux_ != 0 || !is_present) return;
     // Board reset pulse: the firmware's EXTI handler marks a frame boundary.
     resets_++;
+    if (kind_ == GSensorKind::IR && ir_physical) ir.on_reset_pulse(world().now_ns());
     io::set_input(hw_.resetPin, 1);
     world().schedule(world().now_ns() + 1000, [this] { io::set_input(hw_.resetPin, 0); });
 }
 
-uint16_t GPortBoard::current_value() const {
+uint16_t GPortBoard::current_value() {
     if (!is_present) return 0;
     const uint32_t sweep = mux_ / 16, ch = mux_ % 16;
     const uint32_t phys = ch < 8 ? 7 - ch : ch;   // the boards' flipped first 8 channels
     if (kind_ == GSensorKind::Line) return values[static_cast<uint8_t>(led_order[sweep])][phys];
+    if (ir_physical) return ir.sample(world().now_ns(), phys);
     return values[0][phys];
 }
 

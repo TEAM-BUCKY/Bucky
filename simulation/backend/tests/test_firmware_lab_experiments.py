@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from bucky.firmware import glue, sensors
+from bucky.firmware import ir_ball, glue, sensors
 from bucky.firmware.ekf_bench import EKF_NOISE_DEFAULTS
 from bucky.firmware.programs import program_role, run_test_symbol
 from bucky.lab import registry
@@ -74,12 +74,19 @@ def test_sonar_localize_needs_both_axes():
 
 
 def test_ir_bearing_range_matches_the_model():
-    m = sensors.IRModel(noise=0.0)
+    m = ir_ball.IRRingModel()
+    cfg = dict(baseline=m.baseline, range_k=m.range_k)
+
+    def codes(bearing_deg, dist_cm):
+        b = math.radians(bearing_deg)
+        ball = (math.cos(b) * dist_cm / 100, -math.sin(b) * dist_cm / 100)   # sim body frame
+        return m.front_end.code_of(m.photocurrents((0, 0), 0.0, ball), m.ball.carrier_hz)
+
     for bearing in (0.0, 30.0, 47.0, -100.0):
-        b, r = glue.ir_bearing_range(sensors.ir_adc(math.radians(bearing), 40.0, m))
-        assert math.degrees(b) == pytest.approx(bearing, abs=4.0)
+        b, r = glue.ir_bearing_range(codes(bearing, 40.0), **cfg)
+        assert math.degrees(b) == pytest.approx(bearing, abs=2.0)
         assert r == pytest.approx(40.0, rel=0.05)
-    assert glue.ir_bearing_range(sensors.ir_adc(0.0, 40.0, m, visible=False)) is None
+    assert glue.ir_bearing_range(m.front_end.code_of(np.zeros(16), 41e3), **cfg) is None
 
 
 def test_encoder_field_velocity_round_trip():

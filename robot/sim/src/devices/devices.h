@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "core/world.h"
+#include "devices/ir_frontend.h"
 #include "hardware/io/encoder/Encoder.h"
 #include "hardware/sensors/GPort.h"
 #include "hardware/sensors/pos/Sonar.h"
@@ -69,6 +70,9 @@ public:
     std::array<std::array<uint16_t, 16>, 4> values{};   // [colour or 0 for IR][physical sensor]
     std::array<LineColor, 4> led_order{LineColor::Red, LineColor::Green, LineColor::Blue, LineColor::Dark};
     bool is_present = true;
+    // IR only: when set, samples come from the time-domain front end (`ir`) instead of `values`.
+    bool ir_physical = false;
+    IrFrontEnd ir;
 
     void reset() override;
     void sync(uint64_t now) override;
@@ -84,7 +88,7 @@ private:
     void on_rise(uint64_t gen);
     void on_fall(uint64_t gen);
     void advance_mux();
-    uint16_t current_value() const;
+    uint16_t current_value();
 
     const GPortHardware& hw_;
     GSensorKind kind_;

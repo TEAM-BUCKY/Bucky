@@ -56,6 +56,7 @@ set(FW_SOURCES
     "${FIRMWARE_DIR}/hardware/motor/Kicker.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/GPort.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/LineSensor.cpp"
+    "${FIRMWARE_DIR}/hardware/sensors/IRRing.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Compass.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Accelerometer.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Sonar.cpp"

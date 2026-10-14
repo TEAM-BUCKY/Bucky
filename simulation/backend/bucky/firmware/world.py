@@ -20,7 +20,7 @@ Only one FirmwareWorld can be live per process (the firmware's globals are proce
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -148,10 +148,14 @@ class FirmwareWorld:
         s = self.physics.state_a()
         return RobotTruth(pos_m=s.robot_pos, heading=float(s.robot_heading), vel_mps=s.robot_vel,
                           omega=float(s.robot_omega), accel_mps2=self._accel,
-                          ball_m=s.ball_pos, ball_visible=True)
+                          ball_m=s.ball_pos, ball_vel_mps=np.asarray(s.ball_vel, float),
+                          ball_visible=True)
+
+    def _ir_substeps(self) -> int:
+        return max(1, math.ceil(self.dt / self.cfg.ir.update_s - 1e-9))
 
     def _apply_truth(self) -> dict:
-        return self.hw.apply_truth(self.truth())
+        return self.hw.apply_truth(self.truth(), ir_dt=self.dt / self._ir_substeps())
 
     def _run_firmware(self, seconds: float) -> str:
         sim = self.fw.sim
@@ -167,7 +171,7 @@ class FirmwareWorld:
 
     def step(self) -> StepInfo:
         readings = self._apply_truth()
-        status = self._run_firmware(self.dt)
+        status = self._run_ir_substeps(self.truth())
         act = self.hw.read_actuators()
         rim = self.cfg.motors.rim_speeds(act.duty)
         twist = body_twist_from_wheels(rim)
@@ -181,6 +185,24 @@ class FirmwareWorld:
         self.last = StepInfo(info=info, actuators=act, twist=twist, status=status,
                              readings=readings)
         return self.last
+
+    def _run_ir_substeps(self, t0: RobotTruth) -> str:
+        """Run one dt of firmware, re-evaluating the IR optics every ``cfg.ir.update_s`` with the
+        robot and ball extrapolated linearly (the ball's LEDs roll on in between)."""
+        n = self._ir_substeps()
+        h = self.dt / n
+        moving = (np.any(t0.vel_mps != 0) or t0.omega != 0
+                  or (t0.ball_m is not None and np.any(t0.ball_vel_mps != 0)))
+        if n == 1 or not moving:
+            return self._run_firmware(self.dt)
+        status = self._run_firmware(h)
+        for i in range(1, n):
+            tau = i * h
+            ti = replace(t0, pos_m=t0.pos_m + t0.vel_mps * tau, heading=t0.heading + t0.omega * tau,
+                         ball_m=None if t0.ball_m is None else t0.ball_m + t0.ball_vel_mps * tau)
+            self.hw.apply_ir_truth(ti, h)
+            status = self._run_firmware(h)
+        return status
 
     def run(self, seconds: float) -> list[StepInfo]:
         return [self.step() for _ in range(max(0, math.ceil(seconds / self.dt - 1e-9)))]

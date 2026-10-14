@@ -155,6 +155,50 @@ void bind_devices(py::module_& m) {
         .def_readwrite("present", &sim::Lsm303Acc::is_present)
         .def("regs", &sim::Lsm303Acc::regs);
 
+    py::class_<sim::IrBurstParams>(d, "IrBurstParams")
+        .def_readwrite("period_s", &sim::IrBurstParams::period_s)
+        .def_readwrite("period_ppm", &sim::IrBurstParams::period_ppm)
+        .def_readwrite("jitter_s", &sim::IrBurstParams::jitter_s)
+        .def_readwrite("pulses", &sim::IrBurstParams::pulses)
+        .def_readwrite("on_s", &sim::IrBurstParams::on_s)
+        .def_readwrite("off_s", &sim::IrBurstParams::off_s)
+        .def_property_readonly("length_s", &sim::IrBurstParams::length_s);
+
+    py::class_<sim::IrFrontEndParams>(d, "IrFrontEndParams")
+        .def_readwrite("gain_v_per_a", &sim::IrFrontEndParams::gain_v_per_a)
+        .def_readwrite("i_sat_a", &sim::IrFrontEndParams::i_sat_a)
+        .def_readwrite("tau_bp_s", &sim::IrFrontEndParams::tau_bp_s)
+        .def_readwrite("envelope_order", &sim::IrFrontEndParams::envelope_order)
+        .def_readwrite("tau_hold_s", &sim::IrFrontEndParams::tau_hold_s)
+        .def_readwrite("reset_width_s", &sim::IrFrontEndParams::reset_width_s)
+        .def_readwrite("vref", &sim::IrFrontEndParams::vref)
+        .def_readwrite("noise_v", &sim::IrFrontEndParams::noise_v)
+        .def_readwrite("adc_noise_lsb", &sim::IrFrontEndParams::adc_noise_lsb);
+
+    py::class_<sim::IrFrontEnd>(d, "IrFrontEnd",
+                                "Time-domain IR sensor chain: burst schedule, peak hold, droop, RESET")
+        .def_property("burst", [](sim::IrFrontEnd& f) -> sim::IrBurstParams& { return f.burst; },
+                      [](sim::IrFrontEnd& f, const sim::IrBurstParams& b) { f.burst = b; },
+                      py::return_value_policy::reference_internal)
+        .def_property("params", [](sim::IrFrontEnd& f) -> sim::IrFrontEndParams& { return f.params; },
+                      [](sim::IrFrontEnd& f, const sim::IrFrontEndParams& p) { f.params = p; },
+                      py::return_value_policy::reference_internal)
+        .def_readwrite("i_ambient", &sim::IrFrontEnd::i_ambient, "DC photocurrent per channel (A)")
+        .def_readwrite("offset_v", &sim::IrFrontEnd::offset_v, "Peak-detector offset per channel (V)")
+        .def("seed", &sim::IrFrontEnd::seed, "RNG seed, applied at the next reboot/reset")
+        .def("reset", [](sim::IrFrontEnd& f) { f.reset(world().now_ns()); },
+             "Clear holds and restart the burst schedule now (reseeds)")
+        .def("set_drive",
+             [](sim::IrFrontEnd& f, const std::array<double, 16>& i) { f.set_drive(world().now_ns(), i); },
+             "LED-on photocurrent per channel (A), effective from now")
+        .def_property_readonly("drive", &sim::IrFrontEnd::drive)
+        .def_property_readonly("hold_v", &sim::IrFrontEnd::hold_v)
+        .def("peek", &sim::IrFrontEnd::peek, py::arg("t_ns"), "Hold voltages at t_ns (no side effects)")
+        .def("amplitude", &sim::IrFrontEnd::amplitude, "Steady-state held amplitude of a channel (V)")
+        .def_property_readonly("bursts", &sim::IrFrontEnd::bursts)
+        .def_property_readonly("last_burst_start_s", &sim::IrFrontEnd::last_burst_start_s)
+        .def_property_readonly("next_burst_start_s", &sim::IrFrontEnd::next_burst_start_s);
+
     py::class_<sim::GPortBoard>(d, "GPortBoard")
         .def_readwrite("values", &sim::GPortBoard::values,
                        "[LineColor (or 0 for IR)][physical sensor] ADC counts")
@@ -169,6 +213,10 @@ void bind_devices(py::module_& m) {
                 for (int i = 0; i < 4; i++) b.led_order[i] = static_cast<LineColor>(o[i]);
             })
         .def_readwrite("present", &sim::GPortBoard::is_present)
+        .def_readwrite("ir_physical", &sim::GPortBoard::ir_physical,
+                       "IR: sample the time-domain front end (ir) instead of values")
+        .def_property_readonly("ir", [](sim::GPortBoard& b) -> sim::IrFrontEnd& { return b.ir; },
+                               py::return_value_policy::reference_internal)
         .def_property_readonly("kind", [](const sim::GPortBoard& b) { return static_cast<int>(b.kind()); })
         .def_property_readonly("frame_length", &sim::GPortBoard::frame_length)
         .def_property_readonly("mux", &sim::GPortBoard::mux)

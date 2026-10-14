@@ -110,14 +110,14 @@ def _parse_ball(out: str):
     return float(m[-1][0]), float(m[-1][1])
 
 
+@pytest.mark.parametrize("dist_cm", [40.0, 120.0])
 @pytest.mark.parametrize("bearing_deg", [0.0, 45.0, 100.0, -60.0])
-def test_ir_positioning_program(sim, hw, run_program, bearing_deg):
-    model = sensors.IRModel(noise=0.0)
-    hw.cfg = type(hw.cfg)(ir=model)
-    hw.set_ir(math.radians(bearing_deg), 40.0)
+def test_ir_positioning_program(sim, hw, run_program, bearing_deg, dist_cm):
+    """Physical ball → time-domain IR boards → GPort → IRRing (default IRConfig)."""
+    hw.set_ir(math.radians(bearing_deg), dist_cm)
     bearing, rng = _parse_ball(run_program("testIRPositioning", 1.5))
     assert (bearing - bearing_deg + 180) % 360 - 180 == pytest.approx(0.0, abs=4.0)
-    assert rng == pytest.approx(40.0, rel=0.1)
+    assert rng == pytest.approx(dist_cm, rel=0.1)
 
 
 def test_ir_program_prints_frames(hw, run_program):

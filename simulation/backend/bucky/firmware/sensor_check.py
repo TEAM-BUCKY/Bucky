@@ -102,10 +102,10 @@ class IRPositioningChecker(Checker):
 
     @staticmethod
     def in_range(truth) -> bool:
-        """Whether the ball is close enough to clear testIRPositioning's MIN_PEAK (100) on the
-        modelled IR ring: (range_k / d)² ≥ 100."""
+        """Whether the ball is close enough for IRRing to report it: the facing sensor clears
+        IRConfig.minAmp on the modelled ring."""
         _, d = _ball_truth(truth)
-        return d <= truth["config"].ir.range_k / 10.0
+        return d <= truth["config"].ir.max_range_cm()
 
     def feed(self, line, truth, tally):
         no_ball = line.startswith("no ball")

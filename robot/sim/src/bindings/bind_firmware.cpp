@@ -13,6 +13,7 @@
 #include "hardware/motor/Motors.h"
 #include "hardware/sensors/Button.h"
 #include "hardware/sensors/GPort.h"
+#include "hardware/sensors/IRRing.h"
 #include "hardware/sensors/LineSensor.h"
 #include "hardware/sensors/pos/Accelerometer.h"
 #include "hardware/sensors/pos/Compass.h"
@@ -221,6 +222,14 @@ void bind_firmware(py::module_& m) {
     py::class_<GPort>(m, "GPort")
         .def(py::init<>())
         .def("begin", py::overload_cast<const GPortHardware&, GSensorKind>(&GPort::begin), py::keep_alive<1, 2>())
+        .def("begin_timed",
+             [](GPort& p, const GPortHardware& hw, const GSensorKind kind, const uint32_t sampleRateHz,
+                const uint32_t modulationHz, const uint8_t adcSampleTime) {
+                 return p.begin(hw, kind, GPortTiming{sampleRateHz, modulationHz, adcSampleTime});
+             },
+             py::arg("hw"), py::arg("kind"), py::arg("sampleRateHz"), py::arg("modulationHz") = 0,
+             py::arg("adcSampleTime") = 4, py::keep_alive<1, 2>())
+        .def("hasBegun", &GPort::hasBegun)
         .def("setLineOrder", [](GPort& p, const std::vector<LineColor>& order) {
             if (order.size() != 4) throw py::value_error("4 colours");
             p.setLineOrder(order.data());
@@ -246,6 +255,51 @@ void bind_firmware(py::module_& m) {
             return py::cast(f);
         });
     m.attr("GPORT_SENSORS") = GPort::SENSORS;
+
+    m.attr("G_TIMING_IR_HZ") = G_TIMING_IR.sampleRateHz;
+
+    py::class_<IRConfig>(m, "IRConfig")
+        .def(py::init<>())
+        .def_readwrite("sensors", &IRConfig::sensors)
+        .def_readwrite("baselineCode", &IRConfig::baselineCode)
+        .def_readwrite("kCm", &IRConfig::kCm)
+        .def_readwrite("clipCode", &IRConfig::clipCode)
+        .def_readwrite("mountRadiusCm", &IRConfig::mountRadiusCm)
+        .def_readwrite("cosPower", &IRConfig::cosPower)
+        .def_readwrite("minAmp", &IRConfig::minAmp)
+        .def_readwrite("minNeighbourAmp", &IRConfig::minNeighbourAmp)
+        .def_readwrite("maxCm", &IRConfig::maxCm);
+
+    py::class_<BallReading>(m, "BallReading")
+        .def_readonly("seen", &BallReading::seen)
+        .def_readonly("clipped", &BallReading::clipped)
+        .def_readonly("angle", &BallReading::angle)
+        .def_readonly("distanceCm", &BallReading::distanceCm)
+        .def_readonly("sensorDistanceCm", &BallReading::sensorDistanceCm)
+        .def_property_readonly("position", [](const BallReading& r) { return std::make_pair(r.position.x, r.position.y); })
+        .def_readonly("peakAmp", &BallReading::peakAmp)
+        .def_readonly("peakSensor", &BallReading::peakSensor)
+        .def_readonly("contributors", &BallReading::contributors)
+        .def_readonly("confidence", &BallReading::confidence);
+
+    py::class_<IRRing>(m, "IRRing")
+        .def(py::init<const GPort&, const IRConfig&>(), py::arg("port"), py::arg("config") = IRConfig{},
+             py::keep_alive<1, 2>())
+        .def("ready", &IRRing::ready)
+        .def("update", &IRRing::update)
+        .def("ball", &IRRing::ball)
+        .def("getBallPosition", [](const IRRing& r) {
+            const VectorXY v = r.getBallPosition();
+            return std::make_pair(v.x, v.y);
+        })
+        .def("raw", [](const IRRing& r) { return std::vector<uint16_t>(r.raw(), r.raw() + GPort::SENSORS); })
+        .def("config", &IRRing::config)
+        .def_static("sensorAngle", &IRRing::sensorAngle)
+        .def_static("sensorDistanceCm", &IRRing::sensorDistanceCm)
+        .def_static("estimate", [](const std::vector<uint16_t>& frame, const IRConfig& cfg) {
+            if (frame.size() != GPort::SENSORS) throw py::value_error("16 values");
+            return IRRing::estimate(frame.data(), cfg);
+        }, py::arg("frame"), py::arg("config") = IRConfig{});
 
     py::class_<LineSensor>(m, "LineSensor")
         .def(py::init<GPort&>(), py::keep_alive<1, 2>())

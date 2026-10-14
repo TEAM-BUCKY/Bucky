@@ -16,7 +16,7 @@ from types import ModuleType
 
 import numpy as np
 
-from bucky.firmware import frames, sensors
+from bucky.firmware import frames, ir_ball, sensors
 from bucky.firmware.kinematics import MotorModel, wheel_rim_speeds
 
 
@@ -25,7 +25,8 @@ class RobotHardwareConfig:
     compass: sensors.CompassModel = field(default_factory=sensors.CompassModel)
     accel: sensors.AccelModel = field(default_factory=sensors.AccelModel)
     sonar: sensors.SonarModel = field(default_factory=sensors.SonarModel)
-    ir: sensors.IRModel = field(default_factory=sensors.IRModel)
+    #: IR ball + ring optics + analog front end (time-domain, see :mod:`.ir_ball`).
+    ir: ir_ball.IRRingModel = field(default_factory=ir_ball.IRRingModel)
     line: sensors.LineModel = field(default_factory=sensors.LineModel)
     encoders: sensors.EncoderModel = field(default_factory=sensors.EncoderModel)
     motors: MotorModel = field(default_factory=MotorModel)
@@ -43,8 +44,9 @@ class RobotTruth:
     omega: float = 0.0
     accel_mps2: np.ndarray = field(default_factory=lambda: np.zeros(2))   # world frame
     ball_m: np.ndarray | None = None
+    ball_vel_mps: np.ndarray = field(default_factory=lambda: np.zeros(2))
     ball_visible: bool = True
-    robots: tuple = ()                    # other robots' centres (sonar obstacles)
+    robots: tuple = ()                    # other robots' centres (sonar and IR obstacles)
 
 
 @dataclass
@@ -59,11 +61,11 @@ class SimHardware:
     def __init__(self, fw: ModuleType, config: RobotHardwareConfig | None = None,
                  rng: np.random.Generator | None = None) -> None:
         self.fw = fw
-        self.cfg = config or RobotHardwareConfig()
         self.rng = rng
         dev = fw.devices
         ir = int(fw.GSensorKind.IR)
         self.ir_board = dev.gport1 if fw.board.G_PORT1_KIND == ir else dev.gport2
+        self.cfg = config or RobotHardwareConfig()
         line = int(fw.GSensorKind.Line)
         self.line_board = dev.gport1 if fw.board.G_PORT1_KIND == line else dev.gport2
         self.line_board.led_order = list(self.cfg.line_led_order)
@@ -72,6 +74,20 @@ class SimHardware:
         self.set_heading(0.0)
         self.set_accel((0.0, 0.0))
         self.set_ir(None)
+
+    @property
+    def cfg(self) -> RobotHardwareConfig:
+        return self._cfg
+
+    @cfg.setter
+    def cfg(self, config: RobotHardwareConfig) -> None:
+        """Changing the config re-programs the IR board's front end."""
+        self._cfg = config
+        seed = int(self.rng.integers(2**63)) if self.rng is not None else 0
+        config.ir.push(self.ir_board.ir, self.rng, seed)
+        self.ir_board.ir.reset()
+        self.ir_board.ir_physical = True
+        self.ir_scene = ir_ball.IRScene(config.ir, self.rng)
 
     # ── individual sensors ────────────────────────────────────────────────────────────────
     def set_heading(self, heading_sim: float) -> np.ndarray:
@@ -90,15 +106,31 @@ class SimHardware:
         self.fw.devices.sonar.echo_us = echo + [math.nan] * (4 - len(echo))
 
     def set_ir(self, ball_bearing_cw: float | None, dist_cm: float = 100.0) -> np.ndarray:
-        """Ball at a robot-frame bearing (rad, CW from front) and distance; None = no ball."""
-        vals = sensors.ir_adc(ball_bearing_cw or 0.0, dist_cm, self.cfg.ir,
-                              visible=ball_bearing_cw is not None, rng=self.rng)
-        values = self.ir_board.values
-        values[0] = [int(v) for v in vals]
-        self.ir_board.values = values
-        return vals
+        """Ball at a robot-frame bearing (rad, CW from front) and distance from the robot centre
+        (cm); None = no ball. Robot at the origin, heading 0, nothing in the way. Returns the
+        steady-state codes (the board's real samples also droop and reset in time)."""
+        if ball_bearing_cw is None:
+            return self.set_ir_scene((0.0, 0.0), 0.0, None)
+        rel = frames.fw_body_to_sim_body(
+            (math.sin(ball_bearing_cw) * dist_cm / 100.0, math.cos(ball_bearing_cw) * dist_cm / 100.0))
+        return self.set_ir_scene((0.0, 0.0), 0.0, rel)
+
+    def set_ir_scene(self, robot_m, heading: float, ball_m, ball_vel=(0.0, 0.0), *, robots=(),
+                     visible: bool = True, dt: float = 0.0) -> np.ndarray:
+        """Physical IR scene (sim frame): the ring's photocurrents go to the board's front end,
+        effective from now. ``dt`` rolls the ball's LEDs on by that much time."""
+        i_on = self.ir_scene.update(robot_m, heading, ball_m, ball_vel, robots=robots,
+                                    visible=visible and ball_m is not None, dt=dt)
+        self.ir_board.ir.set_drive([float(v) for v in i_on])
+        self.ir_board.ir_physical = True
+        m = self.cfg.ir
+        codes = m.front_end.code_of(i_on, m.ball.carrier_hz)
+        codes[m.n_sensors:] = 0
+        return codes
 
     def set_ir_raw(self, values16) -> None:
+        """Fixed ADC codes per physical sensor, bypassing the IR physics."""
+        self.ir_board.ir_physical = False
         values = self.ir_board.values
         values[0] = [int(v) for v in values16]
         self.ir_board.values = values
@@ -117,7 +149,11 @@ class SimHardware:
         self.fw.sim.schedule_input(p, 0, t0 + int(hold_ms * 1e6))
 
     # ── everything at once ────────────────────────────────────────────────────────────────
-    def apply_truth(self, t: RobotTruth) -> dict:
+    def apply_ir_truth(self, t: RobotTruth, dt: float = 0.0) -> np.ndarray:
+        return self.set_ir_scene(t.pos_m, t.heading, t.ball_m, t.ball_vel_mps, robots=t.robots,
+                                 visible=t.ball_visible, dt=dt)
+
+    def apply_truth(self, t: RobotTruth, ir_dt: float = 0.0) -> dict:
         """Push the readings every sensor would produce for ``t`` into the simulated chips.
         Returns them (for logging / the viewer)."""
         cfg = self.cfg
@@ -131,11 +167,7 @@ class SimHardware:
         self.set_sonar_cm(dist)
         out["sonar_cm"] = dist
 
-        if t.ball_m is not None and t.ball_visible:
-            bearing, d = frames.fw_bearing(t.ball_m, t.pos_m, t.heading)
-            out["ir"] = self.set_ir(bearing, d)
-        else:
-            out["ir"] = self.set_ir(None)
+        out["ir"] = self.apply_ir_truth(t, ir_dt)
 
         line = sensors.line_adc(t.pos_m, t.heading, cfg.line, self.rng)
         self.set_line_raw(line)

@@ -42,7 +42,9 @@ def draw_perception(screen, font, world, perceived) -> None:
     # IR ring (what the firmware's IR port holds right now).
     ir = g.irPort().readIR()
     if ir is not None:
-        amp = np.clip((np.asarray(ir[:12], float) - world.cfg.ir.baseline) / 600.0, 0, 1)
+        m = world.cfg.ir
+        amp = np.clip(np.sqrt(np.maximum(np.asarray(ir[:12], float) - m.baseline, 0)
+                              / (m.clip_code - m.baseline)), 0, 1)
         for k in range(12):
             x, y = _polar(math.radians(30 * k), ROBOT_R_CM + 4)
             pygame.draw.circle(screen, C.lerp(C.IR_OFF, C.IR_MAX, amp[k]), (round(x), round(y)), 6)

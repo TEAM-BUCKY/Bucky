@@ -140,7 +140,10 @@ def sonar_echo_us(distances_cm, m: SonarModel = SonarModel()) -> list[float]:
 
 @dataclass(frozen=True)
 class IRModel:
-    """IR ring as testIRPositioning reads it: sensor k looks k·``angle_step_deg`` clockwise from
+    """LEGACY heuristic, superseded by :mod:`bucky.firmware.ir_ball` (the physical, time-domain
+    model SimHardware uses). Kept for quick static experiments.
+
+    IR ring as testIRPositioning reads it: sensor k looks k·``angle_step_deg`` clockwise from
     the front; idle level ``baseline``; a ball at distance d adds (``range_k`` / d)² to the
     sensor facing it — so the firmware's ``range = 700 / sqrt(peak)`` estimate is exact on the
     peak sensor — falling off as cos^``cos_power`` of the angle off-axis, plus ``crosstalk`` of

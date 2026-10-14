@@ -50,6 +50,23 @@ def ray_cast(pos, direction, *, circles=(), max_range: float = math.inf) -> floa
     return min(t, max_range)
 
 
+def segments_hit_circles(p0, p1, centers, radius: float) -> np.ndarray:
+    """Whether each segment p0[i] → p1[i] (N, 2) passes through any circle of ``radius`` around
+    ``centers`` (M, 2). The segment's own endpoints don't count (a point on a rim is free)."""
+    p0 = np.atleast_2d(np.asarray(p0, float))
+    p1 = np.atleast_2d(np.asarray(p1, float))
+    c = np.asarray(centers, float).reshape(-1, 2)
+    if len(c) == 0:
+        return np.zeros(len(p0), dtype=bool)
+    d = p1 - p0                                                  # (N, 2)
+    dd = np.maximum(np.einsum("ij,ij->i", d, d), 1e-18)[:, None]
+    t = np.einsum("ijk,ik->ij", c[None, :, :] - p0[:, None, :], d) / dd    # (N, M)
+    t = np.clip(t, 1e-6, 1.0 - 1e-6)
+    closest = p0[:, None, :] + t[..., None] * d[:, None, :]
+    dist2 = np.sum((closest - c[None, :, :]) ** 2, axis=-1)
+    return np.any(dist2 < radius * radius, axis=1)
+
+
 def surface_at(points, line_width: float = LINE_WIDTH) -> np.ndarray:
     """Surface id under each point (N, 2) in the sim frame: :data:`WHITE` on the playfield's
     boundary line (``line_width`` wide, inside the playfield edge), else :data:`GREEN`."""

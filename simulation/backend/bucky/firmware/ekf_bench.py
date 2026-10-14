@@ -215,9 +215,11 @@ class EkfBench:
         if p.use_ir and self.ir.hasNewFrame(self.ir_seq):
             self.ir_seq = self.ir.frameSequence()
             frame = self.ir.readIR()
-            meas = glue.ir_bearing_range(frame, baseline=self.cfg.ir.baseline,
-                                         range_k=self.cfg.ir.range_k,
-                                         n_sensors=self.cfg.ir.n_sensors) if frame else None
+            ir = self.cfg.ir
+            meas = glue.ir_bearing_range(frame, baseline=ir.baseline, range_k=ir.range_k,
+                                         n_sensors=ir.n_sensors,
+                                         mount_radius_cm=ir.geometry.mount_radius_m * 100.0,
+                                         cos_power=ir.geometry.cos_power) if frame else None
             if meas is not None:
                 ekf.updateBall(*meas)
                 self.counts["ir"] += 1
@@ -393,7 +395,7 @@ class EkfTracking(Experiment):
                 except np.linalg.LinAlgError:
                     pass
                 # Ball error only while the IR ring can see the ball (see sensor_check).
-                in_range = math.hypot(*(tru[BX:BY + 1] - tru[:2])) <= ex.cfg.ir.range_k / 10.0
+                in_range = math.hypot(*(tru[BX:BY + 1] - tru[:2])) <= ex.cfg.ir.max_range_cm()
                 ball_steps += 1
                 if in_range:
                     ball_visible += 1

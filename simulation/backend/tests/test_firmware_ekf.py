@@ -712,7 +712,6 @@ class TestIRBall:
     @pytest.mark.parametrize("bearing_deg", [0.0, 40.0, -75.0])
     def test_pipeline_from_the_chip(self, sim, hw, bearing_deg):
         """IR ring → G port (mux, ADC, DMA) → GPort::readIR → glue → updateBall."""
-        hw.cfg = type(hw.cfg)(ir=sensors.IRModel(noise=0.0))
         robot, th, dist = np.array([20.0, -30.0]), math.radians(25), 45.0
         hw.set_ir(math.radians(bearing_deg), dist)
         port = sim.GPort()
