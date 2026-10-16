@@ -12,19 +12,9 @@
 #include "optimizations/bitboard.h"
 #include "optimizations/optimizations.h"
 
-#if !defined(HRTIM1)
-typedef struct HrtimTimerUnavailable HRTIM_Timerx_TypeDef;
-#endif
-
 #define PWM_SYNC_MAX_PINS   8
 #define PWM_SYNC_MAX_TIMERS 4
 #define PWM_SYNC_NONE       0xFF
-
-enum : uint8_t {
-    PWM_BACKEND_NONE = 0,
-    PWM_BACKEND_TIM = 1,
-    PWM_BACKEND_HRTIM = 2,
-};
 
 typedef struct {
     TIM_TypeDef *timer;
@@ -33,69 +23,11 @@ typedef struct {
     uint8_t syncIndex;
     uint8_t complementary;
     PinName mappedPin;
-    HRTIM_Timerx_TypeDef *hrtimTimer;
-    uint16_t hrtimOutputEnableMask;
-    uint32_t hrtimCounterEnableMask;
-    uint8_t backend;
 } PwmPin;
-
-#if defined(HRTIM1)
-// All motor PWM pins are routed through HRTIM1 so the three timers (A/C/F) share
-// one clocking/DLL setup and can be synchronised. The core pin map does not
-// list HRTIM, so every pin carries its own timer + bit masks and is routed to
-// AF13 directly.
-typedef struct {
-    PinName pin;
-    HRTIM_Timerx_TypeDef *timer;
-    uint8_t channel;                    // 0 = CHx1, 1 = CHx2
-    uint16_t outputEnableMask;          // OENR bit for this output
-    uint32_t counterEnableMask;         // MCR bit that starts the owning timer
-} HrtimMotorPinInfo;
-
-static const HrtimMotorPinInfo hrtim_motor_pins[] = {
-    {PA_8,  HRTIM1_TIMA, 0, HRTIM_OENR_TA1OEN, HRTIM_MCR_TACEN},
-    {PA_9,  HRTIM1_TIMA, 1, HRTIM_OENR_TA2OEN, HRTIM_MCR_TACEN},
-    {PB_12, HRTIM1_TIMC, 0, HRTIM_OENR_TC1OEN, HRTIM_MCR_TCCEN},
-    {PB_13, HRTIM1_TIMC, 1, HRTIM_OENR_TC2OEN, HRTIM_MCR_TCCEN},
-    {PC_6,  HRTIM1_TIMF, 0, HRTIM_OENR_TF1OEN, HRTIM_MCR_TFCEN},
-    {PC_7,  HRTIM1_TIMF, 1, HRTIM_OENR_TF2OEN, HRTIM_MCR_TFCEN},
-    {NC, nullptr, 0, 0, 0}
-};
-
-static FORCE_INLINE const HrtimMotorPinInfo *hrtim_motor_lookup(const PinName pn)
-{
-    for (const HrtimMotorPinInfo *e = hrtim_motor_pins; e->pin != NC; e++) {
-        if (e->pin == pn) return e;
-    }
-    return nullptr;
-}
-
-// If CMP >= PER the reset event either never fires or ties with the period-set
-// event (reset wins on HRTIM -> 0% duty). Push CMP above PER so the compare
-// never triggers and the output stays HIGH.
-static FORCE_INLINE uint32_t hrtim_clamp_compare(const PwmPin *pw, const uint32_t value)
-{
-    const uint32_t per = pw->hrtimTimer->PERxR;
-    return value >= per ? per + 1U : value;
-}
-
-// CMP=0 is below the HRTIM minimum (3 ticks), so the compare event never fires
-// and the output would stay HIGH: disable the output instead to force it LOW.
-static FORCE_INLINE void hrtim_write_output(volatile uint32_t *ccr, const uint16_t outputMask, const uint32_t value)
-{
-    if (value == 0U) {
-        setMask(HRTIM1->sCommonRegs.ODISR, outputMask);
-    } else {
-        *ccr = value;
-        setMask(HRTIM1->sCommonRegs.OENR, outputMask);
-    }
-}
-#endif
 
 typedef struct {
     volatile uint32_t *ccr;
     uint32_t value;
-    uint16_t hrtimOutputEnableMask;
 } PwmStagedPin;
 
 typedef struct {
@@ -130,26 +62,11 @@ static FORCE_INLINE PwmPin pwm_pin_from_map(const PinName mappedPin, TIM_TypeDef
     pw.complementary = complementary;
     pw.mappedPin = mappedPin;
     pw.ccr = tim_ccr(timer, channel);
-    pw.backend = PWM_BACKEND_TIM;
     return pw;
 }
 
 static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
 {
-#if defined(HRTIM1)
-    if (const HrtimMotorPinInfo *info = hrtim_motor_lookup(pn); info != nullptr) {
-        PwmPin pw = pwm_pin_none();
-        pw.hrtimTimer = info->timer;
-        pw.channel = info->channel;
-        pw.mappedPin = pn;
-        pw.ccr = (info->channel == 0U) ? &info->timer->CMP1xR : &info->timer->CMP2xR;
-        pw.hrtimOutputEnableMask = info->outputEnableMask;
-        pw.hrtimCounterEnableMask = info->counterEnableMask;
-        pw.backend = PWM_BACKEND_HRTIM;
-        return pw;
-    }
-#endif
-
     uint8_t channel = 0;
     bool complementary = false;
     TIM_TypeDef *timer = tim_from_pin(pn, &channel, &complementary);
@@ -162,12 +79,6 @@ static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
 static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
 {
     const PinName pn = digitalPinToPinName(pin);
-
-#if defined(HRTIM1)
-    if (hrtim_motor_lookup(pn) != nullptr) {
-        return pwm_pin_init(pn);
-    }
-#endif
 
     const PinMap *bestEntry = nullptr;
     bool bestAdvanced = false;
@@ -192,38 +103,6 @@ static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
                             STM_PIN_INVERTED(bestEntry->function));
 }
 
-#if defined(HRTIM1)
-static FORCE_INLINE void pwm_init_hrtim(const PwmPin *pw, const uint32_t resolution)
-{
-    __HAL_RCC_HRTIM1_CLK_ENABLE();
-
-    // HRTIM cannot drive its outputs until the DLL is calibrated. Do the
-    // one-shot calibration + enable periodic recalibration the first time
-    // any HRTIM pin is initialised.
-    if ((HRTIM1->sCommonRegs.DLLCR & HRTIM_DLLCR_CALEN) == 0U) {
-        HRTIM1->sCommonRegs.DLLCR = HRTIM_DLLCR_CALEN | HRTIM_DLLCR_CAL;
-        while ((HRTIM1->sCommonRegs.ISR & HRTIM_ISR_DLLRDY) == 0U) {}
-        HRTIM1->sCommonRegs.ICR = HRTIM_ICR_DLLRDYC;
-    }
-
-    pw->hrtimTimer->TIMxCR = (pw->hrtimTimer->TIMxCR & ~HRTIM_TIMCR_CK_PSC) | HRTIM_TIMCR_CONT;
-    pw->hrtimTimer->PERxR = resolution;
-
-    if (pw->channel == 0U) {
-        pw->hrtimTimer->SETx1R = HRTIM_SET1R_PER;
-        pw->hrtimTimer->RSTx1R = HRTIM_RST1R_CMP1;
-    } else {
-        pw->hrtimTimer->SETx2R = HRTIM_SET2R_PER;
-        pw->hrtimTimer->RSTx2R = HRTIM_RST2R_CMP2;
-    }
-
-    *pw->ccr = 0;
-    setMask(HRTIM1->sMasterRegs.MCR, pw->hrtimCounterEnableMask);
-
-    pin_function(pw->mappedPin, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_PULLUP, GPIO_AF13_HRTIM1));
-}
-#endif
-
 static FORCE_INLINE void pwm_init(const PwmPin *pw, const uint32_t freq, const uint32_t resolution)
 {
     if (pw->ccr == nullptr) {
@@ -231,13 +110,6 @@ static FORCE_INLINE void pwm_init(const PwmPin *pw, const uint32_t freq, const u
     }
 
     gpio_hold_low(pw->mappedPin);   // until the timer takes the pad over
-
-#if defined(HRTIM1)
-    if (pw->backend == PWM_BACKEND_HRTIM) {
-        pwm_init_hrtim(pw, resolution);
-        return;
-    }
-#endif
 
     TIM_TypeDef *tim = pw->timer;
     tim_clock_enable(tim);
@@ -259,12 +131,6 @@ static FORCE_INLINE void pwm_write(const PwmPin *pw, const uint32_t value)
     if (pw->ccr == nullptr) {
         return;
     }
-#if defined(HRTIM1)
-    if (pw->backend == PWM_BACKEND_HRTIM) {
-        hrtim_write_output(pw->ccr, pw->hrtimOutputEnableMask, hrtim_clamp_compare(pw, value));
-        return;
-    }
-#endif
     *pw->ccr = value;
 }
 
@@ -276,7 +142,7 @@ static FORCE_INLINE void pwm_sync_register(PwmPin *pw)
 
     if (pwm_sync.pinCount < PWM_SYNC_MAX_PINS) {
         pw->syncIndex = pwm_sync.pinCount;
-        pwm_sync.pins[pwm_sync.pinCount] = {pw->ccr, 0, pw->hrtimOutputEnableMask};
+        pwm_sync.pins[pwm_sync.pinCount] = {pw->ccr, 0};
         pwm_sync.pinCount++;
     }
 
@@ -316,13 +182,7 @@ static FORCE_INLINE void pwm_stage(const PwmPin *pw, const uint32_t value)
     if (pw->syncIndex == PWM_SYNC_NONE) {
         return;
     }
-    uint32_t staged = value;
-#if defined(HRTIM1)
-    if (pw->backend == PWM_BACKEND_HRTIM) {
-        staged = hrtim_clamp_compare(pw, value);
-    }
-#endif
-    pwm_sync.pins[pw->syncIndex].value = staged;
+    pwm_sync.pins[pw->syncIndex].value = value;
     setBit(pwm_sync.dirtyPins, pw->syncIndex);
 }
 
@@ -333,12 +193,6 @@ static FORCE_INLINE void pwm_commit()
     uint8_t dirty = pwm_sync.dirtyPins;
     Bitloop(dirty) {
         const PwmStagedPin &pin = pwm_sync.pins[getLSB(dirty)];
-#if defined(HRTIM1)
-        if (pin.hrtimOutputEnableMask != 0) {
-            hrtim_write_output(pin.ccr, pin.hrtimOutputEnableMask, pin.value);
-            continue;
-        }
-#endif
         *pin.ccr = pin.value;
     }
     pwm_sync.dirtyPins = 0;

@@ -4,23 +4,14 @@
 
 void adc_clock_enable(const ADC_TypeDef* adc)
 {
-#if defined(MCU_FAMILY_G4)
-    if (adc == ADC1 || adc == ADC2) __HAL_RCC_ADC12_CLK_ENABLE();
-    else                            __HAL_RCC_ADC345_CLK_ENABLE();
-#elif defined(MCU_FAMILY_H5)
     (void)adc;
     __HAL_RCC_ADC_CLK_ENABLE();
-#endif
 }
 
 ADC_Common_TypeDef* adc_common(const ADC_TypeDef* adc)
 {
-#if defined(MCU_FAMILY_G4)
-    return (adc == ADC1 || adc == ADC2) ? ADC12_COMMON : ADC345_COMMON;
-#else
     (void)adc;
     return ADC12_COMMON;
-#endif
 }
 
 void adc_set_sync_clock(const ADC_TypeDef* adc, const uint32_t ckmode)

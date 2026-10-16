@@ -54,6 +54,8 @@ void setupEnvironment() {
     host.begin();
     cordic_init();
 
+    delay(3000);
+
 
     i2c_dma_init<Board::SENSOR_I2C_FREQ>(&sensorI2C, Board::SENSOR_I2C.instance,
                                          Board::SENSOR_I2C.sda, Board::SENSOR_I2C.scl,

@@ -16,7 +16,7 @@ struct EncoderPins {
 enum class EncoderBackend : uint8_t {
     None,
     Timer,   // hardware quadrature: A/B on CH1/CH2 of the same timer
-    Exti,    // fallback for pads without a timer pair (G474 board)
+    Exti,    // fallback for pads without a timer pair
 };
 
 struct EncoderState {

@@ -78,7 +78,8 @@ class Compass
         [[nodiscard]] int16_t getRawZ() const { return lastRawZ; }
         void setCalibration(float ox, float oy, float oz, float sx, float sy, float sz);
         float computeRotation(float targetDegrees);
-        void setPD(float kp, float kd, float maxRotation, float deadzone);
+
+        void setPD(float newKp, float newKd, float newMaxRotation, float newDeadzone);
         void reset();
 };
 

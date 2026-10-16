@@ -79,47 +79,6 @@ typedef struct {
 static ExtiSlot exti_slots[16];
 static uint16_t exti_used = 0;
 
-#if defined(MCU_FAMILY_G4)
-
-static IRQn_Type exti_irqn(const uint8_t line)
-{
-    if (line <= 4)  return (IRQn_Type)(EXTI0_IRQn + line);
-    if (line <= 9)  return EXTI9_5_IRQn;
-    return EXTI15_10_IRQn;
-}
-
-/* One dispatcher per vector; ctx carries the mask of lines that vector owns. */
-static void exti_dispatch(void* ctx)
-{
-    uint32_t pending = EXTI->PR1 & EXTI->IMR1 & (uint32_t)(uintptr_t)ctx;
-    EXTI->PR1 = pending;
-    Bitloop(pending) {
-        const ExtiSlot* s = &exti_slots[getLSB(pending)];
-        if (s->handler) s->handler(s->ctx);
-    }
-}
-
-static uint32_t exti_dispatch_ctx(const uint8_t line)
-{
-    if (line <= 4) return 1UL << line;
-    if (line <= 9) return 0x03E0UL;
-    return 0xFC00UL;
-}
-
-static void exti_select_port(const uint8_t line, const uint8_t port)
-{
-    setMask(RCC->APB2ENR, RCC_APB2ENR_SYSCFGEN);
-    __DSB();
-    writeField(SYSCFG->EXTICR[line >> 2], 0xFU, (line & 3U) * 4U, port);
-}
-
-static void exti_clear_pending(const uint32_t bit)
-{
-    EXTI->PR1 = bit;
-}
-
-#elif defined(MCU_FAMILY_H5)
-
 static IRQn_Type exti_irqn(const uint8_t line)
 {
     return (IRQn_Type)(EXTI0_IRQn + line);
@@ -139,17 +98,10 @@ static void exti_dispatch(void* ctx)
     if (s->handler) s->handler(s->ctx);
 }
 
-static uint32_t exti_dispatch_ctx(const uint8_t line)
-{
-    return line;
-}
-
 static void exti_select_port(const uint8_t line, const uint8_t port)
 {
     writeField(EXTI->EXTICR[line >> 2], 0xFFU, (line & 3U) * 8U, port);
 }
-
-#endif
 
 bool exti_line_free(const PinName pin)
 {
@@ -187,7 +139,7 @@ bool exti_attach(const PinName pin, const ExtiEdge edge, const IrqHandler handle
 
     irq_restore(primask);
 
-    irq_attach(exti_irqn(line), exti_dispatch, (void*)(uintptr_t)exti_dispatch_ctx(line), priority);
+    irq_attach(exti_irqn(line), exti_dispatch, (void*)(uintptr_t)line, priority);
     return true;
 }
 
@@ -206,8 +158,5 @@ void exti_detach(const PinName pin)
     exti_slots[line].ctx     = NULL;
     clearBit(exti_used, line);
 
-#if defined(MCU_FAMILY_G4)
-    if (exti_used & exti_dispatch_ctx(line)) return;
-#endif
     irq_detach(exti_irqn(line));
 }

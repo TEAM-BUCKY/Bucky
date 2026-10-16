@@ -1,89 +1,5 @@
 #include "DMA.h"
 
-#if defined(MCU_FAMILY_G4)
-
-/* ---------------------------------------------------------------- G4 ----- */
-
-typedef struct {
-    DMA_TypeDef* dma;
-    uint8_t      index;   /* 0-based channel index within its controller */
-    uint8_t      mux;     /* DMAMUX1 output channel */
-} ChannelInfo;
-
-static ChannelInfo channel_info(const DmaChannel* ch)
-{
-    ChannelInfo info;
-    const uintptr_t addr = (uintptr_t)ch;
-    const bool second = addr >= DMA2_Channel1_BASE;
-    info.dma   = second ? DMA2 : DMA1;
-    info.index = (uint8_t)((addr - (second ? DMA2_Channel1_BASE : DMA1_Channel1_BASE)) / 0x14U);
-    info.mux   = (uint8_t)(info.index + (second ? 8U : 0U));
-    return info;
-}
-
-static void dma_clock_enable(const ChannelInfo* info)
-{
-    setMask(RCC->AHB1ENR, (info->dma == DMA1 ? RCC_AHB1ENR_DMA1EN : RCC_AHB1ENR_DMA2EN)
-                          | RCC_AHB1ENR_DMAMUX1EN);
-    __DSB();
-}
-
-void dma_reset(DmaChannel* ch)
-{
-    const ChannelInfo info = channel_info(ch);
-    dma_clock_enable(&info);
-    ch->CCR = 0;
-    info.dma->IFCR = 0xFUL << (info.index * 4U);
-}
-
-void dma_setup(DmaChannel* ch, const DmaDirection dir, const DmaWidth width,
-               volatile void* periph_addr, volatile void* mem_addr,
-               const uint32_t count, const uint32_t request, const bool circular)
-{
-    const ChannelInfo info = channel_info(ch);
-    dma_reset(ch);
-
-    ch->CPAR  = (uint32_t)periph_addr;
-    ch->CMAR  = (uint32_t)mem_addr;
-    ch->CNDTR = count;
-    ch->CCR   = DMA_CCR_MINC
-              | (dir == DMA_MEM_TO_PERIPH ? DMA_CCR_DIR : 0U)
-              | (circular ? DMA_CCR_CIRC : 0U)
-              | (uint32_t)width << DMA_CCR_MSIZE_Pos
-              | (uint32_t)width << DMA_CCR_PSIZE_Pos;
-
-    ((DMAMUX_Channel_TypeDef*)(DMAMUX1_Channel0_BASE + info.mux * 4U))->CCR = request;
-}
-
-uint32_t dma_remaining(const DmaChannel* ch)
-{
-    return ch->CNDTR;
-}
-
-uint32_t dma_take_events(DmaChannel* ch)
-{
-    const ChannelInfo info = channel_info(ch);
-    const uint32_t shift = info.index * 4U;
-    const uint32_t isr = info.dma->ISR >> shift;
-    uint32_t events = 0;
-    if (isr & DMA_ISR_TCIF1) events |= DMA_EVT_TC;
-    if (isr & DMA_ISR_HTIF1) events |= DMA_EVT_HT;
-    info.dma->IFCR = (isr & (DMA_ISR_TCIF1 | DMA_ISR_HTIF1 | DMA_ISR_TEIF1)) << shift;
-    return events;
-}
-
-IRQn_Type dma_irqn(const DmaChannel* ch)
-{
-    const ChannelInfo info = channel_info(ch);
-    if (info.dma == DMA1)
-        return info.index < 7U ? (IRQn_Type)(DMA1_Channel1_IRQn + info.index) : DMA1_Channel8_IRQn;
-    return info.index < 5U ? (IRQn_Type)(DMA2_Channel1_IRQn + info.index)
-                           : (IRQn_Type)(DMA2_Channel6_IRQn + (info.index - 5U));
-}
-
-#elif defined(MCU_FAMILY_H5)
-
-
 #define GPDMA_CHANNELS  8U
 
 typedef struct {
@@ -175,10 +91,6 @@ IRQn_Type dma_irqn(const DmaChannel* ch)
     const ChannelInfo info = channel_info(ch);
     return (IRQn_Type)((info.second ? GPDMA2_Channel0_IRQn : GPDMA1_Channel0_IRQn) + info.index);
 }
-
-#endif
-
-/* ------------------------------------------------------------ common ----- */
 
 void dma_enable(DmaChannel* ch)
 {

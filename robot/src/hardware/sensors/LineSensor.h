@@ -58,7 +58,7 @@ private:
 
     bool beginShow();
     void endShow();
-    void showPeriod(LineRGB color);
+    void showPeriod(LineRGB color) const;
     bool waitFrame(uint32_t timeoutMs);
 };
 

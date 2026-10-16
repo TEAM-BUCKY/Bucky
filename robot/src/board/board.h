@@ -7,9 +7,7 @@
 
 #include "hardware/io/mcu.h"
 
-#if defined(MCU_FAMILY_G4)
-#include "board_g474re.h"
-#elif defined(MCU_FAMILY_H5)
+#if defined(MCU_FAMILY_H5)
 #include "board_h562rg.h"
 #endif
 

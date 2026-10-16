@@ -32,25 +32,6 @@ static void echoISR(void* ctx) {
     }
 }
 
-static void pa10CaptureCallback() {
-    const uint32_t captured = TIM1->CCR3;
-    if ((GPIOA->IDR & (1u << 10)) != 0) {
-        riseTime[0] = captured;
-    } else {
-        duration[0] = static_cast<uint16_t>(captured - riseTime[0]);
-        done[0] = true;
-    }
-}
-
-static void setupPA10TimerCapture() {
-    static HardwareTimer tim1(TIM1);
-    tim1.setMode(3, TIMER_INPUT_CAPTURE_BOTHEDGE, PA_10);
-    tim1.setPrescaleFactor(tim1.getTimerClkFreq() / 1'000'000u);
-    tim1.setOverflow(0xFFFFu, TICK_FORMAT);
-    tim1.attachInterrupt(3, pa10CaptureCallback);
-    tim1.resume();
-}
-
 void Sonar::begin(const SonarPins& pins) {
     trigGpio = gpio_pin_init(pins.trigPin);
     gpio_mode(trigGpio, OUTPUT);
@@ -62,15 +43,6 @@ void Sonar::begin(const SonarPins& pins) {
 
         echoGpio[i] = gpio_pin_init(echoPinNames[i]);
         gpio_mode(echoGpio[i], INPUT);
-
-        if (echoPinNames[i] != PA_10)
-            attachEcho(echoPinNames[i], i);
-    }
-
-    for (int i = 0; i < SONAR_COUNT; i++) {
-        if (echoPinNames[i] != PA_10) continue;
-        if (!attachEcho(PA_10, i))
-            setupPA10TimerCapture();
     }
 }
 

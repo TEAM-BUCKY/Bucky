@@ -87,7 +87,7 @@ void LineSensor::endShow() {
 
 // One full frame (4 sweeps x 16 steps), starting and ending at the first
 // sweep. Each colour sweep lasts in proportion to its level; Dark takes the rest.
-void LineSensor::showPeriod(const LineRGB color) {
+void LineSensor::showPeriod(const LineRGB color) const {
     const uint8_t level[4] = {color.r, color.g, color.b, 0};   // indexed by LineColor
 
     uint32_t dwell[4];

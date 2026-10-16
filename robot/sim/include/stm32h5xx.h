@@ -5,7 +5,7 @@
  * object. The firmware's inline register code (gpio.h, pwm.h, Timer.h) therefore runs unchanged;
  * the simulator observes the registers lazily, or through the GPIO write hooks for BSRR/ODR.
  *
- * Deliberately NOT defined: CORDIC (cordic.c builds its libm fallback) and HRTIM1 (H5 has none).
+ * Deliberately NOT defined: CORDIC (cordic.c builds its libm fallback).
  * Values that come from the real headers (request numbers, trigger encodings, bit positions)
  * are copied from framework-arduinoststm32 4.21200.0, stm32h562xx.h / stm32h5xx_hal_*.h.
  */

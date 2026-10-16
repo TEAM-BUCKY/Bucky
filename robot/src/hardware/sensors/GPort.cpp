@@ -137,9 +137,9 @@ void GPort::setLineOrder(const LineColor order[4]) {
     for (uint8_t i = 0; i < 4; i++) lineOrder[i] = order[i];
 }
 
-// Due to design constraints the first 8 channels were flipped.
+// Due to design constraints, the first 8 channels were flipped.
 // This is for both the Line Sensor Controller boards and the IR Sensor Controller boards.
-// Every colour sweep goes through the same mux, so the flip repeats each SENSORS samples.
+// Every color sweep goes through the same mux, so the flip repeats each SENSORS samples.
 uint32_t translatePosition(const uint32_t pos) {
     const uint32_t ch = pos % GPort::SENSORS;
     return ch < 8 ? pos - ch + (7 - ch) : pos;

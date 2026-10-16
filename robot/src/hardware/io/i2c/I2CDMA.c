@@ -42,13 +42,6 @@ static void i2c_clock_enable(const I2C_TypeDef* i2c) {
 
 /* Fast-mode Plus needs the 20 mA pad drivers switched on. */
 static void i2c_enable_fmp(const I2C_TypeDef* i2c, const PinName sda, const PinName scl) {
-#if defined(MCU_FAMILY_G4)
-    (void)sda; (void)scl;
-    __HAL_RCC_SYSCFG_CLK_ENABLE();
-    if      (i2c == I2C1) setMask(SYSCFG->CFGR1, SYSCFG_CFGR1_I2C1_FMP);
-    else if (i2c == I2C2) setMask(SYSCFG->CFGR1, SYSCFG_CFGR1_I2C2_FMP);
-    else if (i2c == I2C3) setMask(SYSCFG->CFGR1, SYSCFG_CFGR1_I2C3_FMP);
-#elif defined(MCU_FAMILY_H5)
     (void)i2c;
     __HAL_RCC_SBS_CLK_ENABLE();
     const PinName pins[2] = {sda, scl};
@@ -57,7 +50,6 @@ static void i2c_enable_fmp(const I2C_TypeDef* i2c, const PinName sda, const PinN
         if (pad >= PB_6 && pad <= PB_9)
             setMask(SBS->PMCR, SBS_PMCR_PB6_FMP << (pad - PB_6));
     }
-#endif
 }
 
 static FORCE_INLINE uint32_t i2c_poll_isr(I2C_TypeDef* i2c, const uint32_t flag)

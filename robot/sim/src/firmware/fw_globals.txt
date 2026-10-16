@@ -28,6 +28,5 @@ echoPinNames                        # Sonar.cpp, by Sonar::begin()
 riseTime                            # Sonar.cpp, by Sonar::startRead()
 duration                            # Sonar.cpp, by Sonar::startRead()
 done                                # Sonar.cpp, by Sonar::startRead()
-setupPA10TimerCapture()::tim1       # Sonar.cpp, function static; only on the G474 board (PA_10 echo)
 # compiler runtime
 DW.ref.__gxx_personality_v0

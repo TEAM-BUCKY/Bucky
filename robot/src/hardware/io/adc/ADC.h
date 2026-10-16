@@ -7,13 +7,6 @@
 // so trigger sources come from the family's HAL instead of a hand-typed table.
 #define ADC_EXTSEL_FROM_HAL(trig) (((trig) & ADC_CFGR_EXTSEL_Msk) >> ADC_CFGR_EXTSEL_Pos)
 
-#if defined(MCU_FAMILY_G4)
-// G4 ADC345 trigger numbering, verified on the G474 board (not in the HAL's
-// ADC12-oriented constants).
-#define ADC_EXTSEL_TIM3_TRGO      4
-#define ADC_EXTSEL_TIM4_TRGO      12
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif

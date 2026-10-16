@@ -133,11 +133,11 @@ float Compass::computeRotation(const float targetDegrees) {
     return rotation;
 }
 
-void Compass::setPD(const float kp_, const float kd_, const float maxRotation_, const float deadzone_) {
-    kp = kp_;
-    kd = kd_;
-    maxRotation = maxRotation_;
-    deadzone = deadzone_;
+void Compass::setPD(const float newKp, const float newKd, const float newMaxRotation, const float newDeadzone) {
+    kp = newKp;
+    kd = newKd;
+    maxRotation = newMaxRotation;
+    deadzone = newDeadzone;
 }
 
 void Compass::reset() {

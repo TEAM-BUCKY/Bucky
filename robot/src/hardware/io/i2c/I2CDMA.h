@@ -9,19 +9,11 @@
 #include "optimizations/optimizations.h"
 #include "optimizations/bitboard.h"
 
-// TIMINGR values depend on the I2C input clock (PCLK, no divider on either board).
-#if defined(MCU_FAMILY_G4)
-/* 170 MHz */
-#define I2C_TIMING_FM_400K  0x4052193AU
-#define I2C_TIMING_FMP_1M   0x00805054U
-#define I2C_TIMING_FMP_3M4  0x0020131BU
-#elif defined(MCU_FAMILY_H5)
-/* 250 MHz: the G4 values with each phase rescaled to the same duration.
- * Not yet verified on a scope. */
+// TIMINGR values for a 250 MHz I2C input clock (PCLK, no divider).
+// Not yet verified on a scope.
 #define I2C_TIMING_FM_400K  0x60521A3DU
 #define I2C_TIMING_FMP_1M   0x00C0767CU
 #define I2C_TIMING_FMP_3M4  0x00301C28U
-#endif
 
 #ifdef __cplusplus
 extern "C" {

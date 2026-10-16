@@ -7,14 +7,11 @@
 #include "optimizations/bitboard.h"
 #include "optimizations/optimizations.h"
 
-// Family-neutral DMA channel control.
+// GPDMA channel control. The request is selected in CTR2; circular mode is built
+// from a single linked-list item that reloads the channel onto itself.
 //
-// G4:  DMA1/DMA2 channels, request routed through the matching DMAMUX1 channel.
-// H5:  GPDMA1 channels, request selected in CTR2. Circular mode is built from a
-//      single linked-list item that reloads the channel onto itself.
-//
-// Request IDs come straight from the HAL headers (DMA_REQUEST_* on G4,
-// GPDMA1_REQUEST_* on H5) so nothing here hardcodes a reference-manual table.
+// Request IDs come straight from the HAL headers (GPDMA1_REQUEST_*) so nothing
+// here hardcodes a reference-manual table.
 
 typedef DMA_Channel_TypeDef DmaChannel;
 

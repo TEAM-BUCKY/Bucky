@@ -9,38 +9,39 @@ namespace
     constexpr float MIN_COS = 1e-3f;
 
     struct FitPoint {
-        float sinA, cosA;   // sensor axis (x = sin, y = cos)
+        float sinA, cosA;
         float lnAmp;
         float weight;
     };
 
     // ln of the modelled amplitude at one sensor for a ball at (bearing, centre distance).
-    float modelLnAmp(const FitPoint& p, const float bearing, const float rho, const IRConfig& cfg)
+    float modelLnAmp(const FitPoint& sensor, const float bearing, const float centreDist, const IRConfig& cfg)
     {
-        const float bx = rho * sinf(bearing), by = rho * cosf(bearing);
-        const float dx = bx - cfg.mountRadiusCm * p.sinA, dy = by - cfg.mountRadiusCm * p.cosA;
-        const float d = sqrtf(dx * dx + dy * dy);
-        float c = (dx * p.sinA + dy * p.cosA) / d;
-        if (c < MIN_COS) c = MIN_COS;
-        return 2.0f * logf(cfg.kCm) - 2.0f * logf(d) + cfg.cosPower * logf(c);
+        const float ballX = centreDist * sinf(bearing), ballY = centreDist * cosf(bearing);
+        const float toBallX = ballX - cfg.mountRadiusCm * sensor.sinA;
+        const float toBallY = ballY - cfg.mountRadiusCm * sensor.cosA;
+        const float sensorDist = sqrtf(toBallX * toBallX + toBallY * toBallY);
+        float cosIncidence = (toBallX * sensor.sinA + toBallY * sensor.cosA) / sensorDist;
+        if (cosIncidence < MIN_COS) cosIncidence = MIN_COS;
+        return 2.0f * logf(cfg.kCm) - 2.0f * logf(sensorDist) + cfg.cosPower * logf(cosIncidence);
     }
 
     // Offset δ ∈ [0, step/2] of the ball from the peak sensor towards its stronger neighbour,
     // from the far-field ratio ln(A_peak / A_neighbour) = n·(ln cos δ − ln cos(step − δ)).
-    float farFieldOffset(const float ratioLn, const float step, const float n)
+    float farFieldOffset(const float lnPeakToNeighbour, const float sensorStep, const float cosPower)
     {
-        const float rho = ratioLn / n;
-        if (rho <= 0.0f) return step * 0.5f;
-        if (rho >= -logf(cosf(step))) return 0.0f;
-        float d = step * 0.5f - rho / step;
-        for (int i = 0; i < 4; i++) {
-            const float f = logf(cosf(d)) - logf(cosf(step - d)) - rho;
-            const float df = -tanf(d) - tanf(step - d);
-            d -= f / df;
-            if (d < 0.0f) d = 0.0f;
-            if (d > step * 0.5f) d = step * 0.5f;
+        const float target = lnPeakToNeighbour / cosPower;
+        if (target <= 0.0f) return sensorStep * 0.5f;
+        if (target >= -logf(cosf(sensorStep))) return 0.0f;
+        float offset = sensorStep * 0.5f - target / sensorStep;
+        for (int iter = 0; iter < 4; iter++) {
+            const float error = logf(cosf(offset)) - logf(cosf(sensorStep - offset)) - target;
+            const float slope = -tanf(offset) - tanf(sensorStep - offset);
+            offset -= error / slope;
+            if (offset < 0.0f) offset = 0.0f;
+            if (offset > sensorStep * 0.5f) offset = sensorStep * 0.5f;
         }
-        return d;
+        return offset;
     }
 }
 
@@ -52,111 +53,117 @@ float IRRing::sensorAngle(const uint8_t sensor, const IRConfig& cfg)
 float IRRing::sensorDistanceCm(const float amp, const IRConfig& cfg)
 {
     if (amp <= 0.0f) return cfg.maxCm;
-    const float r = cfg.kCm / sqrtf(amp);
-    return r > cfg.maxCm ? cfg.maxCm : r;
+    const float dist = cfg.kCm / sqrtf(amp);
+    return dist > cfg.maxCm ? cfg.maxCm : dist;
 }
 
-BallReading IRRing::estimate(const uint16_t raw[GPort::SENSORS], const IRConfig& cfg)
+BallReading IRRing::estimate(const uint16_t frame[GPort::SENSORS], const IRConfig& cfg)
 {
     BallReading out;
-    const uint8_t n = cfg.sensors > GPort::SENSORS ? GPort::SENSORS : cfg.sensors;
-    if (n < 3) return out;
-    const float step = 2.0f * _PI_F / static_cast<float>(n);
+    const uint8_t sensorCount = cfg.sensors > GPort::SENSORS ? GPort::SENSORS : cfg.sensors;
+    if (sensorCount < 3) return out;
+    const float sensorStep = 2.0f * _PI_F / static_cast<float>(sensorCount);
 
     float amp[GPort::SENSORS] = {};
-    bool clip[GPort::SENSORS] = {};
+    bool clipped[GPort::SENSORS] = {};
     uint8_t peak = 0;
-    for (uint8_t k = 0; k < n; k++) {
-        const float a = static_cast<float>(raw[k]) - cfg.baselineCode;
-        amp[k] = a > 0.0f ? a : 0.0f;
-        clip[k] = raw[k] >= cfg.clipCode;
-        if (amp[k] > amp[peak]) peak = k;
+    for (uint8_t s = 0; s < sensorCount; s++) {
+        const float aboveBaseline = static_cast<float>(frame[s]) - cfg.baselineCode;
+        amp[s] = aboveBaseline > 0.0f ? aboveBaseline : 0.0f;
+        clipped[s] = frame[s] >= cfg.clipCode;
+        if (amp[s] > amp[peak]) peak = s;
     }
     out.peakSensor = peak;
     out.peakAmp = amp[peak];
     if (amp[peak] < cfg.minAmp) return out;
 
     out.seen = true;
-    out.clipped = clip[peak];
-    const uint8_t left = (peak + n - 1) % n, right = (peak + 1) % n;
+    out.clipped = clipped[peak];
+    const uint8_t left = (peak + sensorCount - 1) % sensorCount, right = (peak + 1) % sensorCount;
 
-    // Far-field start: bearing from neighbour ratios, range from the peak.
     float offset = 0.0f;
-    if (!clip[peak]) {
+    if (!clipped[peak]) {
         const bool rightStronger = amp[right] >= amp[left];
-        const uint8_t j = rightStronger ? right : left;
-        if (amp[j] >= cfg.minNeighbourAmp) {
-            const float d = farFieldOffset(logf(amp[peak] / amp[j]), step, cfg.cosPower);
-            offset = rightStronger ? d : -d;
+        const uint8_t neighbour = rightStronger ? right : left;
+        if (amp[neighbour] >= cfg.minNeighbourAmp) {
+            const float delta = farFieldOffset(logf(amp[peak] / amp[neighbour]), sensorStep, cfg.cosPower);
+            offset = rightStronger ? delta : -delta;
         }
     } else if (amp[left] >= cfg.minNeighbourAmp && amp[right] >= cfg.minNeighbourAmp) {
-        // Peak saturated: balance the two neighbours, ln(A_r/A_l) = n·(ln cos(step−δ) − ln cos(step+δ)).
         const float target = logf(amp[right] / amp[left]) / cfg.cosPower;
-        float d = 0.0f;
-        for (int i = 0; i < 6; i++) {
-            const float f = logf(cosf(step - d)) - logf(cosf(step + d)) - target;
-            const float df = tanf(step - d) + tanf(step + d);
-            d -= f / df;
-            if (d > step * 0.5f) d = step * 0.5f;
-            if (d < -step * 0.5f) d = -step * 0.5f;
+        float delta = 0.0f;
+        for (int iter = 0; iter < 6; iter++) {
+            const float error = logf(cosf(sensorStep - delta)) - logf(cosf(sensorStep + delta)) - target;
+            const float slope = tanf(sensorStep - delta) + tanf(sensorStep + delta);
+            delta -= error / slope;
+            if (delta > sensorStep * 0.5f) delta = sensorStep * 0.5f;
+            if (delta < -sensorStep * 0.5f) delta = -sensorStep * 0.5f;
         }
-        offset = d;
+        offset = delta;
     }
     const float peakAngle = sensorAngle(peak, cfg);
     float bearing = peakAngle + offset;
-    const float cosOff = cosf(offset);
-    const float onAxisAmp = amp[peak] / powf(cosOff > MIN_COS ? cosOff : MIN_COS, cfg.cosPower);
-    float rho = cfg.mountRadiusCm + cfg.kCm / sqrtf(onAxisAmp);
+    const float cosOffset = cosf(offset);
+    const float onAxisAmp = amp[peak] / powf(cosOffset > MIN_COS ? cosOffset : MIN_COS, cfg.cosPower);
+    float centreDist = cfg.mountRadiusCm + cfg.kCm / sqrtf(onAxisAmp);
 
-    // Near-field refinement: weighted Gauss–Newton on (bearing, centre distance) over the peak
-    // and its neighbours, using each sensor's real position on the ring (parallax).
-    FitPoint pts[3];
-    uint8_t used = 0;
-    const uint8_t cand[3] = {left, peak, right};
-    for (const uint8_t k : cand) {
-        if (clip[k] || amp[k] < cfg.minNeighbourAmp) continue;
-        const float a = sensorAngle(k, cfg);
-        pts[used++] = {sinf(a), cosf(a), logf(amp[k]), amp[k] * amp[k]};
+    FitPoint fitPoints[3];
+    uint8_t fitCount = 0;
+    const uint8_t candidates[3] = {left, peak, right};
+    for (const uint8_t s : candidates) {
+        if (clipped[s] || amp[s] < cfg.minNeighbourAmp) continue;
+        const float angle = sensorAngle(s, cfg);
+        fitPoints[fitCount++] = {sinf(angle), cosf(angle), logf(amp[s]), amp[s] * amp[s]};
     }
-    out.contributors = used;
-    if (used >= 2) {
-        const float minRho = cfg.mountRadiusCm + 2.0f;
+    out.contributors = fitCount;
+    if (fitCount >= 2) {
+        const float minCentreDist = cfg.mountRadiusCm + 2.0f;
         for (int iter = 0; iter < 4; iter++) {
-            float jtj00 = 0, jtj01 = 0, jtj11 = 0, jtr0 = 0, jtr1 = 0;
-            const float hb = 1e-3f, hr = 1e-2f * rho;
-            for (uint8_t i = 0; i < used; i++) {
-                const float m = modelLnAmp(pts[i], bearing, rho, cfg);
-                const float jb = (modelLnAmp(pts[i], bearing + hb, rho, cfg) - m) / hb;
-                const float jr = (modelLnAmp(pts[i], bearing, rho + hr, cfg) - m) / hr;
-                const float r = pts[i].lnAmp - m;
-                const float w = pts[i].weight;
-                jtj00 += w * jb * jb; jtj01 += w * jb * jr; jtj11 += w * jr * jr;
-                jtr0 += w * jb * r; jtr1 += w * jr * r;
+            // Weighted Gauss–Newton normal equations: H = JᵀWJ (2×2, symmetric), g = JᵀWr.
+            float hBearingBearing = 0, hBearingDist = 0, hDistDist = 0;
+            float gBearing = 0, gDist = 0;
+            const float distStep = 1e-2f * centreDist;
+            for (uint8_t i = 0; i < fitCount; i++) {
+                constexpr float bearingStep = 1e-3f;
+                const FitPoint& p = fitPoints[i];
+                const float predicted = modelLnAmp(p, bearing, centreDist, cfg);
+                const float dBearing = (modelLnAmp(p, bearing + bearingStep, centreDist, cfg) - predicted) / bearingStep;
+                const float dDist = (modelLnAmp(p, bearing, centreDist + distStep, cfg) - predicted) / distStep;
+                const float residual = p.lnAmp - predicted;
+                const float w = p.weight;
+                hBearingBearing += w * dBearing * dBearing;
+                hBearingDist += w * dBearing * dDist;
+                hDistDist += w * dDist * dDist;
+                gBearing += w * dBearing * residual;
+                gDist += w * dDist * residual;
             }
-            const float det = jtj00 * jtj11 - jtj01 * jtj01;
+            const float det = hBearingBearing * hDistDist - hBearingDist * hBearingDist;
             if (fabsf(det) < 1e-12f) break;
-            bearing += (jtj11 * jtr0 - jtj01 * jtr1) / det;
-            rho += (jtj00 * jtr1 - jtj01 * jtr0) / det;
-            if (bearing > peakAngle + step) bearing = peakAngle + step;
-            if (bearing < peakAngle - step) bearing = peakAngle - step;
-            if (rho < minRho) rho = minRho;
+            bearing += (hDistDist * gBearing - hBearingDist * gDist) / det;
+            centreDist += (hBearingBearing * gDist - hBearingDist * gBearing) / det;
+            if (bearing > peakAngle + sensorStep) bearing = peakAngle + sensorStep;
+            if (bearing < peakAngle - sensorStep) bearing = peakAngle - sensorStep;
+            if (centreDist < minCentreDist) centreDist = minCentreDist;
         }
     }
 
     if (out.clipped) {
-        const float clipRho = cfg.mountRadiusCm + cfg.kCm / sqrtf(cfg.clipCode - cfg.baselineCode);
-        if (rho > clipRho) rho = clipRho;
+        const float clipDist = cfg.mountRadiusCm + cfg.kCm / sqrtf(cfg.clipCode - cfg.baselineCode);
+        if (centreDist > clipDist) centreDist = clipDist;
     }
-    if (rho > cfg.maxCm) rho = cfg.maxCm;
+    if (centreDist > cfg.maxCm) centreDist = cfg.maxCm;
 
     out.angle = Math::wrapRadians(bearing);
-    out.distanceCm = rho;
-    const float bx = rho * sinf(out.angle) - cfg.mountRadiusCm * sinf(peakAngle);
-    const float by = rho * cosf(out.angle) - cfg.mountRadiusCm * cosf(peakAngle);
-    out.sensorDistanceCm = sqrtf(bx * bx + by * by);
-    out.position = {rho * sinf(out.angle), rho * cosf(out.angle)};
-    float conf = (amp[peak] - cfg.minAmp) / (4.0f * cfg.minAmp);
+    out.distanceCm = centreDist;
+    const float ballX = centreDist * sinf(out.angle), ballY = centreDist * cosf(out.angle);
+    const float fromPeakX = ballX - cfg.mountRadiusCm * sinf(peakAngle);
+    const float fromPeakY = ballY - cfg.mountRadiusCm * cosf(peakAngle);
+    out.sensorDistanceCm = sqrtf(fromPeakX * fromPeakX + fromPeakY * fromPeakY);
+    out.position = {ballX, ballY};
+
+    const float conf = (amp[peak] - cfg.minAmp) / (4.0f * cfg.minAmp);
     out.confidence = conf < 0.0f ? 0.0f : (conf > 1.0f ? 1.0f : conf);
+
     return out;
 }
 
@@ -165,7 +172,9 @@ bool IRRing::update()
     if (!ready() || !port.hasNewFrame(lastSeq)) return false;
     const uint32_t seq = port.frameSequence();
     if (!port.readIR(frame)) return false;
+
     lastSeq = seq;
     last = estimate(frame, cfg);
+
     return true;
 }
