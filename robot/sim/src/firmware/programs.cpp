@@ -58,6 +58,7 @@ extern Sonar sonar;
 extern Kicker kicker;
 extern GPort gPort1;
 extern GPort gPort2;
+extern HM10 bluetooth;
 
 static void run_test_without_main(const TestFn test) {
     init();
@@ -69,7 +70,7 @@ static void run_test_without_main(const TestFn test) {
               : Board::G_PORT2_KIND == GSensorKind::IR ? &gPort2 : nullptr;
     GPort* line = Board::G_PORT1_KIND == GSensorKind::Line ? &gPort1
                 : Board::G_PORT2_KIND == GSensorKind::Line ? &gPort2 : nullptr;
-    const TestContext ctx = {motorDriver, &kicker, compass, accel, sonar, sensorI2C, ir, line};
+    const TestContext ctx = {motorDriver, &kicker, compass, accel, sonar, sensorI2C, ir, line, &bluetooth};
     test(ctx);
     fw_main();
 }

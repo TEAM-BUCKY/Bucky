@@ -1,0 +1,72 @@
+#ifndef BUCKY_HM10_H
+#define BUCKY_HM10_H
+
+#include <stdint.h>
+
+#include "hardware/io/serial/SerialPort.h"
+
+// HM-10 BLE module (CC2541, transparent UART bridge).
+//
+// begin() finds the module's current baud rate, switches it to the requested one, turns on
+// connection notifications and sets the advertised name. After that the UART is a plain data
+// pipe while a central is linked. The module only accepts AT commands while it is NOT linked,
+// and announces link changes in-band as "OK+CONN" / "OK+LOST"; those are filtered out of the
+// received data and tracked as connected().
+//
+// AT commands are sent without a line ending, which is what the genuine HM-10 firmware expects.
+// Clones (MLT-BT05, JDY-08, ...) usually want "\r\n" and will not configure.
+
+class HM10 final : public SerialPort {
+public:
+    static constexpr uint8_t NAME_MAX = 12;
+
+    using SerialPort::read;
+    using SerialPort::write;
+
+    // Blocking, at most ~2 s when the module does not answer. Returns true when the module was
+    // reached and configured; false means it is absent, or already linked from before a reset
+    // (it ignores AT commands then), in which case it is assumed linked at `baud`.
+    bool begin(const UartHardware& hw, uint32_t baud, const char* name = nullptr);
+
+    [[nodiscard]] bool configured() const { return atReady; }
+    [[nodiscard]] bool connected();
+
+    // Drops data while no central is linked: the module would read it as AT commands.
+    size_t write(const uint8_t* data, size_t len) override;
+    int availableForWrite() override;
+    size_t available() override;
+    size_t read(uint8_t* out, size_t len) override;
+
+    int writeString(const char* str) {
+        const size_t written = writeAll(str, strlen(str));
+        return written == strlen(str) ? static_cast<int>(written) : -1;
+    }
+
+private:
+    static constexpr uint16_t RX_SIZE = 256;
+    static constexpr uint32_t RESPONSE_TIMEOUT_MS = 300;
+
+    void switchBaud(uint32_t rate);
+    bool command(const char* cmd, const char* expect, char* reply = nullptr, size_t replySize = 0);
+    void discardInput();
+
+    // Pull bytes from the UART, strip connection notifications into `linked`.
+    void pump();
+    void accept(uint8_t b);
+    void emit(uint8_t b);
+
+    UartSerialPort<512, 256> uart;
+    const UartHardware* hw = nullptr;
+
+    bool atReady = false;
+    bool linked = false;
+
+    uint8_t rxBuf[RX_SIZE] = {};
+    uint16_t rxHead = 0, rxTail = 0;
+
+    char pending[8] = {};   // possible start of a notification, held back from the data
+    uint8_t pendingLen = 0;
+    uint32_t pendingSince = 0;
+};
+
+#endif // BUCKY_HM10_H

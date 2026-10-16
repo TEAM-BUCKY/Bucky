@@ -76,7 +76,8 @@ constexpr auto SENSOR_I2C_FREQ = I2CFrequency::FM_400K;
 inline const UartHardware BLUETOOTH_UART = {USART2, PA_2, PA_3,
                                             GPDMA1_Channel3, GPDMA1_REQUEST_USART2_TX,
                                             GPDMA1_Channel2, GPDMA1_REQUEST_USART2_RX};
-constexpr uint32_t BLUETOOTH_BAUD = 115200;   // TODO: match the module's configured rate
+constexpr uint32_t BLUETOOTH_BAUD = 115200;   // HM-10 is switched to this rate on boot
+constexpr const char* BLUETOOTH_NAME = "Bucky";
 
 }
 

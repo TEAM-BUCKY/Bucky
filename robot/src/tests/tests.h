@@ -8,6 +8,7 @@
 #include "hardware/io/i2c/I2CDMA.h"
 #include "hardware/motor/Kicker.h"
 #include "hardware/sensors/GPort.h"
+#include "hardware/comms/HM10.h"
 
 struct TestContext {
     Motors& motorDriver;
@@ -18,6 +19,7 @@ struct TestContext {
     I2CDMABus& i2c;
     GPort* irPort;     // nullptr when no G port carries the IR ring
     GPort* linePort;   // nullptr when no G port carries the line sensors
+    HM10* bluetooth;   // nullptr when the board has no Bluetooth module
 };
 
 void testHoldHeading(const TestContext& ctx);
@@ -36,6 +38,10 @@ void testIRBallSeek(const TestContext& ctx);
 void testMainLoopSensors(const TestContext& ctx);
 void testStuckDetector(const TestContext& ctx);
 void testStrategyFSM(const TestContext& ctx);
+void testBluetooth(const TestContext& ctx);
+void testBluetoothProbe(const TestContext& ctx);
+void testBluetoothBaud(const TestContext& ctx);
+void testBluetoothTxCheck(const TestContext& ctx);
 
 // Load calibration from EEPROM (saved by testCalibrate / testCompassCalibrate).
 // Returns true if valid calibration was found and applied.

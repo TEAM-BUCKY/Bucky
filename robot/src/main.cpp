@@ -5,6 +5,7 @@
 #include "hardware/io/gpio/gpio.h"
 #include "hardware/io/i2c/I2CDMA.h"
 #include "hardware/io/serial/SerialPort.h"
+#include "hardware/comms/HM10.h"
 #include "hardware/motor/Kicker.h"
 #include "hardware/motor/Motors.h"
 #include "hardware/sensors/Button.h"
@@ -13,7 +14,7 @@
 #include "tests/tests.h"
 
 // Set to run a test instead of the main loop.
-#define RUN_TEST testLine
+#define RUN_TEST testBluetooth
 
 Motors motorDriver(Board::MOTOR1, Board::MOTOR2, Board::MOTOR3);
 I2CDMABus sensorI2C;
@@ -47,7 +48,7 @@ GPort gPort2;
 UsbSerialPort host;
 
 #ifdef BOARD_HAS_BLUETOOTH
-UartSerialPort<512, 256> bluetooth;
+HM10 bluetooth;
 #endif
 
 void setupEnvironment() {
@@ -65,7 +66,8 @@ void setupEnvironment() {
     accel.begin(sensorI2C);
 
 #ifdef BOARD_HAS_BLUETOOTH
-    bluetooth.begin(Board::BLUETOOTH_UART, Board::BLUETOOTH_BAUD);
+    if (!bluetooth.begin(Board::BLUETOOTH_UART, Board::BLUETOOTH_BAUD, Board::BLUETOOTH_NAME))
+        DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "HM-10 not configured (absent, or still linked from before reset)");
 #endif
 
     analogReadResolution(12);
@@ -116,7 +118,13 @@ void setupEnvironment() {
 #else
     Kicker* const kickerPtr = nullptr;
 #endif
-    const TestContext ctx = {motorDriver, kickerPtr, compass, accel, sonar, sensorI2C, irPort(), linePort()};
+#ifdef BOARD_HAS_BLUETOOTH
+    HM10* const bluetoothPtr = &bluetooth;
+#else
+    HM10* const bluetoothPtr = nullptr;
+#endif
+    const TestContext ctx = {motorDriver, kickerPtr, compass, accel, sonar, sensorI2C, irPort(), linePort(),
+                             bluetoothPtr};
     RUN_TEST(ctx);
 #endif
 #ifdef BOARD_HAS_KICKER

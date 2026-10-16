@@ -61,6 +61,7 @@ set(FW_SOURCES
     "${FIRMWARE_DIR}/hardware/sensors/pos/Accelerometer.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Sonar.cpp"
     "${FIRMWARE_DIR}/hardware/io/encoder/Encoder.cpp"
+    "${FIRMWARE_DIR}/hardware/comms/HM10.cpp"
     "${FIRMWARE_DIR}/hardware/io/cordic/cordic.c"
     "${FIRMWARE_DIR}/strategy/EKF.cpp"
     "${FIRMWARE_DIR}/strategy/DigitalField.cpp"

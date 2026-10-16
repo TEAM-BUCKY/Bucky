@@ -8,6 +8,7 @@
 #include "board/board.h"
 #include "debug.h"
 #include "firmware/firmware.h"
+#include "hardware/comms/HM10.h"
 #include "hardware/io/gpio/pwm.h"
 #include "hardware/io/serial/SerialPort.h"
 #include "hardware/motor/Kicker.h"
@@ -28,7 +29,7 @@ extern Kicker kicker;
 extern GPort gPort1;
 extern GPort gPort2;
 extern UsbSerialPort host;
-extern UartSerialPort<512, 256> bluetooth;
+extern HM10 bluetooth;
 
 namespace {
 template <typename T, typename... Args>
