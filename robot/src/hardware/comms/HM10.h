@@ -5,16 +5,7 @@
 
 #include <hardware/io/serial/SerialPort.h>
 
-// HM-10 BLE module (CC2541, transparent UART bridge).
-//
-// begin() finds the module's current baud rate, switches it to the requested one, turns on
-// connection notifications and sets the advertised name. After that the UART is a plain data
-// pipe while a central is linked. The module only accepts AT commands while it is NOT linked,
-// and announces link changes in-band as "OK+CONN" / "OK+LOST"; those are filtered out of the
-// received data and tracked as connected().
-//
-// AT commands are sent without a line ending, which is what the genuine HM-10 firmware expects.
-// Clones (MLT-BT05, JDY-08, ...) usually want "\r\n" and will not configure.
+// HM-10 BLE bridge: AT commands (no line ending) only work while unlinked; OK+CONN/OK+LOST are filtered from RX.
 
 class HM10 final : public SerialPort {
 public:
@@ -23,9 +14,7 @@ public:
     using SerialPort::read;
     using SerialPort::write;
 
-    // Blocking, at most ~2 s when the module does not answer. Returns true when the module was
-    // reached and configured; false means it is absent, or already linked from before a reset
-    // (it ignores AT commands then), in which case it is assumed linked at `baud`.
+    // Blocks up to ~2 s. False when absent, or still linked from before a reset.
     bool begin(const UartHardware& hw, uint32_t baud, const char* name = nullptr);
 
     [[nodiscard]] bool configured() const { return atReady; }

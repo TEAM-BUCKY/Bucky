@@ -63,10 +63,6 @@ LineRGB LineSensor::color(const uint8_t sensor) const {
     return {out[0], out[1], out[2]};
 }
 
-// ---- Show mode -------------------------------------------------------------
-
-// Takes the clock and steps until the board's reset fires, which puts its
-// counter at the start of the first colour sweep.
 bool LineSensor::beginShow() {
     if (port.kind() != GSensorKind::Line || !port.holdClock()) return false;
 
@@ -85,8 +81,6 @@ void LineSensor::endShow() {
     lastSeq = port.frameSequence();
 }
 
-// One full frame (4 sweeps x 16 steps), starting and ending at the first
-// sweep. Each colour sweep lasts in proportion to its level; Dark takes the rest.
 void LineSensor::showPeriod(const LineRGB color) const {
     const uint8_t level[4] = {color.r, color.g, color.b, 0};   // indexed by LineColor
 

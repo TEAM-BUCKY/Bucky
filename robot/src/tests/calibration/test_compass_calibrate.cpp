@@ -59,9 +59,6 @@ void testCompassCalibrate(const TestContext& ctx) {
         delay(SAMPLE_PERIOD_MS);
     }
 
-    // Hard-iron: midpoint of min/max per axis.
-    // Soft-iron (diagonal): scale each axis to the largest range so the sweep becomes
-    // a sphere (or at least a circle in X/Y) rather than an ellipse.
     float range[3], offset[3];
     int32_t maxRange = 0;
     for (uint8_t i = 0; i < 3; i++) {
@@ -103,7 +100,6 @@ void testCompassCalibrate(const TestContext& ctx) {
         EEPROM.get(0, cal);
         const bool keepMotor = (cal.magic == CALIBRATION_MAGIC);
         if (!keepMotor) {
-            // Start from a clean slate: motor cal unknown, direction cal disabled.
             cal = {};
             for (uint8_t i = 0; i < NUM_DIRECTIONS; i++) {
                 cal.dirScale[i]     = 1.0f;

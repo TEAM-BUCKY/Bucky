@@ -9,22 +9,12 @@
 #include <hardware/io/dma/DMA.h>
 #include <hardware/io/irq/IRQ.h>
 
-// USART with DMA on both directions.
-//
-// RX: a circular DMA channel streams RDR into rx_buf continuously; reads just
-//     chase the DMA write position, so no per-byte interrupts. The optional
-//     on_rx callback fires from the USART IDLE interrupt (end of a burst).
-// TX: writes go into a ring buffer; the largest contiguous run is sent as one
-//     DMA transfer and the transfer-complete interrupt chains the next run.
-//
-// Buffers are owned by the caller. rx_size/tx_size must be powers of two and
-// at most 65535 (one DMA block).
+// rx_size/tx_size must be powers of two, at most 65535.
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Board wiring of one USART. */
 typedef struct {
     USART_TypeDef* instance;
     PinName        tx;
@@ -63,7 +53,7 @@ typedef struct {
     volatile uint16_t tx_tail;     /* advanced by the DMA TC interrupt */
     volatile uint16_t tx_inflight; /* bytes in the running DMA transfer */
 
-    uint16_t rx_tail;              /* next byte the reader will consume */
+    uint16_t rx_tail;
 } UartDma;
 
 void uart_dma_init(UartDma* u, const UartDmaConfig* cfg);
@@ -71,7 +61,6 @@ void uart_dma_init(UartDma* u, const UartDmaConfig* cfg);
 // Queue bytes for transmission. Returns how many fit in the TX buffer.
 size_t uart_dma_write(UartDma* u, const uint8_t* data, size_t len);
 
-// Free space in the TX buffer.
 size_t uart_dma_write_available(const UartDma* u);
 
 // Block until everything queued has left the shift register.

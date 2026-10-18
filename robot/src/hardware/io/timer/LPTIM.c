@@ -78,8 +78,7 @@ bool lptim_pwm_start(LPTIM_TypeDef* lptim, const uint8_t channel, const uint32_t
 
     lptim_stop(lptim);
 
-    /* Disabled: counter configuration. Internal clock, PWM waveform, no preload
-     * so the acknowledged ARR/CCR writes take effect immediately. */
+    /* No preload: ARR/CCR writes take effect immediately. */
     lptim->CFGR = presc_log2 << LPTIM_CFGR_PRESC_Pos;
 
     /* CCxSEL = 0: output, CCxP = 0: non-inverted. */

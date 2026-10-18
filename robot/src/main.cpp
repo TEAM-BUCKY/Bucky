@@ -13,7 +13,6 @@
 #include <hardware/sensors/pos/Sonar.h>
 #include <tests/tests.h>
 
-// Set to run a test instead of the main loop.
 #define RUN_TEST testBluetooth
 
 Motors motorDriver(Board::MOTOR1, Board::MOTOR2, Board::MOTOR3);

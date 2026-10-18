@@ -24,7 +24,7 @@ namespace
     RingFrame readRing(const uint16_t frame[GPort::SENSORS], const uint8_t sensorCount, const IRConfig& cfg)
     {
         RingFrame ring;
-        ring.step = 2.0f * _PI_F / static_cast<float>(sensorCount);
+        ring.step = 2.0f * PI_F / static_cast<float>(sensorCount);
         for (uint8_t s = 0; s < sensorCount; s++) {
             const float aboveBaseline = static_cast<float>(frame[s]) - cfg.baselineCode;
             ring.amp[s] = aboveBaseline > 0.0f ? aboveBaseline : 0.0f;
@@ -76,7 +76,7 @@ namespace
 
 float IRRing::sensorAngle(const uint8_t sensor, const IRConfig& cfg)
 {
-    return 2.0f * _PI_F * static_cast<float>(sensor) / static_cast<float>(cfg.sensors);
+    return 2.0f * PI_F * static_cast<float>(sensor) / static_cast<float>(cfg.sensors);
 }
 
 float IRRing::sensorDistanceCm(const float amp, const IRConfig& cfg)

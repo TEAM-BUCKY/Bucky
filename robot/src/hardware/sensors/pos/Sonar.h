@@ -23,6 +23,7 @@ class Sonar {
         bool reading = false;
 
     public:
+        // One shared trigger pin; at most SONAR_COUNT echo pins.
         void begin(const SonarPins& pins);
 
         void startRead();

@@ -43,8 +43,7 @@ void testBluetoothProbe(const TestContext& ctx);
 void testBluetoothBaud(const TestContext& ctx);
 void testBluetoothTxCheck(const TestContext& ctx);
 
-// Load calibration from EEPROM (saved by testCalibrate / testCompassCalibrate).
-// Returns true if valid calibration was found and applied.
+// Applies the calibration saved by testCalibrate / testCompassCalibrate, if any.
 bool loadCalibration(Motors& md, Compass& compass);
 
 #endif //BUCKY_TESTS_H

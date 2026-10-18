@@ -5,12 +5,7 @@
 #include <strategy/DigitalField.h>
 #include <helpers/math/Math.h>
 
-// Frames / units used everywhere in the EKF:
-//  - field frame: cm, origin as in DigitalField
-//  - field frame: x = right, y = forward (towards opponent goal)
-//  - angles: radians, clockwise positive, 0 = +y (forward). Direction of angle a = (sin a, cos a)
-//  - theta: robot heading in the field frame (clockwise from field +y), omega = dtheta/dt
-//  - robot frame: x = right, y = forward
+// Field frame: cm, x right, y forward. Angles: radians, clockwise from +y.
 struct State
 {
     float ballX;
@@ -27,7 +22,7 @@ struct State
     float speedY;
 };
 
-// Standard deviations (1 sigma). Fill in from datasheets / measurements.
+// Standard deviations (1 sigma).
 struct EKFNoise
 {
     float accel = 0.05f * 981.0f; // cm/s^2, LSM303AGR accel incl. vibration (input noise -> Q)
@@ -46,7 +41,6 @@ struct EKFNoise
     float irDistanceRel = 0.2f;   // fraction of distance, IR range is 1/sqrt(amplitude) so error grows with range
 };
 
-// Model constants that are not noise.
 struct EKFModel
 {
     float imuOffsetX = 0.0f;      // cm, accelerometer position relative to rotation centre (robot frame)
@@ -56,21 +50,7 @@ struct EKFModel
     uint8_t maxRejects = 10;      // accept anyway after this many consecutive rejects (recover from divergence)
 };
 
-//  State x = [robotX, robotY, robotTheta, omega, speedX, speedY, ballX, ballY, ballSpeedX, ballSpeedY]
-//
-//  predict:  accelerometer is the control input u = (ax, ay) in robot frame (g)
-//      a_r    = u + omega^2 * r_imu  (remove centripetal accel of an off-centre IMU)
-//      a_f    = R(theta) * a_r
-//      pos   += v*dt + 1/2 a_f dt^2
-//      v     += a_f dt
-//      theta += omega*dt             (constant turn rate, angularAccel as process noise)
-//      ball  += ballSpeed*dt         (ballSpeed decays with ballFrictionTau, ballAccel as process noise)
-//
-//  updates (sequential, call whenever a sensor has fresh data, innovation gated):
-//      sonar   -> robotX, robotY        H = identity rows
-//      compass -> robotTheta            H = identity row (innovation wrapped)
-//      encoder -> robot frame speed     h = R(theta)^T v  (nonlinear in theta), omega identity row
-//      IR      -> angle, distance       h = [atan2(bx-x, by-y) - theta, |b - p|]  (nonlinear)
+// x = [robotX, robotY, theta, omega, speedX, speedY, ballX, ballY, ballSpeedX, ballSpeedY]
 class EKF
 {
     static constexpr std::size_t N = 10;
@@ -92,8 +72,7 @@ class EKF
 
     State state = {};
 
-    // Scalar Kalman update with measurement Jacobian row h, innovation already computed.
-    // Returns false when the innovation fails the gate.
+    // h is the measurement Jacobian row. Returns false when the innovation fails the gate.
     bool updateScalar(const Math::Vector<N>& h, float innovation, float variance, Sensor sensor);
     bool updateIdentity(std::size_t i, float innovation, float variance, Sensor sensor);
     void syncState();

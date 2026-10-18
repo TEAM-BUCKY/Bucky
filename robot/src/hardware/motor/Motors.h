@@ -56,8 +56,6 @@ class Motors {
 public:
     static constexpr uint8_t MOTOR_COUNT = 3;
 
-    // Omni-wheel inverse kinematics: wheel speeds (in % before clamping) for a
-    // heading given as sin/cos, a translation scale and a rotation term.
     static void wheelSpeeds(float sinHeading, float cosHeading, Percentage scale, Percentage rotation,
                             float out[MOTOR_COUNT]);
 

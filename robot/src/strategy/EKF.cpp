@@ -38,14 +38,11 @@ void EKF::init(const float robotX, const float robotY, const float robotTheta, c
 
 void EKF::predict(const float accelX_g, const float accelY_g, const float dt)
 {
-    // x_k = f(x_k-1, u_k)
-    // p_k = F p_k-1 F^T + Q
     const float s = std::sin(x[THETA]);
     const float c = std::cos(x[THETA]);
     const float omega = x[OMEGA];
 
-    // An IMU at r from the rotation centre measures an extra -omega^2 r (centripetal), add it back.
-    // Tangential (domega/dt x r) is not modelled, accelSpinGain covers it in Q.
+    // Add back the centripetal accel of the off-centre IMU.
     const float w2 = omega * omega;
     const float ax = accelX_g * G_TO_CM_S2 + w2 * model.imuOffsetX;
     const float ay = accelY_g * G_TO_CM_S2 + w2 * model.imuOffsetY;
@@ -93,8 +90,7 @@ void EKF::predict(const float accelX_g, const float accelY_g, const float dt)
     Math::multiplyMatrix(F, stateCovariance, FP);
     Math::multiplyMatrixByTransposed(FP, F, stateCovariance);
 
-    // Q: accel noise enters through G = [1/2 dt^2, dt] per axis (field frame, isotropic).
-    // Vibration and lever arm residue grow while spinning.
+    // Q: accel noise through G = [1/2 dt^2, dt] per axis.
     const float accelStd = noise.accel * (1.0f + noise.accelSpinGain * std::fabs(omega));
     const float qa = accelStd * accelStd;
     const float qPP = halfDt2 * halfDt2 * qa;
@@ -136,9 +132,6 @@ void EKF::predict(const float accelX_g, const float accelY_g, const float dt)
 
 bool EKF::updateScalar(const Math::Vector<N>& h, const float innovation, const float variance, const Sensor sensor)
 {
-    // g_k = p_k h^T / (h p_k h^T + r)
-    // x_k <- x_k + g_k (z_k - h(x_k))
-    // p_k <- (1 - g_k h) p_k
     Math::Vector<N> PhT;
     Math::multiplyMatrixVector(stateCovariance, h, PhT); // P symmetric, so P h^T == (h P)^T
 
@@ -147,10 +140,7 @@ bool EKF::updateScalar(const Math::Vector<N>& h, const float innovation, const f
         s += h[i] * PhT[i];
     if (s <= 0.0f) return false;
 
-    // Innovation gate: drop outliers (sonar hitting the opponent, IR reflections, magnetic spikes).
-    // Encoders are not gated: slip biases them rather than producing outliers, and a collision is
-    // exactly when the speed jumps far outside the predicted spread.
-    // After maxRejects in a row the filter is more likely wrong than the sensor, so accept again.
+    // Innovation gate. Encoders are ungated (slip biases them); accept again after maxRejects.
     if (sensor != ENCODER && innovation * innovation > model.gateChi2 * s)
     {
         ++rejectCount[sensor];
@@ -214,8 +204,7 @@ void EKF::updateHeading(const float robotTheta)
 
 void EKF::updateSpeed(const float speedX, const float speedY, const float omega)
 {
-    // h(x) = R(theta)^T v_field: rx = c vx - s vy, ry = s vx + c vy
-    // Each row relinearized around the state corrected by the previous one.
+    // h(x) = R(theta)^T v_field, each row relinearized after the previous one.
     const float r = noise.encoderSpeed * noise.encoderSpeed;
     {
         const float s = std::sin(x[THETA]);
@@ -272,7 +261,6 @@ void EKF::updateBall(const float angle, const float distance)
     const float d = std::fmax(std::sqrt(dx * dx + dy * dy), MIN_BALL_DISTANCE);
     const float d2 = d * d;
 
-    // Angle row
     {
         Math::Vector<N> h = {};
         h[X] = -dy / d2;

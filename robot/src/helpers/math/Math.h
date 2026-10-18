@@ -80,21 +80,21 @@ namespace Math
 
 	FORCE_INLINE float radiansToDegrees(const float radians)
 	{
-		return radians * (180.0f / _PI_F);
+		return radians * (180.0f / PI_F);
 	}
 
 	FORCE_INLINE float degreesToRadians(const float degrees)
 	{
-		return degrees * (_PI_F / 180.0f);
+		return degrees * (PI_F / 180.0f);
 	}
 
 	FORCE_INLINE float wrapRadians(float radians)
 	{
-		constexpr float kTwoPi = 2.0f * _PI_F;
-		if (radians >  _PI_F) radians -= kTwoPi;
-		else if (radians < -_PI_F) radians += kTwoPi;
-		if (radians >  _PI_F) radians -= kTwoPi;
-		else if (radians < -_PI_F) radians += kTwoPi;
+		constexpr float kTwoPi = 2.0f * PI_F;
+		if (radians >  PI_F) radians -= kTwoPi;
+		else if (radians < -PI_F) radians += kTwoPi;
+		if (radians >  PI_F) radians -= kTwoPi;
+		else if (radians < -PI_F) radians += kTwoPi;
 		return radians;
 	}
 

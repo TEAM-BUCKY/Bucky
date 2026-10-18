@@ -50,10 +50,7 @@ struct GPortTiming {
     uint8_t adcSampleTime;
 };
 
-// IR: the ball repeats its 8-pulse burst every 833.33 us. RESET clears every hold at the frame
-// wrap, and the first channel (physical sensor 7) is sampled half a clock period later: 833 us at
-// 600 Hz, exactly one burst period, so it always holds one. Don't raise this rate: at 2400 Hz that
-// sensor misses the ball in about half the frames (see test_firmware_ir_frontend.py).
+// Keep at 600 Hz: one 833 us IR burst per mux step, or sensor 7 misses the ball.
 constexpr GPortTiming G_TIMING_IR = {600, 0, 4};
 
 // Line: 4000 samples per second, 44 kHz modulation, 4 cycles of ADC sample time.
@@ -91,8 +88,7 @@ public:
     [[nodiscard]] uint32_t resetCount() const { return resets; }
     [[nodiscard]] LineColor lineColorAt(const uint8_t sweep) const { return lineOrder[sweep]; }
 
-    // Manual clocking: take the clock pin from its timer and step the mux by
-    // hand (e.g. to hold the line LEDs on a colour). Frames stop while held.
+    // Frames stop while the clock is held manually.
     bool holdClock();
     void stepClock() const;
     bool releaseClock();

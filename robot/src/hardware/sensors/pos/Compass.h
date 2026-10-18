@@ -1,7 +1,3 @@
-//
-// Created by koen on 2/28/26.
-//
-
 #ifndef BUCKY_COMPASS_H
 #define BUCKY_COMPASS_H
 
@@ -45,7 +41,6 @@ class Compass
         uint8_t sampleCount = 0;
         uint8_t whoAmIRetries = 0;
 
-        // PD control state
         float lastError = 0;
         float lastDerivative = 0;     // dirty-D filtered derivative
         unsigned long lastTime = 0;
@@ -54,7 +49,6 @@ class Compass
         float kd = 0.3f;
         float maxRotation = 25.0f;
         float deadzone = 3.0f;
-        // Time constant for dirty-D filter. tau = 1/(2*pi*fc); fc ~= 20 Hz.
         float derivTau = 0.00796f;
 
         void writeReg(const uint8_t reg, const uint8_t value) const { i2c_dma_write_reg(bus, LIS2MDL_ADDR, reg, value); }
@@ -69,7 +63,7 @@ class Compass
         bool update(uint32_t timeoutMs = 10);  // blocking with timeout; true on success
         void startRead() { i2c_dma_read_reg(bus, LIS2MDL_ADDR, LIS2MDL_OUTX_L_REG, rx_buf, 6); }
         [[nodiscard]] bool isReadComplete() const { return !i2c_dma_is_busy(bus);}
-        void processRead();            // convert rx_buf into heading
+        void processRead();
 
         [[nodiscard]] float getHeading() const { return heading; }
         [[nodiscard]] float getOffset() const;

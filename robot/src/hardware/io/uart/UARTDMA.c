@@ -8,7 +8,6 @@
 
 #include <optimizations/bitboard.h>
 
-/* Enable the instance's RCC clock and return its interrupt. */
 #define UART_CASE(inst) \
     if (uart == inst) { __HAL_RCC_##inst##_CLK_ENABLE(); return inst##_IRQn; }
 

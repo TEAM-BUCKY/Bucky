@@ -133,13 +133,7 @@ float Compass::computeRotation(const float targetDegrees) {
     return rotation;
 }
 
-/**
- * Sets the PD controller parameters for the compass rotation control.
- * @param newKp The proportional gain.
- * @param newKd The derivative gain.
- * @param newMaxRotation The maximum rotation output, in degrees per second. [0.0f, 180.0f]
- * @param newDeadzone The deadzone for the error, in degrees. [0.0f, 180.0f]
- */
+// maxRotation in deg/s, deadzone in degrees, both in [0, 180].
 void Compass::setPD(const float newKp, const float newKd, const float newMaxRotation, const float newDeadzone) {
     kp = newKp;
     kd = newKd;

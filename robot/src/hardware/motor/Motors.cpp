@@ -19,12 +19,7 @@ static void initPwm(PWMPin& pw, const PinName pin) {
     pwm_sync_register(&pw);
 }
 
-/**
- * Initialize the motors.
- * @param minSpeed the minimum speed to motors in the range [0.0f, 1.0f]
- * @param maxSpeed the maximum speed to motors in the range [0.0f, 1.0f]
- * @param enc an array of encoder pin configurations for each motor, or nullptr if encoders are not used
- */
+// minSpeed/maxSpeed in [0, 1]; enc may be nullptr when no encoders are fitted.
 void Motors::init(const Percentage minSpeed, const Percentage maxSpeed, const EncoderPins enc[MOTOR_COUNT])
 {
     changeSpeed(minSpeed, maxSpeed);
@@ -122,17 +117,11 @@ void Motors::updateMotor(Motor& motor) const
     setMotorSpeed<shouldStage>(motor.motor, Percentage(setpoint + correction));
 }
 
-/**
- * Update all motors immediately
- */
 void Motors::updateAllMotors() {
 
     for (Motor& m : motors) updateMotor<false>(m);
 }
 
-/**
- * Commit staged motor updates.
- */
 void Motors::syncUpdateAllMotors() {
 
     for (Motor& m : motors) updateMotor<true>(m);
@@ -151,29 +140,17 @@ void Motors::drive(Motor& motor, const float speed, const float totalSpeed) {
 
 void Motors::wheelSpeeds(const float sinHeading, const float cosHeading, const Percentage scale,
                               const Percentage rotation, float out[MOTOR_COUNT]) {
-    out[0] = (0.5f * sinHeading - _SIN_60_F * cosHeading) * scale + rotation;
+    out[0] = (0.5f * sinHeading - SIN_60_F * cosHeading) * scale + rotation;
     out[1] = -sinHeading * scale + rotation;
-    out[2] = (0.5f * sinHeading + _SIN_60_F * cosHeading) * scale + rotation;
+    out[2] = (0.5f * sinHeading + SIN_60_F * cosHeading) * scale + rotation;
 }
 
-/**
- * Drive in a direction specified in degrees, with a translation scale and rotation term.
- * Degrees are clockwise from +y (forward): 0 = forward, 90 = right, 180 = backward, 270 = left.
- * @param degrees The direction to drive, in degrees.
- * @param scale The translation scale, in the range [0.0f, 1.0f]
- * @param rotation The rotation term, in the range [-1.0f, 1.0f].
- */
+// Clockwise from +y (forward): 0 = forward, 90 = right, 180 = backward, 270 = left.
 void Motors::driveDegrees(const float degrees, const Percentage scale, const PercentageSigned rotation) {
     driveRadians(Math::degreesToRadians(degrees), scale, rotation);
 }
 
-/**
- * Drive in a direction specified in radians, with a translation scale and a rotation term.
- * Radians are clockwise from +y (forward): 0 = forward, π/2 = right, π = backward, 3π/2 = left.
- * @param radians The direction to drive, in radians.
- * @param scale The translation scale, in the range [0.0f, 1.0f].
- * @param rotation The rotation term, in the range [-1.0f, 1.0f].
- */
+// Clockwise from +y (forward): 0 = forward, π/2 = right, π = backward, 3π/2 = left.
 void Motors::driveRadians(const float radians, const Percentage scale, const PercentageSigned rotation) {
     const Percentage rotationScale = fmaxf(scale, fabsf(rotation)) / 1.0f;
 
@@ -189,11 +166,7 @@ void Motors::driveRadians(const float radians, const Percentage scale, const Per
     DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, "Drive: radians=" + String(radians) + ", scale=" + String(scale) + ", rotation=" + String(rotation));
 }
 
-/**
- * Drive in a direction specified by a vector.
- * @param vector The vector specifying the direction and magnitude of movement.
- * @param rotation The rotation term, in the range [-100, 100].
- */
+// rotation in [-100, 100].
 void Motors::driveVector(const VectorXY vector, const float rotation) {
 
     float angleRad, magnitude;
