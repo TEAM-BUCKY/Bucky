@@ -1,9 +1,9 @@
-#include "tests.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <debug.h>
 #include <Arduino.h>
 #include <cmath>
-#include "helpers/Math.h"
-#include "hardware/sensors/IRRing.h"
+#include <helpers/math/Math.h>
+#include <hardware/sensors/ir/IRRing.h>
 
 void testIRPositioning(const TestContext& ctx)
 {

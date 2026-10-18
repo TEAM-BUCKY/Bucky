@@ -1,5 +1,5 @@
-#include "tests.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <debug.h>
 #include <Arduino.h>
 
 static void scanBus(const char* name, const I2CDMABus& bus) {

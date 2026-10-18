@@ -10,7 +10,7 @@
 #include "core/world.h"
 #include "devices/ir_frontend.h"
 #include "hardware/io/encoder/Encoder.h"
-#include "hardware/sensors/GPort.h"
+#include "hardware/sensors/gport/GPort.h"
 #include "hardware/sensors/pos/Sonar.h"
 #include "io/io.h"
 

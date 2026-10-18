@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "hardware/io/serial/SerialPort.h"
+#include <hardware/io/serial/SerialPort.h>
 
 // HM-10 BLE module (CC2541, transparent UART bridge).
 //

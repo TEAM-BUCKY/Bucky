@@ -1,8 +1,8 @@
 #include "Compass.h"
-#include "debug.h"
-#include "optimizations/bitboard.h"
-#include "hardware/io/cordic/cordic.h"
-#include "helpers/Math.h"
+#include <debug.h>
+#include <optimizations/bitboard.h>
+#include <hardware/io/cordic/cordic.h>
+#include <helpers/math/Math.h>
 
 void Compass::begin(I2CDMABus& busRef) {
     bus = &busRef;
@@ -133,6 +133,13 @@ float Compass::computeRotation(const float targetDegrees) {
     return rotation;
 }
 
+/**
+ * Sets the PD controller parameters for the compass rotation control.
+ * @param newKp The proportional gain.
+ * @param newKd The derivative gain.
+ * @param newMaxRotation The maximum rotation output, in degrees per second. [0.0f, 180.0f]
+ * @param newDeadzone The deadzone for the error, in degrees. [0.0f, 180.0f]
+ */
 void Compass::setPD(const float newKp, const float newKd, const float newMaxRotation, const float newDeadzone) {
     kp = newKp;
     kd = newKd;

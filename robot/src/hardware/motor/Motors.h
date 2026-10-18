@@ -2,11 +2,11 @@
 #define BUCKY_MOTORDRIVER_H
 
 #include <Arduino.h>
-#include "hardware/io/gpio/pwm.h"
-#include "hardware/io/encoder/Encoder.h"
 
-#define MIN_SPEED 1300
-#define MAX_SPEED 3399
+#include <hardware/motor/MotorDriver.h>
+#include <hardware/io/gpio/pwm.h>
+#include <hardware/io/encoder/Encoder.h>
+#include <helpers/types.h>
 
 // Pins may carry an _ALTn suffix to select the timer (e.g. PB_14_ALT2 = TIM12).
 struct MotorPin {
@@ -14,9 +14,9 @@ struct MotorPin {
     PinName inB;
 };
 
-struct MotorPwm {
-    PwmPin inA{};
-    PwmPin inB{};
+struct MotorPWM {
+    PWMPin inA{};
+    PWMPin inB{};
     float currentSpeed = 0;
 };
 
@@ -31,7 +31,7 @@ struct MotorEncoderValue
 };
 
 struct Motor {
-    MotorPwm motor;
+    MotorPWM motor;
     float beginSpeed = 0;
     float targetSpeed = 0;
     float totalSpeed = 0;
@@ -58,14 +58,14 @@ public:
 
     // Omni-wheel inverse kinematics: wheel speeds (in % before clamping) for a
     // heading given as sin/cos, a translation scale and a rotation term.
-    static void wheelSpeeds(float sinHeading, float cosHeading, float scale, float rotation,
+    static void wheelSpeeds(float sinHeading, float cosHeading, Percentage scale, Percentage rotation,
                             float out[MOTOR_COUNT]);
 
 private:
     MotorPin pins[MOTOR_COUNT];
     Motor motors[MOTOR_COUNT];
 
-    SpeedRange speedRange = {MIN_SPEED, MAX_SPEED, (MAX_SPEED - MIN_SPEED) / 100.0f};
+    SpeedRange speedRange = {DRIVER_PWM_RESOLUTION * 0.0f, DRIVER_PWM_RESOLUTION * 1.0f, (DRIVER_PWM_RESOLUTION * 1.0f - DRIVER_PWM_RESOLUTION * 0.0f) / 100.0f};
 
     bool encodersEnabled = false;
     float kP = 0.5f;
@@ -74,7 +74,7 @@ private:
     float maxTicksPerSec[MOTOR_COUNT] = {1200.0f, 1200.0f, 1200.0f};
 
     template<bool stage>
-    void setMotorSpeed(const MotorPwm& motor, float targetSpeed) const;
+    void setMotorSpeed(const MotorPWM& motor, Percentage targetSpeed) const;
     template<bool stage>
     void updateMotor(Motor& motor) const;
     static void drive(Motor& motor, float speed, float totalSpeed);
@@ -82,19 +82,21 @@ private:
 public:
     Motors(const MotorPin m1, const MotorPin m2, const MotorPin m3) : pins{m1, m2, m3} {}
 
-    void init(float minSpeed = MIN_SPEED, float maxSpeed = MAX_SPEED,
+    void init(Percentage minSpeed = 0.0f, Percentage maxSpeed = 1.0f,
               const EncoderPins enc[MOTOR_COUNT] = nullptr);
 
     void updateAllMotors();
     void syncUpdateAllMotors();
 
-    void driveDegrees(float degrees, float scale = 100, float rotation = 0);
-    void driveRadians(float radians, float scale = 100, float rotation = 0);
+    void driveDegrees(float degrees, Percentage scale = 1.0f, PercentageSigned rotation = 0.0f);
+    void driveRadians(float radians, Percentage scale = 1.0f, PercentageSigned rotation = 0.0f);
     void driveVector(VectorXY vector, float rotation = 0);
     void driveMotorsDirect(float m1Speed, float m2Speed, float m3Speed);
 
-    void changeSpeed(const float minSpeed = MIN_SPEED, const float maxSpeed = MAX_SPEED) {
-        speedRange = {minSpeed, maxSpeed, (maxSpeed - minSpeed) / 100.0f};
+    void changeSpeed(const float minSpeed = 0.0f, const float maxSpeed = 1.0f) {
+        const float absoluteMinSpeed = minSpeed * DRIVER_PWM_RESOLUTION;
+        const float absoluteMaxSpeed = maxSpeed * DRIVER_PWM_RESOLUTION;
+        speedRange = {absoluteMinSpeed, absoluteMaxSpeed, (absoluteMaxSpeed - absoluteMinSpeed) / 100.0f};
     }
 
     [[nodiscard]] SpeedRange getSpeedRange() const

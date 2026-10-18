@@ -1,10 +1,10 @@
-#include "SerialPort.h"
+#include <hardware/io/serial/SerialPort.h>
 
 #include <usbd_conf.h>
 #include <usbd_cdc_if.h>
 #include <WSerial.h>
 
-#include "hardware/io/irq/IRQ.h"
+#include <hardware/io/irq/IRQ.h>
 
 extern "C" void USB_IRQHandler(void);
 

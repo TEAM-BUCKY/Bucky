@@ -1,4 +1,4 @@
-#include "hardware/sensors/LineSensor.h"
+#include "LineSensor.h"
 
 static constexpr LineColor RGB[3] = {LineColor::Red, LineColor::Green, LineColor::Blue};
 

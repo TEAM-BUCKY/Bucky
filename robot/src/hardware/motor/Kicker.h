@@ -1,17 +1,17 @@
 #ifndef ROBOT_KICKER_H
 #define ROBOT_KICKER_H
-#include "Motors.h"
+#include <hardware/motor/Motors.h>
 
 class Kicker {
     PinName kickerPin;
-    PwmPin kickerPwm;
+    PWMPin kickerPWM;
 
 public:
     explicit Kicker(const PinName pin) : kickerPin(pin) {}
 
     void init();
 
-    void kick(float speed) const;
+    void kick(Percentage speed) const;
     void stop() const;
 };
 

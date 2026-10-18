@@ -1,30 +1,31 @@
 #include "Motors.h"
-#include "debug.h"
-#include "hardware/io/cordic/cordic.h"
+#include <debug.h>
+#include <hardware/io/cordic/cordic.h>
 #include <cmath>
 
-#include "helpers/Math.h"
-#include "optimizations/logic.h"
+#include <hardware/motor/MotorDriver.h>
+#include <helpers/math/Math.h>
+#include <helpers/types.h>
+#include <optimizations/logic.h>
 
-constexpr float STOP_DEADBAND = 0.05f;
+constexpr float STOP_DEADBAND = 0.03f;
 
-constexpr uint32_t MOTOR_PWM_FREQ_HZ = 5000;
-constexpr uint32_t MOTOR_PWM_RESOLUTION = 3399;
+constexpr float ACCELERATION_TIME = 30000; // Time required to go from speed 0 to speed 100 in ms
 
-constexpr float timePer100 = 30000; // Time required to go from speed 0 to speed 100 in ms
-
-static FORCE_INLINE float clampSpeed(const float speed) {
-    return clamp(speed, -100.0f, 100.0f);
-}
-
-static void initPwm(PwmPin& pw, const PinName pin) {
+static void initPwm(PWMPin& pw, const PinName pin) {
     pw = pwm_pin_init(pin);
-    pwm_init(&pw, MOTOR_PWM_FREQ_HZ, MOTOR_PWM_RESOLUTION);
+    pwm_init(&pw, DRIVER_PWM_FREQ_HZ, DRIVER_PWM_RESOLUTION);
     pwm_write(&pw, 0);
     pwm_sync_register(&pw);
 }
 
-void Motors::init(const float minSpeed, const float maxSpeed, const EncoderPins enc[MOTOR_COUNT])
+/**
+ * Initialize the motors.
+ * @param minSpeed the minimum speed to motors in the range [0.0f, 1.0f]
+ * @param maxSpeed the maximum speed to motors in the range [0.0f, 1.0f]
+ * @param enc an array of encoder pin configurations for each motor, or nullptr if encoders are not used
+ */
+void Motors::init(const Percentage minSpeed, const Percentage maxSpeed, const EncoderPins enc[MOTOR_COUNT])
 {
     changeSpeed(minSpeed, maxSpeed);
 
@@ -45,15 +46,15 @@ void Motors::init(const float minSpeed, const float maxSpeed, const EncoderPins 
 
     if (enc != nullptr) {
         for (uint8_t i = 0; i < MOTOR_COUNT; i++)
-            encoder_init(i, enc[i]);
+            encoder_init(i, &enc[i]);
         encodersEnabled = true;
     }
 }
 
-template<bool stage>
-void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const int speedB)
+template<bool shouldStage>
+void FORCE_INLINE writeMotorSpeed(const MotorPWM& motor, const int speedA, const int speedB)
 {
-    if constexpr (stage) {
+    if constexpr (shouldStage) {
         pwm_stage(&motor.inA, speedA);
         pwm_stage(&motor.inB, speedB);
     } else {
@@ -62,25 +63,25 @@ void FORCE_INLINE writeMotorSpeed(const MotorPwm& motor, const int speedA, const
     }
 }
 
-template<bool stage>
-void Motors::setMotorSpeed(const MotorPwm& motor, const float targetSpeed) const
+template<bool shouldStage>
+void Motors::setMotorSpeed(const MotorPWM& motor, const Percentage targetSpeed) const
 {
     if (fabsf(targetSpeed) <= STOP_DEADBAND) {
-        writeMotorSpeed<stage>(motor, 0, 0);
+        writeMotorSpeed<shouldStage>(motor, 0, 0);
         return;
     }
 
     const auto speed = static_cast<int>(fabsf(targetSpeed) * speedRange.scale + speedRange.min);
     if (targetSpeed < 0)
-        writeMotorSpeed<stage>(motor, 0, speed);
+        writeMotorSpeed<shouldStage>(motor, 0, speed);
     else
-        writeMotorSpeed<stage>(motor, speed, 0);
+        writeMotorSpeed<shouldStage>(motor, speed, 0);
 }
 
 // Hermite smoothstep from begin to target over a time proportional to the speed change.
 float getSmoothFunction(const float begin, const float target, const float totalSpeed, const uint32_t time)
 {
-    const float duration = fabsf(begin - totalSpeed) * timePer100;
+    const float duration = fabsf(begin - totalSpeed) * ACCELERATION_TIME;
     const auto floatTime = static_cast<float>(time);
 
     if (floatTime > duration)
@@ -91,7 +92,7 @@ float getSmoothFunction(const float begin, const float target, const float total
     return begin + smoothStep * (target - begin);
 }
 
-template<bool stage>
+template<bool shouldStage>
 void Motors::updateMotor(Motor& motor) const
 {
     const uint32_t timeSinceBeginSmooth = micros() - motor.beginTimeMs;
@@ -99,13 +100,13 @@ void Motors::updateMotor(Motor& motor) const
     motor.motor.currentSpeed = setpoint;
 
     if (!encodersEnabled || !encoder_is_active(motor.encoderIndex)) {
-        setMotorSpeed<stage>(motor.motor, setpoint);
+        setMotorSpeed<shouldStage>(motor.motor, setpoint);
         return;
     }
 
     if (fabsf(setpoint) <= STOP_DEADBAND) {
         motor.pi.integral = 0.0f;
-        setMotorSpeed<stage>(motor.motor, 0.0f);
+        setMotorSpeed<shouldStage>(motor.motor, 0.0f);
         return;
     }
 
@@ -118,14 +119,22 @@ void Motors::updateMotor(Motor& motor) const
     motor.pi.integral = clamp(motor.pi.integral + error, -piIntegralMax, piIntegralMax);
     const float correction = kP * error + kI * motor.pi.integral;
 
-    setMotorSpeed<stage>(motor.motor, clampSpeed(setpoint + correction));
+    setMotorSpeed<shouldStage>(motor.motor, Percentage(setpoint + correction));
 }
 
+/**
+ * Update all motors immediately
+ */
 void Motors::updateAllMotors() {
+
     for (Motor& m : motors) updateMotor<false>(m);
 }
 
+/**
+ * Commit staged motor updates.
+ */
 void Motors::syncUpdateAllMotors() {
+
     for (Motor& m : motors) updateMotor<true>(m);
     pwm_commit();
 }
@@ -140,19 +149,33 @@ void Motors::drive(Motor& motor, const float speed, const float totalSpeed) {
     motor.beginTimeMs = micros();
 }
 
-void Motors::wheelSpeeds(const float sinHeading, const float cosHeading, const float scale,
-                              const float rotation, float out[MOTOR_COUNT]) {
+void Motors::wheelSpeeds(const float sinHeading, const float cosHeading, const Percentage scale,
+                              const Percentage rotation, float out[MOTOR_COUNT]) {
     out[0] = (0.5f * sinHeading - _SIN_60_F * cosHeading) * scale + rotation;
     out[1] = -sinHeading * scale + rotation;
     out[2] = (0.5f * sinHeading + _SIN_60_F * cosHeading) * scale + rotation;
 }
 
-void Motors::driveDegrees(const float degrees, const float scale, const float rotation) {
+/**
+ * Drive in a direction specified in degrees, with a translation scale and rotation term.
+ * Degrees are clockwise from +y (forward): 0 = forward, 90 = right, 180 = backward, 270 = left.
+ * @param degrees The direction to drive, in degrees.
+ * @param scale The translation scale, in the range [0.0f, 1.0f]
+ * @param rotation The rotation term, in the range [-1.0f, 1.0f].
+ */
+void Motors::driveDegrees(const float degrees, const Percentage scale, const PercentageSigned rotation) {
     driveRadians(Math::degreesToRadians(degrees), scale, rotation);
 }
 
-void Motors::driveRadians(const float radians, const float scale, const float rotation) {
-    const float rotationScale = fmaxf(scale, fabsf(rotation)) / 100.0f;
+/**
+ * Drive in a direction specified in radians, with a translation scale and a rotation term.
+ * Radians are clockwise from +y (forward): 0 = forward, π/2 = right, π = backward, 3π/2 = left.
+ * @param radians The direction to drive, in radians.
+ * @param scale The translation scale, in the range [0.0f, 1.0f].
+ * @param rotation The rotation term, in the range [-1.0f, 1.0f].
+ */
+void Motors::driveRadians(const float radians, const Percentage scale, const PercentageSigned rotation) {
+    const Percentage rotationScale = fmaxf(scale, fabsf(rotation)) / 1.0f;
 
     float sinRadians, cosRadians;
     cordic_sin_cos(radians, &sinRadians, &cosRadians);
@@ -161,14 +184,19 @@ void Motors::driveRadians(const float radians, const float scale, const float ro
     wheelSpeeds(sinRadians, cosRadians, scale, rotation * rotationScale, speeds);
 
     for (uint8_t i = 0; i < MOTOR_COUNT; i++)
-        drive(motors[i], clampSpeed(speeds[i]), scale);
+        drive(motors[i], Percentage(speeds[i]), scale);
 
     DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MOTOR, "Drive: radians=" + String(radians) + ", scale=" + String(scale) + ", rotation=" + String(rotation));
 }
 
+/**
+ * Drive in a direction specified by a vector.
+ * @param vector The vector specifying the direction and magnitude of movement.
+ * @param rotation The rotation term, in the range [-100, 100].
+ */
 void Motors::driveVector(const VectorXY vector, const float rotation) {
+
     float angleRad, magnitude;
-    // Angles are clockwise from +y (forward): angle = atan2(x, y)
     cordic_atan2_mod(vector.x, vector.y, &angleRad, &magnitude);
 
     driveRadians(angleRad, magnitude, rotation);
@@ -180,7 +208,7 @@ void Motors::driveMotorsDirect(const float m1Speed, const float m2Speed, const f
 
     for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
         Motor& m = motors[i];
-        const float speed = clampSpeed(speeds[i]);
+        const float speed = Percentage(speeds[i]);
         m.beginSpeed = speed;
         m.targetSpeed = speed;
         m.totalSpeed = fabsf(speed);

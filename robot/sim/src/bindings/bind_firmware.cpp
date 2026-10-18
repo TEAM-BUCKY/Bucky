@@ -12,13 +12,13 @@
 #include "hardware/motor/Kicker.h"
 #include "hardware/motor/Motors.h"
 #include "hardware/sensors/Button.h"
-#include "hardware/sensors/GPort.h"
-#include "hardware/sensors/IRRing.h"
-#include "hardware/sensors/LineSensor.h"
+#include "hardware/sensors/gport/GPort.h"
+#include "hardware/sensors/ir/IRRing.h"
+#include "hardware/sensors/ln/LineSensor.h"
 #include "hardware/sensors/pos/Accelerometer.h"
 #include "hardware/sensors/pos/Compass.h"
 #include "hardware/sensors/pos/Sonar.h"
-#include "helpers/Math.h"
+#include "helpers/math/Math.h"
 #include "strategy/DigitalField.h"
 #include "strategy/EKF.h"
 
@@ -118,9 +118,6 @@ void bind_firmware(py::module_& m) {
         .value("CONFIGURE", CompassState::CONFIGURE).value("SETTLE_WAIT", CompassState::SETTLE_WAIT)
         .value("SAMPLING", CompassState::SAMPLING).value("READY", CompassState::READY)
         .value("FAILED", CompassState::FAILED);
-    py::enum_<EncoderBackend>(m, "EncoderBackend")
-        .value("None_", EncoderBackend::None).value("Timer", EncoderBackend::Timer)
-        .value("Exti", EncoderBackend::Exti);
 
     py::class_<I2CDMABus>(m, "I2CDMABus").def(py::init<>());
     m.def("make_sensor_bus", [] {
@@ -438,14 +435,13 @@ void bind_firmware(py::module_& m) {
     m.def("wrapDegrees", &Math::wrapDegrees);
     m.def("wrapSignedDegrees", &Math::wrapSignedDegrees);
 
-    m.def("encoder_init", [](const uint8_t i) { encoder_init(i, Board::ENCODERS[i]); },
-          "encoder_init(i, Board::ENCODERS[i])");
+    m.def("encoder_init", [](const uint8_t i) { encoder_init(i, &Board::ENCODERS[i]); },
+          "encoder_init(i, &Board::ENCODERS[i])");
     m.def("encoder_get_ticks", &encoder_get_ticks);
     m.def("encoder_get_speed", &encoder_get_speed);
     m.def("encoder_reset", &encoder_reset);
     m.def("encoder_is_active", &encoder_is_active);
     m.def("encoder_update_speed", &encoder_update_speed);
-    m.def("encoder_backend", &encoder_backend);
 
     // ---- main.cpp's globals -------------------------------------------------------------------
     auto g = m.def_submodule("globals",

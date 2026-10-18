@@ -5,9 +5,9 @@
 #include <stddef.h>
 #include <PinNames.h>
 
-#include "hardware/io/mcu.h"
-#include "hardware/io/dma/DMA.h"
-#include "hardware/io/irq/IRQ.h"
+#include <hardware/io/mcu.h>
+#include <hardware/io/dma/DMA.h>
+#include <hardware/io/irq/IRQ.h>
 
 // USART with DMA on both directions.
 //

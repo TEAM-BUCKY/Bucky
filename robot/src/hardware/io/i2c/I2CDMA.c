@@ -5,8 +5,8 @@
 #include <PortNames.h>
 #include <pinmap.h>
 
-#include "hardware/io/irq/IRQ.h"
-#include "optimizations/bitboard.h"
+#include <hardware/io/irq/IRQ.h>
+#include <optimizations/bitboard.h>
 
 #define I2C_TIMEOUT (F_CPU / 1000U)  /* ~1 ms of polling */
 

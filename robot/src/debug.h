@@ -3,7 +3,7 @@
 
 #include <Print.h>
 
-#include "hardware/io/serial/SerialPort.h"
+#include <hardware/io/serial/SerialPort.h>
 
 #define DEBUG_LOGGING
 

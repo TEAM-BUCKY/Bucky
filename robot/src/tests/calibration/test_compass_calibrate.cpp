@@ -1,6 +1,6 @@
-#include "../tests.h"
-#include "calibration_storage.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <tests/calibration/calibration_storage.h>
+#include <debug.h>
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <limits.h>

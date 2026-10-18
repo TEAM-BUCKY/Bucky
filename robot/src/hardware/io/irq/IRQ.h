@@ -4,20 +4,20 @@
 #include <stdbool.h>
 #include <PinNames.h>
 
-#include "hardware/io/mcu.h"
+#include <hardware/io/mcu.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-static inline uint32_t irq_lock(void)
+static uint32_t irq_lock(void)
 {
     const uint32_t primask = __get_PRIMASK();
     __disable_irq();
     return primask;
 }
 
-static inline void irq_restore(const uint32_t primask)
+static void irq_restore(const uint32_t primask)
 {
     __set_PRIMASK(primask);
 }

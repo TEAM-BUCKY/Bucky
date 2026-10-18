@@ -14,7 +14,7 @@
 #include "hardware/motor/Kicker.h"
 #include "hardware/motor/Motors.h"
 #include "hardware/sensors/Button.h"
-#include "hardware/sensors/GPort.h"
+#include "hardware/sensors/gport/GPort.h"
 #include "hardware/sensors/pos/Accelerometer.h"
 #include "hardware/sensors/pos/Compass.h"
 #include "hardware/sensors/pos/Sonar.h"

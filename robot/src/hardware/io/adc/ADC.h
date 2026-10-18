@@ -1,10 +1,8 @@
 #ifndef BUCKY_ADC_H
 #define BUCKY_ADC_H
 
-#include "hardware/io/mcu.h"
+#include <hardware/io/mcu.h>
 
-// External trigger index (CFGR.EXTSEL) from a HAL ADC_EXTERNALTRIG_* constant,
-// so trigger sources come from the family's HAL instead of a hand-typed table.
 #define ADC_EXTSEL_FROM_HAL(trig) (((trig) & ADC_CFGR_EXTSEL_Msk) >> ADC_CFGR_EXTSEL_Pos)
 
 #ifdef __cplusplus
@@ -14,7 +12,6 @@ extern "C" {
 void adc_clock_enable(const ADC_TypeDef* adc);
 ADC_Common_TypeDef* adc_common(const ADC_TypeDef* adc);
 
-// Synchronous ADC clock (CKMODE): 1 = HCLK/1, 2 = HCLK/2, 3 = HCLK/4.
 void adc_set_sync_clock(const ADC_TypeDef* adc, uint32_t ckmode);
 
 void adc_disable(ADC_TypeDef* adc);
@@ -24,7 +21,6 @@ typedef enum {
     ADC_TRIGGER_BOTH    = 3,
 } AdcTriggerEdge;
 
-// Continuous DMA stream of one channel, one conversion per trigger edge.
 void adc_init_triggered(ADC_TypeDef* adc, uint32_t channel, uint32_t extsel, uint32_t smp,
                         AdcTriggerEdge edge);
 

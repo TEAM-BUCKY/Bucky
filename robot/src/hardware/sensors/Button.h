@@ -1,8 +1,8 @@
 #ifndef ROBOT_BUTTON_H
 #define ROBOT_BUTTON_H
 
-#include "hardware/io/gpio/gpio.h"
-#include "hardware/io/irq/IRQ.h"
+#include <hardware/io/gpio/gpio.h>
+#include <hardware/io/irq/IRQ.h>
 
 class Button {
 public:

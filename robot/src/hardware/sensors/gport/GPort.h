@@ -3,10 +3,10 @@
 
 #include <Arduino.h>
 
-#include "hardware/io/mcu.h"
-#include "hardware/io/dma/DMA.h"
-#include "hardware/io/gpio/gpio.h"
-#include "hardware/io/irq/IRQ.h"
+#include <hardware/io/mcu.h>
+#include <hardware/io/dma/DMA.h>
+#include <hardware/io/gpio/gpio.h>
+#include <hardware/io/irq/IRQ.h>
 
 enum class GSensorKind : uint8_t {
     None,

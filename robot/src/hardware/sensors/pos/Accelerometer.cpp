@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include "Accelerometer.h"
-#include "debug.h"
-#include "optimizations/bitboard.h"
+#include <debug.h>
+#include <optimizations/bitboard.h>
 
 void Accelerometer::begin(I2CDMABus& busRef) {
     bus = &busRef;

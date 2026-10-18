@@ -1,9 +1,9 @@
 #ifndef BUCKY_CORDIC_H
 #define BUCKY_CORDIC_H
 
-#include "hardware/io/mcu.h"
+#include <hardware/io/mcu.h>
 
-#include "optimizations/optimizations.h"
+#include <optimizations/optimizations.h>
 
 #ifdef __cplusplus
 extern "C" {

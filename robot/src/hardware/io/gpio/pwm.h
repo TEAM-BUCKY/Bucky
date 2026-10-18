@@ -5,12 +5,12 @@
 #include <PeripheralPins.h>
 #include <pinmap.h>
 
-#include "hardware/io/mcu.h"
-#include "hardware/io/gpio/gpio.h"
-#include "hardware/io/timer/Timer.h"
+#include <hardware/io/mcu.h>
+#include <hardware/io/gpio/gpio.h>
+#include <hardware/io/timer/Timer.h>
 
-#include "optimizations/bitboard.h"
-#include "optimizations/optimizations.h"
+#include <optimizations/bitboard.h>
+#include <optimizations/optimizations.h>
 
 #define PWM_SYNC_MAX_PINS   8
 #define PWM_SYNC_MAX_TIMERS 4
@@ -23,40 +23,40 @@ typedef struct {
     uint8_t syncIndex;
     uint8_t complementary;
     PinName mappedPin;
-} PwmPin;
+} PWMPin;
 
 typedef struct {
     volatile uint32_t *ccr;
     uint32_t value;
-} PwmStagedPin;
+} PWMStagedPin;
 
 typedef struct {
-    PwmStagedPin pins[PWM_SYNC_MAX_PINS];
+    PWMStagedPin pins[PWM_SYNC_MAX_PINS];
     uint8_t pinCount;
     uint8_t dirtyPins;
     TIM_TypeDef *timers[PWM_SYNC_MAX_TIMERS];
     uint8_t timerCount;
-} PwmSyncState;
+} PWMSyncState;
 
-inline PwmSyncState pwm_sync = {};
+inline PWMSyncState pwm_sync = {};
 
 static FORCE_INLINE bool pwm_same_gpio_pin(const PinName a, const PinName b)
 {
     return STM_PORT(a) == STM_PORT(b) && STM_PIN(a) == STM_PIN(b);
 }
 
-static FORCE_INLINE PwmPin pwm_pin_none()
+static FORCE_INLINE PWMPin pwm_pin_none()
 {
-    PwmPin pw = {};
+    PWMPin pw = {};
     pw.mappedPin = NC;
     pw.syncIndex = PWM_SYNC_NONE;
     return pw;
 }
 
-static FORCE_INLINE PwmPin pwm_pin_from_map(const PinName mappedPin, TIM_TypeDef *timer,
+static FORCE_INLINE PWMPin pwm_pin_from_map(const PinName mappedPin, TIM_TypeDef *timer,
                                             const uint8_t channel, const bool complementary)
 {
-    PwmPin pw = pwm_pin_none();
+    PWMPin pw = pwm_pin_none();
     pw.timer = timer;
     pw.channel = channel;
     pw.complementary = complementary;
@@ -65,7 +65,7 @@ static FORCE_INLINE PwmPin pwm_pin_from_map(const PinName mappedPin, TIM_TypeDef
     return pw;
 }
 
-static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
+static FORCE_INLINE PWMPin pwm_pin_init(const PinName pn)
 {
     uint8_t channel = 0;
     bool complementary = false;
@@ -76,7 +76,7 @@ static FORCE_INLINE PwmPin pwm_pin_init(const PinName pn)
     return pwm_pin_from_map(pn, timer, channel, complementary);
 }
 
-static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
+static FORCE_INLINE PWMPin pwm_pin_init(const int pin)
 {
     const PinName pn = digitalPinToPinName(pin);
 
@@ -103,7 +103,7 @@ static FORCE_INLINE PwmPin pwm_pin_init(const int pin)
                             STM_PIN_INVERTED(bestEntry->function));
 }
 
-static FORCE_INLINE void pwm_init(const PwmPin *pw, const uint32_t freq, const uint32_t resolution)
+static FORCE_INLINE void pwm_init(const PWMPin *pw, const uint32_t freq, const uint32_t resolution)
 {
     if (pw->ccr == nullptr) {
         return;
@@ -126,7 +126,7 @@ static FORCE_INLINE void pwm_init(const PwmPin *pw, const uint32_t freq, const u
     tim_pin_connect(pw->mappedPin);
 }
 
-static FORCE_INLINE void pwm_write(const PwmPin *pw, const uint32_t value)
+static FORCE_INLINE void pwm_write(const PWMPin *pw, const uint32_t value)
 {
     if (pw->ccr == nullptr) {
         return;
@@ -134,7 +134,7 @@ static FORCE_INLINE void pwm_write(const PwmPin *pw, const uint32_t value)
     *pw->ccr = value;
 }
 
-static FORCE_INLINE void pwm_sync_register(PwmPin *pw)
+static FORCE_INLINE void pwm_sync_register(PWMPin *pw)
 {
     if (pw->ccr == nullptr) {
         return;
@@ -177,7 +177,7 @@ static FORCE_INLINE void pwm_sync_timers()
     __enable_irq();
 }
 
-static FORCE_INLINE void pwm_stage(const PwmPin *pw, const uint32_t value)
+static FORCE_INLINE void pwm_stage(const PWMPin *pw, const uint32_t value)
 {
     if (pw->syncIndex == PWM_SYNC_NONE) {
         return;
@@ -192,8 +192,8 @@ static FORCE_INLINE void pwm_commit()
 
     uint8_t dirty = pwm_sync.dirtyPins;
     Bitloop(dirty) {
-        const PwmStagedPin &pin = pwm_sync.pins[getLSB(dirty)];
-        *pin.ccr = pin.value;
+        const auto & [ccr, value] = pwm_sync.pins[getLSB(dirty)];
+        *ccr = value;
     }
     pwm_sync.dirtyPins = 0;
 

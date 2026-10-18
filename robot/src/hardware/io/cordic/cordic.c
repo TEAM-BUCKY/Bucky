@@ -1,8 +1,8 @@
 #include "cordic.h"
 #include <math.h>
 
-#include "helpers/constants.h"
-#include "optimizations/optimizations.h"
+#include <helpers/constants.h>
+#include <optimizations/optimizations.h>
 
 #if MCU_HAS_CORDIC
 

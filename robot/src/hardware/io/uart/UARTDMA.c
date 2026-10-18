@@ -6,7 +6,7 @@
 #include <pinmap.h>
 #include <uart.h>
 
-#include "optimizations/bitboard.h"
+#include <optimizations/bitboard.h>
 
 /* Enable the instance's RCC clock and return its interrupt. */
 #define UART_CASE(inst) \

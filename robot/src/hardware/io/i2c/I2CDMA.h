@@ -4,13 +4,10 @@
 #include <stdbool.h>
 #include <PinNames.h>
 
-#include "hardware/io/mcu.h"
-#include "hardware/io/dma/DMA.h"
-#include "optimizations/optimizations.h"
-#include "optimizations/bitboard.h"
+#include <hardware/io/mcu.h>
+#include <hardware/io/dma/DMA.h>
+#include <optimizations/optimizations.h>
 
-// TIMINGR values for a 250 MHz I2C input clock (PCLK, no divider).
-// Not yet verified on a scope.
 #define I2C_TIMING_FM_400K  0x60521A3DU
 #define I2C_TIMING_FMP_1M   0x00C0767CU
 #define I2C_TIMING_FMP_3M4  0x00301C28U
@@ -26,8 +23,6 @@ typedef struct {
     volatile bool busy;
 } I2CDMABus;
 
-// SDA/SCL alternate functions are looked up from the core pin map. The RX DMA
-// complete interrupt is registered through irq_attach(), no handler macro needed.
 void i2c_dma_init_raw(I2CDMABus* bus, I2C_TypeDef* i2c, PinName sda, PinName scl,
                       DmaChannel* dma_rx, uint32_t rx_request,
                       uint32_t timing, uint8_t irq_priority);
@@ -49,7 +44,6 @@ static FORCE_INLINE void i2c_dma_wait(const I2CDMABus* bus) {
     while (bus->busy) {}
 }
 
-// Wait for the running DMA read. False when it has not finished within timeout_ms.
 bool i2c_dma_wait_timeout(const I2CDMABus* bus, uint32_t timeout_ms);
 
 #ifdef __cplusplus

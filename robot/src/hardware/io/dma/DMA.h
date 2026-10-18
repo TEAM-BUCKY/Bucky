@@ -3,15 +3,9 @@
 
 #include <stdbool.h>
 
-#include "hardware/io/mcu.h"
-#include "optimizations/bitboard.h"
-#include "optimizations/optimizations.h"
-
-// GPDMA channel control. The request is selected in CTR2; circular mode is built
-// from a single linked-list item that reloads the channel onto itself.
-//
-// Request IDs come straight from the HAL headers (GPDMA1_REQUEST_*) so nothing
-// here hardcodes a reference-manual table.
+#include <hardware/io/mcu.h>
+#include <optimizations/bitboard.h>
+#include <optimizations/optimizations.h>
 
 typedef DMA_Channel_TypeDef DmaChannel;
 
@@ -26,7 +20,6 @@ typedef enum {
     DMA_WIDTH_32 = 2,
 } DmaWidth;
 
-/* Portable interrupt / flag bits. */
 #define DMA_EVT_TC  0x1U
 #define DMA_EVT_HT  0x2U
 
@@ -34,23 +27,18 @@ typedef enum {
 extern "C" {
 #endif
 
-// Stop the channel and leave it disabled with flags cleared.
 void dma_reset(DmaChannel* ch);
 
-// Configure (but do not enable) a transfer of `count` data items.
 void dma_setup(DmaChannel* ch, DmaDirection dir, DmaWidth width,
                volatile void* periph_addr, volatile void* mem_addr,
                uint32_t count, uint32_t request, bool circular);
 
 void dma_enable(DmaChannel* ch);
 
-// Enable TC and/or HT interrupts (DMA_EVT_*) on a configured channel.
 void dma_enable_events(DmaChannel* ch, uint32_t events);
 
-// Data items still to transfer in the current block.
 uint32_t dma_remaining(const DmaChannel* ch);
 
-// Read and clear the channel's pending DMA_EVT_* flags. Call from its ISR.
 uint32_t dma_take_events(DmaChannel* ch);
 
 IRQn_Type dma_irqn(const DmaChannel* ch);

@@ -1,5 +1,5 @@
-#include "tests.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <debug.h>
 
 void testSonar(const TestContext& ctx) {
     DBG_PRINTLN("=== Sonar Test ===");

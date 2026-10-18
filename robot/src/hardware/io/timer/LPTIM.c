@@ -5,7 +5,7 @@
 #include <Arduino.h>
 #include <pinmap.h>
 
-#include "optimizations/bitboard.h"
+#include <optimizations/bitboard.h>
 
 #define LPTIM_MAX_PRESC_LOG2  7U   /* /128 */
 

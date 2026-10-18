@@ -3,7 +3,7 @@
 
 #include <cmath>
 
-#include "optimizations.h"
+#include <optimizations/optimizations.h>
 
 static FORCE_INLINE float clamp(const float value, const float min, const float max)
 {

@@ -5,10 +5,10 @@
 // Everything that differs between boards lives in these headers; drivers only
 // receive the values.
 
-#include "hardware/io/mcu.h"
+#include <hardware/io/mcu.h>
 
 #if defined(MCU_FAMILY_H5)
-#include "board_h562rg.h"
+#include <board/board_h562rg.h>
 #endif
 
 #endif // BUCKY_BOARD_H

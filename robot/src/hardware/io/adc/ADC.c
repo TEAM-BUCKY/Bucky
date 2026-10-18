@@ -1,6 +1,6 @@
 #include "ADC.h"
 #include <Arduino.h>
-#include "optimizations/bitboard.h"
+#include <optimizations/bitboard.h>
 
 void adc_clock_enable(const ADC_TypeDef* adc)
 {

@@ -1,13 +1,13 @@
-#include "../tests.h"
-#include "calibration_storage.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <tests/calibration/calibration_storage.h>
+#include <debug.h>
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <utility/stm32_eeprom.h>
 #include <cmath>
-#include "hardware/io/encoder/Encoder.h"
-#include "hardware/io/cordic/cordic.h"
-#include "helpers/Math.h"
+#include <hardware/io/encoder/Encoder.h>
+#include <hardware/io/cordic/cordic.h>
+#include <helpers/math/Math.h>
 
 // EEPROM.put() flushes the whole 2KB flash page after every byte, so saving a
 // 596-byte struct takes ~12s and burns hundreds of flash cycles. This helper

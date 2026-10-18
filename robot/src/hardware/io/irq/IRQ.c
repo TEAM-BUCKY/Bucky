@@ -3,8 +3,8 @@
 #include <string.h>
 #include <PortNames.h>
 
-#include "optimizations/bitboard.h"
-#include "optimizations/optimizations.h"
+#include <optimizations/bitboard.h>
+#include <optimizations/optimizations.h>
 
 #define VECTOR_COUNT (16U + MCU_IRQ_COUNT)
 

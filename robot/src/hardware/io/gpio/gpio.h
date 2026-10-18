@@ -3,10 +3,10 @@
 
 #include <Arduino.h>
 
-#include "hardware/io/mcu.h"
+#include <hardware/io/mcu.h>
 
-#include "optimizations/bitboard.h"
-#include "optimizations/optimizations.h"
+#include <optimizations/bitboard.h>
+#include <optimizations/optimizations.h>
 
 typedef struct {
     GPIO_TypeDef *port;

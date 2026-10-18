@@ -3,7 +3,7 @@
 
 #include <Print.h>
 
-#include "hardware/io/uart/UARTDMA.h"
+#include <hardware/io/uart/UARTDMA.h>
 
 class SerialPort : public Print {
 public:

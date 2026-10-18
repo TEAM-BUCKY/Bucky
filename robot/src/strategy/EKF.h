@@ -2,8 +2,8 @@
 #define ROBOT_EKF_H
 #include <cstdint>
 
-#include "DigitalField.h"
-#include "helpers/Math.h"
+#include <strategy/DigitalField.h>
+#include <helpers/math/Math.h>
 
 // Frames / units used everywhere in the EKF:
 //  - field frame: cm, origin as in DigitalField

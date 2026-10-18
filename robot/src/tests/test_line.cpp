@@ -1,9 +1,9 @@
-#include "tests.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <debug.h>
 #include <Arduino.h>
 
-#include "hardware/sensors/Button.h"
-#include "hardware/sensors/LineSensor.h"
+#include <hardware/sensors/Button.h>
+#include <hardware/sensors/ln/LineSensor.h>
 
 static void printRaw(const LineSensor& line) {
     DBG_PRINTLN("sensor\tR\tG\tB\tDark\tR-D\tG-D\tB-D");

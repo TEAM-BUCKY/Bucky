@@ -1,17 +1,17 @@
-#include "debug.h"
+#include <debug.h>
 
-#include "board/board.h"
-#include "hardware/io/cordic/cordic.h"
-#include "hardware/io/gpio/gpio.h"
-#include "hardware/io/i2c/I2CDMA.h"
-#include "hardware/io/serial/SerialPort.h"
-#include "hardware/comms/HM10.h"
-#include "hardware/motor/Kicker.h"
-#include "hardware/motor/Motors.h"
-#include "hardware/sensors/Button.h"
-#include "hardware/sensors/pos/Compass.h"
-#include "hardware/sensors/pos/Sonar.h"
-#include "tests/tests.h"
+#include <board/board.h>
+#include <hardware/io/cordic/cordic.h>
+#include <hardware/io/gpio/gpio.h>
+#include <hardware/io/i2c/I2CDMA.h>
+#include <hardware/io/serial/SerialPort.h>
+#include <hardware/comms/HM10.h>
+#include <hardware/motor/Kicker.h>
+#include <hardware/motor/Motors.h>
+#include <hardware/sensors/Button.h>
+#include <hardware/sensors/pos/Compass.h>
+#include <hardware/sensors/pos/Sonar.h>
+#include <tests/tests.h>
 
 // Set to run a test instead of the main loop.
 #define RUN_TEST testBluetooth
@@ -72,7 +72,7 @@ void setupEnvironment() {
 
     analogReadResolution(12);
 
-    motorDriver.init(MIN_SPEED, MAX_SPEED, Board::ENCODERS);
+    motorDriver.init(0.0f, 1.0f, Board::ENCODERS);
 #ifdef BOARD_HAS_KICKER
     kicker.init();
 #endif
@@ -111,13 +111,9 @@ void setupEnvironment() {
 #endif
 
 
-#ifdef RUN_TEST
-    dbg.setBlocking(true);   // test reports are long; let them arrive complete
-    #ifdef BOARD_HAS_KICKER
+
     Kicker* const kickerPtr = &kicker;
-#else
-    Kicker* const kickerPtr = nullptr;
-#endif
+
 #ifdef BOARD_HAS_BLUETOOTH
     HM10* const bluetoothPtr = &bluetooth;
 #else
@@ -125,11 +121,13 @@ void setupEnvironment() {
 #endif
     const TestContext ctx = {motorDriver, kickerPtr, compass, accel, sonar, sensorI2C, irPort(), linePort(),
                              bluetoothPtr};
+
+#ifdef RUN_TEST
+    dbg.setBlocking(true);   // test reports are long; let them arrive complete
     RUN_TEST(ctx);
 #endif
-#ifdef BOARD_HAS_KICKER
+
     kicker.kick(1.0f);
-#endif
     motorDriver.driveMotorsDirect(100, 0, 0);
 
     uint32_t lastTick = millis();

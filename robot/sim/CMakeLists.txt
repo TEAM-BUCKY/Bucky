@@ -54,18 +54,17 @@ set(FW_SOURCES
     "${FIRMWARE_DIR}/main.cpp"
     "${FIRMWARE_DIR}/hardware/motor/Motors.cpp"
     "${FIRMWARE_DIR}/hardware/motor/Kicker.cpp"
-    "${FIRMWARE_DIR}/hardware/sensors/GPort.cpp"
-    "${FIRMWARE_DIR}/hardware/sensors/LineSensor.cpp"
-    "${FIRMWARE_DIR}/hardware/sensors/IRRing.cpp"
+    "${FIRMWARE_DIR}/hardware/sensors/gport/GPort.cpp"
+    "${FIRMWARE_DIR}/hardware/sensors/ln/LineSensor.cpp"
+    "${FIRMWARE_DIR}/hardware/sensors/ir/IRRing.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Compass.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Accelerometer.cpp"
     "${FIRMWARE_DIR}/hardware/sensors/pos/Sonar.cpp"
-    "${FIRMWARE_DIR}/hardware/io/encoder/Encoder.cpp"
+    "${FIRMWARE_DIR}/hardware/io/encoder/Encoder.c"
     "${FIRMWARE_DIR}/hardware/comms/HM10.cpp"
     "${FIRMWARE_DIR}/hardware/io/cordic/cordic.c"
     "${FIRMWARE_DIR}/strategy/EKF.cpp"
     "${FIRMWARE_DIR}/strategy/DigitalField.cpp"
-    "${FIRMWARE_DIR}/helpers/MatrixMultiplyArm.cpp"
     ${FW_TESTS})
 add_library(bucky_firmware OBJECT ${FW_SOURCES})
 target_include_directories(bucky_firmware PRIVATE ${SIM_INCLUDES})

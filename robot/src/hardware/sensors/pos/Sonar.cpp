@@ -1,10 +1,10 @@
 #include "Sonar.h"
-#include "hardware/io/gpio/gpio.h"
+#include <hardware/io/gpio/gpio.h>
 #include <HardwareTimer.h>
 
-#include "hardware/io/irq/IRQ.h"
+#include <hardware/io/irq/IRQ.h>
 
-#include "debug.h"
+#include <debug.h>
 
 static GpioPin echoGpio[SONAR_COUNT];
 static PinName echoPinNames[SONAR_COUNT];
@@ -15,13 +15,6 @@ static volatile bool done[SONAR_COUNT];
 
 constexpr uint8_t SONAR_EXTI_PRIORITY = 2;
 
-static void echoISR(void* ctx);
-
-static bool attachEcho(const PinName pin, const int idx) {
-    return exti_attach(pin, EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(idx)),
-                       SONAR_EXTI_PRIORITY);
-}
-
 static void echoISR(void* ctx) {
     const auto idx = reinterpret_cast<intptr_t>(ctx);
     if (gpio_read(echoGpio[idx]))
@@ -30,6 +23,11 @@ static void echoISR(void* ctx) {
         duration[idx] = micros() - riseTime[idx];
         done[idx] = true;
     }
+}
+
+static bool attachEcho(const PinName pin, const int idx) {
+    return exti_attach(pin, EXTI_BOTH, echoISR, reinterpret_cast<void*>(static_cast<intptr_t>(idx)),
+                       SONAR_EXTI_PRIORITY);
 }
 
 void Sonar::begin(const SonarPins& pins) {
@@ -43,6 +41,7 @@ void Sonar::begin(const SonarPins& pins) {
 
         echoGpio[i] = gpio_pin_init(echoPinNames[i]);
         gpio_mode(echoGpio[i], INPUT);
+        attachEcho(echoPinNames[i], i);
     }
 }
 

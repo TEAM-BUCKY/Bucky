@@ -1,5 +1,5 @@
-#include "tests.h"
-#include "debug.h"
+#include <tests/tests.h>
+#include <debug.h>
 #include <Arduino.h>
 
 void testHoldHeading(const TestContext& ctx) {

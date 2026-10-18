@@ -1,12 +1,12 @@
-#include "hardware/sensors/GPort.h"
+#include "GPort.h"
 
 #include <PeripheralPins.h>
 #include <pinmap.h>
 
-#include "hardware/io/adc/ADC.h"
-#include "hardware/io/gpio/gpio.h"
-#include "hardware/io/timer/LPTIM.h"
-#include "hardware/io/timer/Timer.h"
+#include <hardware/io/adc/ADC.h>
+#include <hardware/io/gpio/gpio.h>
+#include <hardware/io/timer/LPTIM.h>
+#include <hardware/io/timer/Timer.h>
 
 constexpr uint8_t GPORT_RESET_PRIORITY = 2;
 
@@ -118,7 +118,6 @@ bool GPort::holdClock() {
     return true;
 }
 
-// One high pulse: the mux advances on whichever of its two edges it uses.
 void GPort::stepClock() const {
     gpio_high(clockGpio);
     delayMicroseconds(1);

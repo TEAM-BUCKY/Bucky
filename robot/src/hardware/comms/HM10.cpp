@@ -1,12 +1,13 @@
 #include "HM10.h"
 
 #include <string.h>
-#include <Arduino.h>
+#include <wiring_time.h>
+#include <initializer_list>
 
 namespace
 {
-    constexpr const char* NOTE_CONN = "OK+CONN";
-    constexpr const char* NOTE_LOST = "OK+LOST";
+    constexpr auto NOTE_CONN = "OK+CONN";
+    constexpr auto NOTE_LOST = "OK+LOST";
     constexpr uint32_t PENDING_FLUSH_MS = 20;   // a held-back "OK+..." that never completes is data
     constexpr uint32_t REPLY_QUIET_MS = 20;     // replies have no terminator: done once the line goes quiet
     constexpr uint32_t RESET_BOOT_MS = 1000;
