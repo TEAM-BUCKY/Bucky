@@ -321,7 +321,7 @@ void bind_firmware(py::module_& m) {
         .def(py::init<MotorPin, MotorPin, MotorPin>())
         .def("init", [](Motors& mo, const float minSpeed, const float maxSpeed, const bool encoders) {
             mo.init(minSpeed, maxSpeed, encoders ? Board::ENCODERS : nullptr);
-        }, py::arg("minSpeed") = MIN_SPEED, py::arg("maxSpeed") = MAX_SPEED, py::arg("encoders") = false,
+        }, py::arg("minSpeed") = 0.0f, py::arg("maxSpeed") = 1.0f, py::arg("encoders") = false,
            "encoders=True wires Board::ENCODERS, like setupEnvironment()")
         .def("updateAllMotors", &Motors::updateAllMotors)
         .def("syncUpdateAllMotors", &Motors::syncUpdateAllMotors)
@@ -329,7 +329,7 @@ void bind_firmware(py::module_& m) {
         .def("driveRadians", &Motors::driveRadians, py::arg("radians"), py::arg("scale") = 100, py::arg("rotation") = 0)
         .def("driveVector", &Motors::driveVector, py::arg("vector"), py::arg("rotation") = 0)
         .def("driveMotorsDirect", &Motors::driveMotorsDirect)
-        .def("changeSpeed", &Motors::changeSpeed, py::arg("minSpeed") = MIN_SPEED, py::arg("maxSpeed") = MAX_SPEED)
+        .def("changeSpeed", &Motors::changeSpeed, py::arg("minSpeed") = 0.0f, py::arg("maxSpeed") = 1.0f)
         .def("getSpeedRange", &Motors::getSpeedRange)
         .def("setPIGains", &Motors::setPIGains)
         .def("setMaxTicksPerSec", py::overload_cast<float>(&Motors::setMaxTicksPerSec))
@@ -353,8 +353,6 @@ void bind_firmware(py::module_& m) {
             Motors::wheelSpeeds(s, c, scale, rot, out);
             return py::make_tuple(out[0], out[1], out[2]);
         }, py::arg("sinHeading"), py::arg("cosHeading"), py::arg("scale"), py::arg("rotation"));
-    m.attr("MIN_SPEED") = MIN_SPEED;
-    m.attr("MAX_SPEED") = MAX_SPEED;
     m.def("getSmoothFunction", &getSmoothFunction, py::arg("begin"), py::arg("target"),
           py::arg("totalSpeed"), py::arg("time"));
 
