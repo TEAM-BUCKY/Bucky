@@ -21,6 +21,7 @@ class Sonar {
 
         uint32_t trigStart = 0;
         bool reading = false;
+        SonarReading lastReading = {};
 
     public:
         // One shared trigger pin; at most SONAR_COUNT echo pins.
@@ -29,6 +30,8 @@ class Sonar {
         void startRead();
         bool isReadComplete() const;
         SonarReading processRead();
+        // Result of the most recent processRead().
+        [[nodiscard]] const SonarReading& last() const { return lastReading; }
 
         SonarReading read();
 };

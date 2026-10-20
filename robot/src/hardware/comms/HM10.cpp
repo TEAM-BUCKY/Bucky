@@ -1,7 +1,7 @@
 #include "HM10.h"
 
 #include <string.h>
-#include <wiring_time.h>
+#include <Arduino.h>
 #include <initializer_list>
 
 namespace

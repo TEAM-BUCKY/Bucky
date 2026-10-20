@@ -6,9 +6,12 @@
 #include <hardware/io/i2c/I2CDMA.h>
 #include <hardware/io/serial/SerialPort.h>
 #include <hardware/comms/HM10.h>
+#include <hardware/comms/Telemetry.h>
 #include <hardware/motor/Kicker.h>
 #include <hardware/motor/Motors.h>
 #include <hardware/sensors/Button.h>
+#include <hardware/sensors/ir/IRRing.h>
+#include <hardware/sensors/ln/LineSensor.h>
 #include <hardware/sensors/pos/Compass.h>
 #include <hardware/sensors/pos/Sonar.h>
 #include <tests/tests.h>
@@ -39,6 +42,10 @@ GPort gPort2;
     if constexpr (Board::G_PORT2_KIND == GSensorKind::Line) return &gPort2;
     return nullptr;
 }
+
+// Only fed while their port carries that sensor kind (see irPort()/linePort()).
+IRRing irRing(Board::G_PORT1_KIND == GSensorKind::IR ? gPort1 : gPort2);
+LineSensor lineSensor(Board::G_PORT1_KIND == GSensorKind::Line ? gPort1 : gPort2);
 #else
 [[maybe_unused]] [[maybe_unused]] static GPort* irPort() { return nullptr; }
 [[maybe_unused]] static GPort* linePort() { return nullptr; }
@@ -50,8 +57,30 @@ UsbSerialPort host;
 HM10 bluetooth;
 #endif
 
+Telemetry telemetry;
+
+static void setupTelemetry() {
+    TelemetrySources sources;
+    sources.compass = &compass;
+    sources.motors = &motorDriver;
+    sources.sonar = &sonar;
+#ifdef BOARD_HAS_GPORTS
+    if (irPort() != nullptr) sources.irRing = &irRing;
+    if (linePort() != nullptr) sources.line = &lineSensor;
+#endif
+    telemetry.begin(Board::NAME, sources);
+
+    telemetry.addLink(host, 50);
+#ifdef BOARD_HAS_BLUETOOTH
+    telemetry.addLink(bluetooth, 200);
+#endif
+    telemetry.setRawLogOutput(host);
+    dbg.setOutput(telemetry.logSink());
+}
+
 void setupEnvironment() {
     host.begin();
+    setupTelemetry();
     cordic_init();
 
     delay(3000);
@@ -123,6 +152,7 @@ void setupEnvironment() {
 
 #ifdef RUN_TEST
     dbg.setBlocking(true);   // test reports are long; let them arrive complete
+    telemetry.setLogBlocking(true);
     RUN_TEST(ctx);
 #endif
 
@@ -132,6 +162,20 @@ void setupEnvironment() {
     uint32_t lastTick = millis();
     while (true) {
         motorDriver.syncUpdateAllMotors();
+
+        if (compass.isReady() && compass.isReadComplete()) {
+            compass.processRead();
+            compass.startRead();
+        }
+        if (sonar.isReadComplete()) {
+            sonar.processRead();
+            sonar.startRead();
+        }
+#ifdef BOARD_HAS_GPORTS
+        if (irPort() != nullptr) irRing.update();
+        if (linePort() != nullptr) lineSensor.update();
+#endif
+        telemetry.tick();
 
 #ifdef BOARD_HAS_BUTTONS
         if (button1.pressed()) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 1 pressed");

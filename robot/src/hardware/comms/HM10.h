@@ -2,6 +2,7 @@
 #define BUCKY_HM10_H
 
 #include <stdint.h>
+#include <string.h>
 
 #include <hardware/io/serial/SerialPort.h>
 
@@ -18,7 +19,7 @@ public:
     bool begin(const UartHardware& hw, uint32_t baud, const char* name = nullptr);
 
     [[nodiscard]] bool configured() const { return atReady; }
-    [[nodiscard]] bool connected();
+    bool connected() override;
 
     // Drops data while no central is linked: the module would read it as AT commands.
     size_t write(const uint8_t* data, size_t len) override;
@@ -26,10 +27,8 @@ public:
     size_t available() override;
     size_t read(uint8_t* out, size_t len) override;
 
-    int writeString(const char* str) {
-        const size_t written = writeAll(str, strlen(str));
-        return written == strlen(str) ? static_cast<int>(written) : -1;
-    }
+    // True only when the whole string was queued.
+    bool writeString(const char* str) { return writeAll(str, strlen(str)); }
 
 private:
     static constexpr uint16_t RX_SIZE = 256;

@@ -82,13 +82,14 @@ SonarReading Sonar::processRead() {
     SonarReading r;
     for (int i = 0; i < SONAR_COUNT; i++) {
         r.valid[i] = (echoPinNames[i] != NC) && done[i];
+        r.distance[i] = r.valid[i] ? 0.017f * duration[i] : 0.0f;
         DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, "Sonar ");
         DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, i);
         DBG_PRINT_SUBJECT(DEBUG_SUBJ_POSITION, " distance: ");
         DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_POSITION, r.distance[i]);
-        r.distance[i] = r.valid[i] ? 0.017f * duration[i] : 0.0f;
     }
 
+    lastReading = r;
     return r;
 }
 

@@ -130,7 +130,7 @@ float cordic_atan(const float x)
     const uint32_t csr = CORDIC_FUNC_ARCTAN << CORDIC_CSR_FUNC_Pos
         | DEFAULT_PRECISION << CORDIC_CSR_PRECISION_Pos;
 
-    return from_q31(cordic_compute(csr, to_q31(x))) * _PI_F;
+    return from_q31(cordic_compute(csr, to_q31(x))) * PI_F;
 }
 
 void cordic_sinh_cosh(const float x, float *sinh_out, float *cosh_out)

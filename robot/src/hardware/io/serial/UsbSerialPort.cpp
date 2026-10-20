@@ -23,7 +23,7 @@ void UsbSerialPort::begin() {
     started = true;
 }
 
-bool UsbSerialPort::connected() const {
+bool UsbSerialPort::connected() {
     return CDC_connected();
 }
 

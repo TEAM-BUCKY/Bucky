@@ -54,7 +54,7 @@ void UsbSerialPort::drain() {}
 
 void UsbSerialPort::begin() { started = true; }
 
-bool UsbSerialPort::connected() const { return usb_is_connected; }
+bool UsbSerialPort::connected() { return usb_is_connected; }
 
 int UsbSerialPort::availableForWrite() { return static_cast<int>(TX_SIZE - 1); }
 

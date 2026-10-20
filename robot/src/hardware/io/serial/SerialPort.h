@@ -23,6 +23,9 @@ public:
 
     virtual size_t read(uint8_t* out, size_t len) = 0;
 
+    // Whether a peer is listening (USB port opened, BLE central linked). Non-const: may poll the device.
+    virtual bool connected() { return true; }
+
     int read() {
         uint8_t b;
         return read(&b, 1) ? b : -1;
@@ -38,7 +41,7 @@ public:
 
     void begin();
 
-    [[nodiscard]] bool connected() const;
+    bool connected() override;
 
     size_t write(const uint8_t* data, size_t len) override;
     int availableForWrite() override;

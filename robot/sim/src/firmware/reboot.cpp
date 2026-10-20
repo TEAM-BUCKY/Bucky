@@ -9,12 +9,15 @@
 #include "debug.h"
 #include "firmware/firmware.h"
 #include "hardware/comms/HM10.h"
+#include "hardware/comms/Telemetry.h"
 #include "hardware/io/gpio/pwm.h"
 #include "hardware/io/serial/SerialPort.h"
 #include "hardware/motor/Kicker.h"
 #include "hardware/motor/Motors.h"
 #include "hardware/sensors/Button.h"
 #include "hardware/sensors/gport/GPort.h"
+#include "hardware/sensors/ir/IRRing.h"
+#include "hardware/sensors/ln/LineSensor.h"
 #include "hardware/sensors/pos/Accelerometer.h"
 #include "hardware/sensors/pos/Compass.h"
 #include "hardware/sensors/pos/Sonar.h"
@@ -30,6 +33,9 @@ extern GPort gPort1;
 extern GPort gPort2;
 extern UsbSerialPort host;
 extern HM10 bluetooth;
+extern IRRing irRing;
+extern LineSensor lineSensor;
+extern Telemetry telemetry;
 
 namespace {
 template <typename T, typename... Args>
@@ -52,10 +58,13 @@ void firmware_reboot() {
     renew(gPort2);
     renew(host);
     renew(bluetooth);
+    renew(irRing, Board::G_PORT1_KIND == GSensorKind::IR ? gPort1 : gPort2);
+    renew(lineSensor, Board::G_PORT1_KIND == GSensorKind::Line ? gPort1 : gPort2);
+    renew(telemetry);
     renew(dbg);
     renew(button1);
     renew(button2);
-    pwm_sync = PwmSyncState{};
+    pwm_sync = PWMSyncState{};
 }
 
 }  // namespace sim

@@ -13,6 +13,9 @@ gPort1
 gPort2
 host
 bluetooth
+irRing
+lineSensor
+telemetry
 # header-inline globals — re-constructed by firmware_reboot()
 dbg                                 # debug.h
 button1                             # hardware/sensors/Button.h
