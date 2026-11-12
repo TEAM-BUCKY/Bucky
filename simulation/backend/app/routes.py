@@ -134,12 +134,19 @@ class LabVariant(BaseModel):
     params: dict = {}
 
 
+class LabOptimize(BaseModel):
+    # Best-fit search for params set to "*" (bucky.lab.optimize).
+    points: Optional[int] = None    # values tried per param per round
+    rounds: Optional[int] = None
+
+
 class LabSweepRequest(BaseModel):
     module: str
     kind: str = "drive"
     experiment: str = "drive_approach"
     params: dict = {}
     variants: Optional[list[LabVariant]] = None
+    optimize: Optional[LabOptimize] = None
     grid: dict = {}
     sensor_params: dict = {}
     workers: Optional[int] = None

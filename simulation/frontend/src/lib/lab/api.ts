@@ -83,6 +83,28 @@ export interface VariantResult {
 	by_heading?: (Summary & { heading_deg: number })[];
 }
 
+/** Best-fit search over params set to "*" (backend bucky/lab/optimize.py). */
+export interface OptimizeResult {
+	objective: string;
+	points: number;
+	rounds: number;
+	best: Record<string, ParamValue>;
+	best_score: number;
+	start: Record<string, ParamValue>;
+	axes: { name: string; type: string; lo: number; hi: number; choices: ParamValue[] | null }[];
+	/** Every evaluated point, best first. */
+	history: { params: Record<string, ParamValue>; score: number; overall: Summary }[];
+}
+
+export interface SearchStatus {
+	round: number;
+	rounds: number;
+	axis: string;
+	evaluations: number;
+	best: Record<string, ParamValue>;
+	best_score: number | null;
+}
+
 export interface SweepResult {
 	module: string;
 	kind: string;
@@ -91,6 +113,7 @@ export interface SweepResult {
 	n_scenarios: number;
 	elapsed_s: number;
 	variants: VariantResult[];
+	optimize?: OptimizeResult;
 }
 
 export interface SweepJob {
@@ -100,6 +123,9 @@ export interface SweepJob {
 	total: number;
 	error: string | null;
 	result?: SweepResult;
+	/** True when the request had params set to "*" (a best-fit search). */
+	optimize?: boolean;
+	search?: SearchStatus | null;
 }
 
 export interface TraceFrame {
@@ -122,6 +148,7 @@ export interface SweepRequest {
 	experiment: string;
 	params: Record<string, ParamValue>;
 	variants?: { label: string; params: Record<string, ParamValue> }[] | null;
+	optimize?: { points: number; rounds: number } | null;
 	grid: Record<string, ParamValue>;
 	sensor_params: Record<string, Record<string, ParamValue>>;
 	seed: number;
@@ -176,6 +203,10 @@ export function toField(p: readonly [number, number] | readonly number[]): { x: 
 export function toFieldTheta(h: number): number {
 	return h + Math.PI / 2;
 }
+
+/** A param value of "*" or "*lo..hi": search it for the best fit. */
+export const isStar = (v: ParamValue | undefined): v is string =>
+	typeof v === 'string' && v.trim().startsWith('*');
 
 export function defaults(spec: Record<string, ParamSpec>): Record<string, ParamValue> {
 	return Object.fromEntries(Object.entries(spec).map(([k, p]) => [k, Array.isArray(p.default) ? [...p.default] : p.default]));

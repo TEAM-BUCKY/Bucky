@@ -7,6 +7,7 @@ Usage:
     uv run python scripts/lab.py list
     uv run python scripts/lab.py sweep bisector --grid ball_step_cm=10 --param speed=0.4
     uv run python scripts/lab.py sweep bisector --variant fast:speed=0.8 --variant slow:speed=0.3
+    uv run python scripts/lab.py sweep bisector --param 'behind_dist=*' --param 'speed=*0.3..1'
     uv run python scripts/lab.py replay bisector --ball 0 0 --robot 0 40
 
 The real firmware (robot/src, see bucky/firmware) runs as modules of kind "firmware", one per
@@ -25,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from bucky.lab import registry  # noqa: E402
 from bucky.lab.experiments import get_experiment, list_experiments  # noqa: E402
 from bucky.lab.frames import Vec2, user_to_world  # noqa: E402
+from bucky.lab.optimize import run_optimize, starred  # noqa: E402
 from bucky.lab.runner import replay, run_sweep  # noqa: E402
 
 _SUMMARY_COLS = [
@@ -81,12 +83,19 @@ def cmd_sweep(args) -> None:
     def progress(done, total):
         print(f"\r  {done}/{total} episodes", end="", file=sys.stderr, flush=True)
 
-    res = run_sweep(
-        args.module, kind=args.kind, experiment=args.experiment, params=_kv(args.param),
-        variants=[_variant(v) for v in args.variant] or None, grid=_kv(args.grid),
-        workers=args.workers, seed=args.seed, progress=progress,
-    )
+    params = _kv(args.param)
+    kwargs = dict(kind=args.kind, experiment=args.experiment, params=params,
+                  variants=[_variant(v) for v in args.variant] or None, grid=_kv(args.grid),
+                  workers=args.workers, seed=args.seed, progress=progress)
+    if starred(params):   # KEY=* → best-fit search over that param
+        res = run_optimize(args.module, points=args.points, rounds=args.rounds, **kwargs)
+    else:
+        res = run_sweep(args.module, **kwargs)
     print(file=sys.stderr)
+    if "optimize" in res:
+        opt = res["optimize"]
+        print(f"best {opt['objective']} {opt['best_score']:.2f} after {len(opt['history'])} "
+              f"evaluations: " + ", ".join(f"{k}={v}" for k, v in opt["best"].items()))
     print(f"{res['module']} × {res['experiment']}: {res['n_scenarios']} scenarios, "
           f"{res['elapsed_s']} s")
     header = "  ".join(h.rjust(len(f.format(0))) for _, h, f in _SUMMARY_COLS)
@@ -132,7 +141,7 @@ def main() -> None:
         p.add_argument("module")
         p.add_argument("--kind", default="drive")
         p.add_argument("--experiment", default="drive_approach")
-        p.add_argument("--param", action="append", default=[], help="Module param KEY=VALUE")
+        p.add_argument("--param", action="append", default=[], help="Module param KEY=VALUE; VALUE '*' or '*LO..HI' searches for the best fit")
         p.add_argument("--grid", action="append", default=[], help="Experiment param KEY=VALUE")
         p.add_argument("--seed", type=int, default=0)
 
@@ -141,6 +150,9 @@ def main() -> None:
     sw.add_argument("--variant", action="append", default=[],
                     help="LABEL:KEY=VAL,KEY=VAL — compare param variants side by side")
     sw.add_argument("--workers", type=int, default=None)
+    sw.add_argument("--points", type=int, default=5,
+                    help="KEY=* search: values tried per param per round")
+    sw.add_argument("--rounds", type=int, default=4, help="KEY=* search: refinement rounds")
     sw.add_argument("--worst", type=int, default=10)
     sw.add_argument("--json", help="Write the full result to this file")
 

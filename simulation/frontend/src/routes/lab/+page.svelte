@@ -7,10 +7,12 @@
 	import LoginControl from '$lib/components/simulation/LoginControl.svelte';
 	import ParamForm from '$lib/components/lab/ParamForm.svelte';
 	import SweepSummary from '$lib/components/lab/SweepSummary.svelte';
+	import OptimizeSummary from '$lib/components/lab/OptimizeSummary.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Input } from '$lib/components/ui/input';
 	import { Progress } from '$lib/components/ui/progress';
 	import Combobox from '$lib/components/ui/combobox/Combobox.svelte';
 	import { ChartLine, FlaskConical, Pause, Play, RefreshCw, RotateCcw } from '@lucide/svelte';
@@ -20,6 +22,7 @@
 		toField,
 		toFieldTheta,
 		acceptsKind,
+		isStar,
 		type ExperimentInfo,
 		type LabModuleInfo,
 		type ParamValue,
@@ -44,6 +47,11 @@
 	let sensorParams = $state<Record<string, Record<string, ParamValue>>>({});
 	let variantsText = $state('');
 	let seed = $state(0);
+	// Best-fit search: params whose value is "*" / "*lo..hi" (backend bucky/lab/optimize.py).
+	let searchPoints = $state(5);
+	let searchRounds = $state(4);
+	const starredNames = $derived(Object.keys(params).filter((k) => isStar(params[k])));
+	const searching = $derived(starredNames.length > 0);
 
 	const mod = $derived(modules.find((m) => `${m.kind}/${m.name}` === moduleKey));
 	const experiment = $derived(experiments.find((e) => acceptsKind(e, mod?.kind)));
@@ -109,12 +117,17 @@
 		if (!mod || !experiment) return;
 		runError = null;
 		const variants = parseVariants(variantsText);
+		if (searching && variants.length) {
+			runError = 'Clear the variants to search params marked "*" (or remove the "*").';
+			return;
+		}
 		const req = {
 			module: mod.name,
 			kind: mod.kind,
 			experiment: experiment.name,
 			params: $state.snapshot(params),
 			variants: variants.length ? [{ label: 'base', params: {} }, ...variants] : null,
+			optimize: searching ? { points: searchPoints, rounds: searchRounds } : null,
 			grid: $state.snapshot(grid),
 			sensor_params: $state.snapshot(sensorParams),
 			seed
@@ -389,7 +402,10 @@
 								</summary>
 								<pre class="max-h-80 overflow-auto px-2 pb-2 font-mono text-[10.5px] leading-snug">{mod.source}</pre>
 							</details>
-							<ParamForm spec={mod.params} bind:values={params} disabled={running} idPrefix="mod" />
+							<ParamForm spec={mod.params} bind:values={params} disabled={running} idPrefix="mod" allowSearch />
+							<span class="font-mono text-[10px] text-muted-foreground/70">
+								Type <code>*</code> in a field (or <code>*lo..hi</code>) to search it for the best score; star several to search them together.
+							</span>
 						{/if}
 						{#if loadError}<p class="font-mono text-[11px] text-red-400">{loadError}</p>{/if}
 						{#each Object.entries(loadErrors) as [file, err] (file)}
@@ -430,14 +446,34 @@
 
 				<Card.Root>
 					<Card.Content class="flex flex-col gap-3 pt-4">
-						<div class="flex flex-col gap-1.5">
+						{#if searching}
+							<div class="flex flex-col gap-1.5 rounded-md border border-primary/40 p-2">
+								<span class="font-mono text-[10px] uppercase tracking-wider text-primary">
+									Best-fit search · {starredNames.join(', ')}
+								</span>
+								<div class="grid grid-cols-2 gap-x-3">
+									<div class="flex flex-col gap-1">
+										<Label for="lab-points" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">points</Label>
+										<Input id="lab-points" type="number" min="2" max="21" bind:value={searchPoints} disabled={running} class="h-8 font-mono text-xs tabular-nums" />
+									</div>
+									<div class="flex flex-col gap-1">
+										<Label for="lab-rounds" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">rounds</Label>
+										<Input id="lab-rounds" type="number" min="1" max="12" bind:value={searchRounds} disabled={running} class="h-8 font-mono text-xs tabular-nums" />
+									</div>
+								</div>
+								<span class="font-mono text-[10px] text-muted-foreground/70">
+									Each round tries {searchPoints} values per starred param (others at the best so far), then narrows around the best. Every value is a full sweep.
+								</span>
+							</div>
+						{/if}
+						<div class="flex flex-col gap-1.5" class:opacity-50={searching}>
 							<Label for="lab-variants" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
 								Compare variants (optional)
 							</Label>
 							<Textarea
 								id="lab-variants"
 								bind:value={variantsText}
-								disabled={running}
+								disabled={running || searching}
 								rows={3}
 								placeholder={'slow: speed=0.3\nwide: behind_dist=30'}
 								class="font-mono text-xs"
@@ -447,11 +483,20 @@
 							</span>
 						</div>
 						<Button size="sm" class="font-mono text-[11px]" disabled={!mod || running || !simulation.hasCredentials} onclick={runSweep}>
-							<Play class="size-3" />{running ? 'Running…' : 'Run sweep'}
+							<Play class="size-3" />{running ? (job?.optimize ? 'Searching…' : 'Running…') : searching ? 'Find best fit' : 'Run sweep'}
 						</Button>
 						{#if running && job}
 							<Progress value={progress} />
 							<span class="font-mono text-[11px] text-muted-foreground tabular-nums">{job.done} / {job.total || '…'} episodes</span>
+							{#if job.search}
+								{@const s = job.search}
+								<span class="font-mono text-[11px] text-muted-foreground tabular-nums">
+									round {s.round}/{s.rounds}{s.axis ? ` · ${s.axis}` : ''} · {s.evaluations} tried
+									{#if s.best_score !== null}
+										<br />best {s.best_score.toFixed(2)}: {Object.entries(s.best).map(([k, v]) => `${k}=${v}`).join(', ')}
+									{/if}
+								</span>
+							{/if}
 						{/if}
 						{#if !simulation.hasCredentials}
 							<p class="font-mono text-[11px] text-amber-500">Log in to run sweeps.</p>
@@ -605,6 +650,9 @@
 
 			<!-- right: results -->
 			<div class="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto [&>*]:shrink-0">
+				{#if result?.optimize}
+					<OptimizeSummary opt={result.optimize} onApply={(best) => (params = { ...params, ...best })} />
+				{/if}
 				{#if result}
 					<SweepSummary {result} experiment={resultExperiment} bind:variantIdx onReplay={startReplay} />
 				{:else}
