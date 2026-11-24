@@ -212,7 +212,7 @@
 		<span class="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
 			<Crosshair class="size-3.5" />{context === 'game'
 				? `Drive ${side === 'a' ? 'blue' : 'red'}`
-				: 'Manual red (test)'}
+				: 'Drive red'}
 		</span>
 		<span
 			class="flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider"
@@ -224,15 +224,7 @@
 	</div>
 
 	{#if selfMode === 'human'}
-		<p class="font-mono text-[10px] leading-relaxed text-muted-foreground">
-			Mouse over the field aims · <span class="text-foreground">W/S</span> drive ·
-			<span class="text-foreground">A/D</span> strafe ·
-			<span class="text-foreground">Space</span> / click kicks
-		</p>
-	{:else}
-		<p class="font-mono text-[10px] leading-relaxed text-muted-foreground">
-			Your robot is running its AI policy. Switch back to drive it yourself.
-		</p>
+		<p class="font-mono text-[10px] text-muted-foreground">Mouse aim · WASD move · Space kick</p>
 	{/if}
 
 	<!-- Human / AI toggle -->

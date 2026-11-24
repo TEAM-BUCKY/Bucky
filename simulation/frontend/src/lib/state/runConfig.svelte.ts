@@ -26,18 +26,34 @@ export const STAGES = [
 // types (classical controller, tabular, imitation, supervised, offline, evolutionary) are trained
 // via their dedicated CLI scripts and don't launch through this train form.
 export const ALGOS = [
-	{ value: 'ppo', label: 'PPO (default)' },
+	{ value: 'ppo', label: 'PPO' },
 	{ value: 'a2c', label: 'A2C' },
 	{ value: 'sac', label: 'SAC' },
 	{ value: 'td3', label: 'TD3' },
 	{ value: 'ddpg', label: 'DDPG' },
-	{ value: 'tqc', label: 'TQC (contrib)' },
-	{ value: 'trpo', label: 'TRPO (contrib)' },
-	{ value: 'ars', label: 'ARS (contrib)' },
-	{ value: 'dqn', label: 'DQN (discrete)' },
-	{ value: 'qrdqn', label: 'QR-DQN (discrete)' },
-	{ value: 'residual_sac', label: 'Residual SAC (hybrid)' },
-	{ value: 'residual_ppo', label: 'Residual PPO (hybrid)' }
+	{ value: 'tqc', label: 'TQC' },
+	{ value: 'trpo', label: 'TRPO' },
+	{ value: 'ars', label: 'ARS' },
+	{ value: 'dqn', label: 'DQN' },
+	{ value: 'qrdqn', label: 'QR-DQN' },
+	{ value: 'residual_sac', label: 'Residual SAC' },
+	{ value: 'residual_ppo', label: 'Residual PPO' },
+	// PWS §9.2 algorithms.
+	{ value: 'c51', label: 'C51' },
+	{ value: 'dsac', label: 'DSAC' },
+	{ value: 'fsm_ppo', label: 'FSM + PPO' },
+	{ value: 'fsm_sac', label: 'FSM + SAC' }
+];
+
+/**
+ * The trainable PWS §9.2 algorithms, the default set for "Train all PWS algorithms". The scripted
+ * ones (FSM, APF, behaviour tree) need no training: they play in tournaments as fsm / apf / bt.
+ */
+export const PWS_ALGOS = ['ppo', 'sac', 'c51', 'dsac', 'fsm_ppo', 'fsm_sac'];
+
+export const REWARD_PROFILES = [
+	{ value: 'pws', label: 'PWS' },
+	{ value: 'legacy', label: 'Legacy' }
 ];
 
 export const STOP_TABS: { value: StopKind; label: string }[] = [
@@ -47,14 +63,14 @@ export const STOP_TABS: { value: StopKind; label: string }[] = [
 ];
 
 export const HP_FIELDS: { key: keyof Hyperparams; label: string; step: number }[] = [
-	{ key: 'learning_rate', label: 'learning rate', step: 0.0001 },
+	{ key: 'learning_rate', label: 'lr', step: 0.0001 },
 	{ key: 'n_steps', label: 'n_steps', step: 128 },
 	{ key: 'batch_size', label: 'batch size', step: 64 },
 	{ key: 'n_epochs', label: 'n_epochs', step: 1 },
 	{ key: 'gamma', label: 'gamma', step: 0.001 },
 	{ key: 'gae_lambda', label: 'gae_lambda', step: 0.001 },
 	{ key: 'clip_range', label: 'clip range', step: 0.01 },
-	{ key: 'ent_coef', label: 'ent_coef (0.01 = auto/per-stage)', step: 0.001 },
+	{ key: 'ent_coef', label: 'ent_coef', step: 0.001 },
 	{ key: 'vf_coef', label: 'vf_coef', step: 0.05 },
 	{ key: 'max_grad_norm', label: 'max grad norm', step: 0.05 }
 ];
@@ -99,40 +115,61 @@ function rewardLabel(key: string): string {
 	return REWARD_LABELS[key] ?? key.replace(/^w_/, '').replace(/_/g, ' ');
 }
 
+export interface RewardField {
+	key: string;
+	label: string;
+	/** "pws" (the five PWS weights) | "rule" (RoboCup rule penalties) | "legacy". */
+	group: string;
+	description: string;
+}
+
 /**
- * Reward-weight defaults + ordered field list, loaded from the backend ``RewardConfig`` so the
- * code is the single source of truth. Until {@link loadRewardDefaults} resolves, ``defaults`` is
- * empty and ``fields`` falls back to the labelled keys above so the editor still renders.
+ * Reward-weight defaults + ordered field list of the last loaded profile, loaded from the backend
+ * ``RewardConfig`` so the code is the single source of truth. Until {@link loadRewardDefaults}
+ * resolves, ``defaults`` is empty and ``fields`` is empty too.
  */
 export const rewardState = $state<{
+	profile: string;
 	defaults: Record<string, number>;
-	fields: { key: string; label: string }[];
-}>({
-	defaults: {},
-	fields: Object.keys(REWARD_LABELS).map((key) => ({ key, label: rewardLabel(key) }))
-});
+	fields: RewardField[];
+}>({ profile: 'pws', defaults: {}, fields: [] });
 
-let _rewardDefaultsLoaded = false;
+const _rewardCache = new Map<string, { defaults: Record<string, number>; fields: RewardField[] }>();
 /**
- * Fetch the reward-weight defaults from the backend once and refresh {@link rewardState}.
- * Idempotent; failures keep the fallbacks. Returns the loaded defaults (or {} on failure).
+ * Fetch the reward-weight defaults of ``profile`` from the backend (cached per profile) and make
+ * them the current {@link rewardState}. Failures keep the previous state. Returns the defaults.
  */
-export async function loadRewardDefaults(): Promise<Record<string, number>> {
-	if (_rewardDefaultsLoaded) return rewardState.defaults;
-	try {
-		const { httpBase } = apiBases();
-		const res = await fetch(httpBase + '/reward-defaults');
-		if (!res.ok) return rewardState.defaults;
-		const data = await res.json();
-		const weights = (data?.weights ?? {}) as Record<string, number>;
-		if (Object.keys(weights).length === 0) return rewardState.defaults;
-		rewardState.defaults = weights;
-		rewardState.fields = Object.keys(weights).map((key) => ({ key, label: rewardLabel(key) }));
-		_rewardDefaultsLoaded = true;
-	} catch {
-		/* keep fallbacks */
+export async function loadRewardDefaults(profile = 'pws'): Promise<Record<string, number>> {
+	let entry = _rewardCache.get(profile);
+	if (!entry) {
+		try {
+			const { httpBase } = apiBases();
+			const res = await fetch(`${httpBase}/reward-defaults?profile=${encodeURIComponent(profile)}`);
+			if (!res.ok) return rewardState.defaults;
+			const data = await res.json();
+			const weights = (data?.weights ?? {}) as Record<string, number>;
+			if (Object.keys(weights).length === 0) return rewardState.defaults;
+			const meta = new Map<string, { group?: string; description?: string }>(
+				((data?.terms ?? []) as { key: string; group?: string; description?: string }[]).map((t) => [t.key, t])
+			);
+			entry = {
+				defaults: weights,
+				fields: Object.keys(weights).map((key) => ({
+					key,
+					label: rewardLabel(key),
+					group: meta.get(key)?.group ?? 'legacy',
+					description: meta.get(key)?.description ?? ''
+				}))
+			};
+			_rewardCache.set(profile, entry);
+		} catch {
+			return rewardState.defaults;
+		}
 	}
-	return rewardState.defaults;
+	rewardState.profile = profile;
+	rewardState.defaults = entry.defaults;
+	rewardState.fields = entry.fields;
+	return entry.defaults;
 }
 
 function fmtCount(n: number): string {
@@ -241,6 +278,10 @@ export class RunConfig {
 	 * the code stays the single source of truth even if the fetch hasn't completed.
 	 */
 	rw = $state<Record<string, number>>({ ...rewardState.defaults });
+	/** Reward profile: "pws" (default, PWS §9.3 integer weights) or "legacy" (the old reward). */
+	rewardProfile = $state('pws');
+	/** Algorithms ticked for "Train all PWS algorithms" (same weights, one model each). */
+	batchAlgos = $state<string[]>([...PWS_ALGOS]);
 
 	constructor(caps: RunConfigCaps = {}) {
 		this.caps = caps;
@@ -249,6 +290,24 @@ export class RunConfig {
 	/** (Re)seed reward weights from the backend-loaded defaults — discards local edits. */
 	syncRewardDefaults() {
 		this.rw = { ...rewardState.defaults };
+	}
+
+	/** Switch reward profile and reseed the weights with that profile's defaults. */
+	async setRewardProfile(profile: string) {
+		await loadRewardDefaults(profile);
+		this.rewardProfile = rewardState.profile;
+		this.syncRewardDefaults();
+	}
+
+	/** Model name used for ``algo`` in a batch: ``<name>-<algo>`` (e.g. "pws-dsac"). */
+	batchName(algo: string): string {
+		return `${this.name.trim()}-${algo}`;
+	}
+
+	/** One train payload per ticked algorithm: identical settings and reward weights, each its
+	 * own model name. */
+	batchPayloads(): LaunchConfig[] {
+		return this.batchAlgos.map((algo) => ({ ...this.trainPayload(), algo, name: this.batchName(algo) }));
 	}
 
 	// ── builders ───────────────────────────────────────────────────────────────
@@ -312,6 +371,7 @@ export class RunConfig {
 			p.hyperparams = { ...this.hp };
 			p.net_arch = this.parseNetArch();
 			p.reward_weights = { ...this.rw };
+			p.reward_profile = this.rewardProfile;
 			p.save_step_checkpoints = this.saveStepCheckpoints;
 		}
 		return p;
@@ -377,8 +437,8 @@ export class RunConfig {
 		return `${a.length} devices · ${a.map((d) => d.n_envs).join('+')} envs`;
 	}
 	get optionsSummary(): string {
-		const bits = [`domain rand ${this.domain_rand ? 'on' : 'off'}`];
-		if (this.viz) bits.push('watch live');
+		const bits = this.domain_rand ? ['domain rand'] : [];
+		if (this.viz) bits.push('live');
 		if (this.distributed) {
 			bits.push(
 				this.distAssignments.length > 1
@@ -387,7 +447,7 @@ export class RunConfig {
 			);
 		}
 		if (this.caps.advanced && this.saveStepCheckpoints) bits.push('step ckpts');
-		return bits.join(' · ');
+		return bits.join(' · ') || 'none';
 	}
 	get resumeSummary(): string {
 		if (!this.cont || !this.srcRun) return 'off';
@@ -397,15 +457,16 @@ export class RunConfig {
 		return fmtTime(this.startEpoch);
 	}
 	get advancedSummary(): string {
-		return `arch ${this.parseNetArch().join('·') || '—'} · ${this.algo.toUpperCase()}`;
+		return this.parseNetArch().join('·') || '—';
 	}
 	get rewardsSummary(): string {
-		return `${rewardState.fields.length} weights`;
+		const profile = REWARD_PROFILES.find((p) => p.value === this.rewardProfile)?.label ?? this.rewardProfile;
+		return profile;
 	}
 	get botASummary(): string {
-		return this.runA ? `${this.runA} / ${this.ckptA.replace(/\.zip$/, '')}` : 'pick a policy';
+		return this.runA ? `${this.runA} / ${this.ckptA.replace(/\.zip$/, '')}` : 'pick';
 	}
 	get botBSummary(): string {
-		return this.runB ? `${this.runB} / ${this.ckptB.replace(/\.zip$/, '')}` : 'pick a policy';
+		return this.runB ? `${this.runB} / ${this.ckptB.replace(/\.zip$/, '')}` : 'pick';
 	}
 }

@@ -112,13 +112,14 @@
 	let runError = $state<string | null>(null);
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	const running = $derived(job?.state === 'running');
+	let lastRequest = $state.raw<Parameters<typeof labApi.startSweep>[0] | null>(null);
 
 	async function runSweep() {
 		if (!mod || !experiment) return;
 		runError = null;
 		const variants = parseVariants(variantsText);
 		if (searching && variants.length) {
-			runError = 'Clear the variants to search params marked "*" (or remove the "*").';
+			runError = 'Clear variants to search "*" params.';
 			return;
 		}
 		const req = {
@@ -140,8 +141,6 @@
 			runError = (err as Error).message;
 		}
 	}
-
-	let lastRequest: Parameters<typeof labApi.startSweep>[0] | null = null;
 
 	async function poll() {
 		if (!job) return;
@@ -201,7 +200,7 @@
 				const vals = recs.map((r) => metricValue(r.metrics, metricKey)).filter((v): v is number => v !== null);
 				const v = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
 				const worst = recs.reduce((a, b) => (Number(b.metrics.score ?? 0) < Number(a.metrics.score ?? 0) ? b : a));
-				const n = recs.length > 1 ? ` (mean of ${recs.length}, click = worst)` : '';
+				const n = recs.length > 1 ? ` (mean of ${recs.length})` : '';
 				return { key: k, ...p, size, value: v, rec: worst,
 					tip: `robot ${(p.x / 10).toFixed(0)}, ${(p.y / 10).toFixed(0)} cm · ${def.label}: ${v === null ? '–' : def.format(v)}${n}` };
 			});
@@ -355,12 +354,7 @@
 		<Card.Root>
 			<Card.Content class="px-4 py-3">
 				<div class="flex flex-wrap items-center justify-between gap-3">
-					<div class="flex items-baseline gap-3">
-						<h1 class="font-mono text-base font-bold tracking-tight text-foreground">BUCKY · LAB</h1>
-						<span class="font-mono text-xs text-muted-foreground">
-							test hand-written robot code over every start position
-						</span>
-					</div>
+					<h1 class="font-mono text-base font-bold tracking-tight text-foreground">BUCKY · LAB</h1>
 					<div class="flex items-center gap-2">
 						<Button href="/viz" variant="ghost" size="xs" class="font-mono text-[11px]">
 							<ChartLine class="size-3" />Train
@@ -387,31 +381,29 @@
 						</div>
 					</Card.Header>
 					<Card.Content class="flex flex-col gap-3">
-						<Combobox
-							bind:value={() => moduleKey, (v) => selectModule(v)}
-							items={moduleItems}
-							size="sm"
-							disabled={running}
-							placeholder="No modules found"
-						/>
+						<div title={mod?.doc}>
+							<Combobox
+								bind:value={() => moduleKey, (v) => selectModule(v)}
+								items={moduleItems}
+								size="sm"
+								disabled={running}
+								placeholder="No modules"
+							/>
+						</div>
 						{#if mod}
-							<p class="font-mono text-[11px] whitespace-pre-line text-muted-foreground">{mod.doc}</p>
-							<details class="rounded-md border border-border">
-								<summary class="cursor-pointer px-2 py-1 font-mono text-[11px] text-muted-foreground">
-									Source · bucky/lab/user/{mod.file}
-								</summary>
-								<pre class="max-h-80 overflow-auto px-2 pb-2 font-mono text-[10.5px] leading-snug">{mod.source}</pre>
+							<details>
+								<summary class="cursor-pointer font-mono text-[11px] text-muted-foreground">Source</summary>
+								<pre class="mt-1 max-h-80 overflow-auto rounded-md bg-muted p-2 font-mono text-[10.5px] leading-snug">{mod.source}</pre>
 							</details>
-							<ParamForm spec={mod.params} bind:values={params} disabled={running} idPrefix="mod" allowSearch />
-							<span class="font-mono text-[10px] text-muted-foreground/70">
-								Type <code>*</code> in a field (or <code>*lo..hi</code>) to search it for the best score; star several to search them together.
-							</span>
+							<div title="* or *lo..hi = search for best fit">
+								<ParamForm spec={mod.params} bind:values={params} disabled={running} idPrefix="mod" allowSearch />
+							</div>
 						{/if}
 						{#if loadError}<p class="font-mono text-[11px] text-red-400">{loadError}</p>{/if}
 						{#each Object.entries(loadErrors) as [file, err] (file)}
-							<details class="rounded-md border border-red-400/50">
-								<summary class="cursor-pointer px-2 py-1 font-mono text-[11px] text-red-400">{file} failed to load</summary>
-								<pre class="max-h-60 overflow-auto px-2 pb-2 font-mono text-[10px]">{err}</pre>
+							<details>
+								<summary class="cursor-pointer font-mono text-[11px] text-red-400">{file} failed</summary>
+								<pre class="mt-1 max-h-60 overflow-auto font-mono text-[10px]">{err}</pre>
 							</details>
 						{/each}
 					</Card.Content>
@@ -434,8 +426,7 @@
 					{#if Object.keys(s.params).length && sensorParams[s.name]}
 						<Card.Root>
 							<Card.Header class="pb-2">
-								<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Sensor · {s.name}</Card.Title>
-								<Card.Description class="font-mono text-[11px]">{s.doc}</Card.Description>
+								<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest" title={s.doc}>Sensor · {s.name}</Card.Title>
 							</Card.Header>
 							<Card.Content>
 								<ParamForm spec={s.params} bind:values={sensorParams[s.name]} disabled={running} idPrefix="sensor-{s.name}" />
@@ -447,59 +438,52 @@
 				<Card.Root>
 					<Card.Content class="flex flex-col gap-3 pt-4">
 						{#if searching}
-							<div class="flex flex-col gap-1.5 rounded-md border border-primary/40 p-2">
-								<span class="font-mono text-[10px] uppercase tracking-wider text-primary">
-									Best-fit search · {starredNames.join(', ')}
-								</span>
-								<div class="grid grid-cols-2 gap-x-3">
-									<div class="flex flex-col gap-1">
-										<Label for="lab-points" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">points</Label>
-										<Input id="lab-points" type="number" min="2" max="21" bind:value={searchPoints} disabled={running} class="h-8 font-mono text-xs tabular-nums" />
-									</div>
-									<div class="flex flex-col gap-1">
-										<Label for="lab-rounds" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">rounds</Label>
-										<Input id="lab-rounds" type="number" min="1" max="12" bind:value={searchRounds} disabled={running} class="h-8 font-mono text-xs tabular-nums" />
-									</div>
+							<span class="font-mono text-[10px] uppercase tracking-wider text-primary">
+								Search · {starredNames.join(', ')}
+							</span>
+							<div class="grid grid-cols-2 gap-x-3" title="Values per param per round; each round narrows around the best">
+								<div class="flex flex-col gap-1">
+									<Label for="lab-points" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">points</Label>
+									<Input id="lab-points" type="number" min="2" max="21" bind:value={searchPoints} disabled={running} class="h-8 font-mono text-xs tabular-nums" />
 								</div>
-								<span class="font-mono text-[10px] text-muted-foreground/70">
-									Each round tries {searchPoints} values per starred param (others at the best so far), then narrows around the best. Every value is a full sweep.
-								</span>
+								<div class="flex flex-col gap-1">
+									<Label for="lab-rounds" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">rounds</Label>
+									<Input id="lab-rounds" type="number" min="1" max="12" bind:value={searchRounds} disabled={running} class="h-8 font-mono text-xs tabular-nums" />
+								</div>
 							</div>
 						{/if}
 						<div class="flex flex-col gap-1.5" class:opacity-50={searching}>
 							<Label for="lab-variants" class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-								Compare variants (optional)
+								Variants
 							</Label>
 							<Textarea
 								id="lab-variants"
 								bind:value={variantsText}
-								disabled={running || searching}
+								disabled={running || (searching && !variantsText.trim())}
 								rows={3}
+								title={'One per line: "label: key=value, …"'}
 								placeholder={'slow: speed=0.3\nwide: behind_dist=30'}
 								class="font-mono text-xs"
 							/>
-							<span class="font-mono text-[10px] text-muted-foreground/70">
-								One per line, "label: key=value, …", applied on top of the params above. "base" is always included.
-							</span>
 						</div>
 						<Button size="sm" class="font-mono text-[11px]" disabled={!mod || running || !simulation.hasCredentials} onclick={runSweep}>
 							<Play class="size-3" />{running ? (job?.optimize ? 'Searching…' : 'Running…') : searching ? 'Find best fit' : 'Run sweep'}
 						</Button>
 						{#if running && job}
 							<Progress value={progress} />
-							<span class="font-mono text-[11px] text-muted-foreground tabular-nums">{job.done} / {job.total || '…'} episodes</span>
-							{#if job.search}
-								{@const s = job.search}
-								<span class="font-mono text-[11px] text-muted-foreground tabular-nums">
-									round {s.round}/{s.rounds}{s.axis ? ` · ${s.axis}` : ''} · {s.evaluations} tried
+							<span class="font-mono text-[11px] text-muted-foreground tabular-nums">
+								{job.done} / {job.total || '…'}
+								{#if job.search}
+									{@const s = job.search}
+									· round {s.round}/{s.rounds}{s.axis ? ` · ${s.axis}` : ''}
 									{#if s.best_score !== null}
 										<br />best {s.best_score.toFixed(2)}: {Object.entries(s.best).map(([k, v]) => `${k}=${v}`).join(', ')}
 									{/if}
-								</span>
-							{/if}
+								{/if}
+							</span>
 						{/if}
 						{#if !simulation.hasCredentials}
-							<p class="font-mono text-[11px] text-amber-500">Log in to run sweeps.</p>
+							<p class="font-mono text-[11px] text-amber-500">Log in to run.</p>
 						{/if}
 						{#if runError}<p class="font-mono text-[11px] whitespace-pre-wrap text-red-400">{runError}</p>{/if}
 					</Card.Content>
@@ -511,15 +495,14 @@
 				<Card.Root class="flex flex-row flex-wrap items-center gap-3 px-3 py-2">
 					<div class="w-48"><Combobox bind:value={metricKey} items={metricItems} size="sm" /></div>
 					{#if result}
-						<div class="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+						<div
+							class="flex items-center gap-2 font-mono text-[10px] text-muted-foreground"
+							title={def.higherIsBetter ? 'Higher is better' : 'Lower is better'}
+						>
 							<span>{def.format(domain[0])}</span>
 							<span class="h-2.5 w-28 rounded-sm" style="background: linear-gradient(to right, {rampColor(0)}, {rampColor(0.5)}, {rampColor(1)})"></span>
 							<span>{def.format(domain[1])}</span>
-							<span>· {def.higherIsBetter ? 'higher is better' : 'lower is better'}</span>
 						</div>
-						<span class="font-mono text-[10px] text-muted-foreground">
-							{fieldMode ? 'Click a cell to replay that start' : selectedBall ? 'Dots = robot starts · click one to replay' : 'Click a ball cell to see each start'}
-						</span>
 					{/if}
 				</Card.Root>
 
@@ -632,14 +615,14 @@
 									.map((m) => { const v = metricValue(replay!.metrics, m.key); return `${m.label} ${v === null ? '–' : m.format(v)}`; })
 									.join(' · ')}
 							{:else if lastRequest?.experiment === 'sensor_check'}
-								<span style="color: {markColors.seen}">●</span> what the program reports
+								<span style="color: {markColors.seen}">●</span> reported
 								· score {Number(replay.metrics.score).toFixed(1)}
 								{typeof replay.metrics.note === 'string' ? `· ${replay.metrics.note}` : ''}
 							{:else}
-								<span style="color: {markColors.A}">●</span> A target
-								<span class="ml-2">○</span> C behind
-								· {replay.metrics.success ? `behind in ${Number(replay.metrics.time_s).toFixed(2)} s` : 'never got behind'}
-								{replay.metrics.wrong_touch ? '· touched ball first' : ''}
+								<span style="color: {markColors.A}">●</span> target
+								<span class="ml-2">○</span> behind
+								· {replay.metrics.success ? `${Number(replay.metrics.time_s).toFixed(2)} s` : 'failed'}
+								{replay.metrics.wrong_touch ? '· touched ball' : ''}
 								{replay.metrics.out_of_bounds ? '· went out' : ''}
 							{/if}
 						</span>
@@ -656,23 +639,7 @@
 				{#if result}
 					<SweepSummary {result} experiment={resultExperiment} bind:variantIdx onReplay={startReplay} />
 				{:else}
-					<Card.Root>
-						<Card.Content class="flex flex-col gap-2 pt-4 font-mono text-[11px] text-muted-foreground">
-							<p>Add a module by dropping a file in <code>backend/bucky/lab/user/</code>:</p>
-							<pre class="overflow-auto rounded-md bg-muted p-2 text-[10.5px] leading-snug">{`from bucky.lab import DriveModule, Param, Vec2, register
-
-@register
-class MyDrive(DriveModule):
-    """What it does."""
-    name = "my_drive"
-    params = {"k": Param(1.0, 0, 5, 0.1, "gain")}
-
-    def target(self, ctx):
-        B = ctx.ball   # cm, robot at (0,0), +y = enemy goal
-        return B - Vec2(0, 20)`}</pre>
-							<p>Then press Reload. Runs in the real training physics; results show here.</p>
-						</Card.Content>
-					</Card.Root>
+					<p class="px-1 pt-2 font-mono text-[11px] text-muted-foreground">No results yet.</p>
 				{/if}
 			</div>
 		</div>

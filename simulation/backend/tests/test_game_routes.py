@@ -51,6 +51,14 @@ def test_reward_defaults_match_reward_config(tmp_path, monkeypatch):
         assert k in weights and float(weights[k]).is_integer()
     assert "w_front_align" not in weights   # legacy weights are off in the default profile
 
+    # Term metadata lets the UI group the weights; the legacy profile is selectable.
+    groups = {t["key"]: t["group"] for t in res.json()["terms"]}
+    assert groups["w_goal"] == "pws" and groups["w_goal_against"] == "rule"
+    assert set(res.json()["profiles"]) >= {"pws", "legacy"}
+    legacy = client.get("/api/reward-defaults", params={"profile": "legacy"}).json()
+    assert legacy["profile"] == "legacy" and "w_front_align" in legacy["weights"]
+    assert client.get("/api/reward-defaults", params={"profile": "nope"}).status_code == 400
+
 
 def test_create_join_and_control_flow(tmp_path, monkeypatch):
     app, manager = build_app(tmp_path, monkeypatch)

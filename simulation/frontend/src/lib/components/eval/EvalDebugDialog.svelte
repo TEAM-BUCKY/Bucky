@@ -66,13 +66,13 @@
 	<Dialog.Content class="max-h-[88vh] w-full max-w-[94vw] overflow-hidden sm:max-w-[72rem]">
 		<Dialog.Header>
 			<Dialog.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-				Frame inspector
+				Frame
 				{#if view}<span class="ml-2 font-normal text-muted-foreground">ep {view.episode} · step {view.step}</span>{/if}
 			</Dialog.Title>
 		</Dialog.Header>
 
 		{#if !view}
-			<p class="font-mono text-xs text-muted-foreground">Run a drill to inspect a frame.</p>
+			<p class="font-mono text-xs text-muted-foreground">No frame.</p>
 		{:else}
 			<div class="grid grid-cols-1 gap-5 overflow-y-auto lg:grid-cols-3">
 				<!-- observation (two columns so 43 dims stay compact and labels have room) -->
@@ -100,7 +100,7 @@
 					{#if states}
 						<div>
 							<div class="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-								Reward fn args · states (world frame)
+								State
 							</div>
 							<div class="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-0.5">
 								<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70"></span>
@@ -127,7 +127,7 @@
 
 					<div>
 					<div class="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-						Reward inputs · what compute_rewards saw
+						Reward inputs
 					</div>
 					{#if inputRows.length}
 						<div class="flex flex-col gap-0.5">
@@ -145,7 +145,7 @@
 							{/each}
 						</div>
 					{:else}
-						<p class="font-mono text-xs text-muted-foreground">No reward signals this frame.</p>
+						<p class="font-mono text-xs text-muted-foreground">None</p>
 					{/if}
 				</div>
 			</div>

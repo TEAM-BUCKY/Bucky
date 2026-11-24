@@ -15,7 +15,11 @@
 		return () => simulation.disconnect();
 	});
 
-	// One bracket entrant. run='classical' selects the hand-coded controller (no checkpoint).
+	// Hand-coded controllers the backend can field without a checkpoint (bucky.controllers).
+	const SCRIPTED: Record<string, string> = { classical: 'Classical', fsm: 'FSM', apf: 'APF', bt: 'BT' };
+	const isScripted = (run: string) => run in SCRIPTED;
+
+	// One bracket entrant. A SCRIPTED run name selects a hand-coded controller (no checkpoint).
 	interface Entrant {
 		run: string;
 		checkpoint: string;
@@ -34,13 +38,13 @@
 	);
 
 	function validEntrants(): Entrant[] {
-		return entrants.filter((e) => e.run === 'classical' || (e.run && e.checkpoint));
+		return entrants.filter((e) => isScripted(e.run) || (e.run && e.checkpoint));
 	}
 	function addModel() {
 		entrants.push({ run: '', checkpoint: '', label: '' });
 	}
-	function addClassical() {
-		entrants.push({ run: 'classical', checkpoint: '', label: 'classical' });
+	function addScripted(run: string) {
+		entrants.push({ run, checkpoint: '', label: run });
 	}
 	function remove(i: number) {
 		entrants.splice(i, 1);
@@ -57,7 +61,7 @@
 		);
 	}
 
-	/** One-click: enter the newest version of every saved model (plus the classical controller). */
+	/** One-click: enter the newest version of every saved model (plus the scripted controllers). */
 	function addAllModels() {
 		const byName = new Map<string, ModelInfo[]>();
 		for (const m of simulation.models) {
@@ -65,7 +69,7 @@
 			arr.push(m);
 			byName.set(m.name, arr);
 		}
-		const next: Entrant[] = [{ run: 'classical', checkpoint: '', label: 'classical' }];
+		const next: Entrant[] = Object.keys(SCRIPTED).map((run) => ({ run, checkpoint: '', label: run }));
 		for (const [name, versions] of byName) {
 			const newest = versions.slice().sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
 			const ckpt = pickCheckpoint(newest);
@@ -78,7 +82,7 @@
 		await simulation.launchTournament({
 			entrants: validEntrants().map((e) => ({
 				run: e.run,
-				checkpoint: e.run === 'classical' ? '' : e.checkpoint,
+				checkpoint: isScripted(e.run) ? '' : e.checkpoint,
 				label: e.label.trim() || undefined
 			})),
 			matchesPerPairing: Math.max(1, Number(matchesPerPairing) || 1),
@@ -91,7 +95,7 @@
 	const conn = $derived.by(() => {
 		if (simulation.live) return { label: 'Live', color: '#34d399' };
 		if (simulation.connected) return { label: 'Connected', color: '#fbbf24' };
-		return { label: 'Reconnecting…', color: '#f87171' };
+		return { label: 'Offline', color: '#f87171' };
 	});
 
 	const statusColor: Record<string, string> = {
@@ -102,13 +106,11 @@
 	};
 
 	const COLS = [
-		['P', 'played'],
 		['W', 'wins'],
 		['D', 'draws'],
 		['L', 'losses'],
 		['GF', 'goals_for'],
 		['GA', 'goals_against'],
-		['GD', 'goal_diff'],
 		['Pts', 'points'],
 		['Elo', 'elo'],
 		['K/m', 'kicks_per_match']
@@ -147,23 +149,23 @@
 			</Card.Header>
 			<Card.Content class="flex flex-col gap-3">
 				{#each entrants as entrant, i (i)}
-					<div class="rounded-md border border-border/70 bg-input/10 p-2">
+					<div class="border-t border-border/40 pt-2 first:border-t-0 first:pt-0">
 						<div class="mb-1.5 flex items-center gap-2">
 							<span class="font-mono text-[10px] uppercase text-muted-foreground">#{i + 1}</span>
-							{#if entrant.run === 'classical'}
+							{#if isScripted(entrant.run)}
 								<span class="flex items-center gap-1 font-mono text-[11px]">
-									<Cpu class="size-3" />classical controller
+									<Cpu class="size-3" />{SCRIPTED[entrant.run]}
 								</span>
 							{/if}
 							<button
 								class="ml-auto text-muted-foreground hover:text-destructive"
-								title="Remove entrant"
+								title="Remove"
 								onclick={() => remove(i)}
 							>
 								<X class="size-3.5" />
 							</button>
 						</div>
-						{#if entrant.run !== 'classical'}
+						{#if !isScripted(entrant.run)}
 							<ModelVersionPicker
 								bind:run={entrant.run}
 								bind:checkpoint={entrant.checkpoint}
@@ -173,7 +175,7 @@
 						{/if}
 						<Input
 							bind:value={entrant.label}
-							placeholder="Label (optional)"
+							placeholder="Label"
 							disabled={running}
 							class="mt-1.5 h-8 font-mono text-xs"
 						/>
@@ -190,25 +192,27 @@
 					>
 						<Plus class="size-3" />Model
 					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						class="flex-1 font-mono text-[11px]"
-						disabled={running}
-						onclick={addClassical}
-					>
-						<Cpu class="size-3" />Classical
-					</Button>
+					{#each Object.entries(SCRIPTED) as [run, name] (run)}
+						<Button
+							variant="outline"
+							size="sm"
+							class="flex-1 font-mono text-[11px]"
+							disabled={running}
+							onclick={() => addScripted(run)}
+						>
+							<Cpu class="size-3" />{name}
+						</Button>
+					{/each}
 				</div>
 				<Button
 					variant="secondary"
 					size="sm"
 					class="font-mono text-[11px]"
 					disabled={running || simulation.models.length === 0}
-					title="Enter the newest version of every saved model, plus the classical controller"
+					title="Newest of each model + scripted"
 					onclick={addAllModels}
 				>
-					<Layers class="size-3" />All models ({simulation.models.length})
+					<Layers class="size-3" />All ({simulation.models.length})
 				</Button>
 
 				<div class="flex gap-3">
@@ -237,11 +241,9 @@
 					</div>
 				</div>
 
-				<label class="flex items-center gap-2">
+				<label class="flex items-center gap-2" title="Short matches: faster, noisier">
 					<Checkbox bind:checked={quick} disabled={running} />
-					<span class="font-mono text-[11px] text-muted-foreground">
-						Quick matches (faster, noisier)
-					</span>
+					<span class="font-mono text-[11px] text-muted-foreground">Quick</span>
 				</label>
 
 				{#if running}
@@ -249,18 +251,19 @@
 						variant="destructive"
 						size="sm"
 						class="font-mono text-[11px]"
+						title="Stops after current match"
 						onclick={() => t && simulation.stopTournament(t.id)}
 					>
-						<Square class="size-3" />Stop after current match
+						<Square class="size-3" />Stop
 					</Button>
 				{:else}
 					<Button size="sm" class="font-mono text-[11px]" disabled={!canLaunch} onclick={launch}>
-						<Play class="size-3" />Run round-robin ({validEntrants().length} entrants)
+						<Play class="size-3" />Run ({validEntrants().length})
 					</Button>
 				{/if}
 
 				{#if !simulation.hasCredentials}
-					<p class="font-mono text-[11px] text-amber-500">Log in to run a competition.</p>
+					<p class="font-mono text-[11px] text-amber-500">Log in to run.</p>
 				{/if}
 			</Card.Content>
 		</Card.Root>
@@ -291,7 +294,7 @@
 			<Card.Content>
 				{#if standings.length === 0}
 					<p class="py-10 text-center font-mono text-xs text-muted-foreground">
-						{t ? 'Waiting for the first match…' : 'Add entrants and run a round-robin to see a ranking.'}
+						{t ? 'Waiting…' : 'No results'}
 					</p>
 				{:else}
 					<div class="overflow-x-auto">
@@ -322,7 +325,7 @@
 					</div>
 					{#if t?.standings && !t.standings.complete && t.status !== 'running'}
 						<p class="mt-2 font-mono text-[10px] text-muted-foreground">
-							Stopped early — partial standings.
+							Partial
 						</p>
 					{/if}
 				{/if}

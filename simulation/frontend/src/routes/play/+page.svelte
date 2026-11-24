@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-	<title>Bucky · Play a friend</title>
+	<title>Bucky · Play</title>
 </svelte:head>
 
 <div class="min-h-screen bg-background text-foreground">

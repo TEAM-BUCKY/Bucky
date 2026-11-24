@@ -38,13 +38,13 @@
 	// One breakdown table, whichever the experiment provides.
 	const breakdown = $derived.by(() => {
 		if (variant.by_angle?.length)
-			return { title: 'By start angle', desc: 'Where the robot starts, seen from the ball',
+			return { title: 'By angle', desc: 'Start angle, seen from the ball',
 				rows: variant.by_angle.map((r) => ({ label: angleLabel(r.angle_deg), row: r })) };
 		if (variant.by_motion?.length)
-			return { title: 'By path', desc: 'How the robot was moving',
+			return { title: 'By path', desc: 'Robot motion',
 				rows: variant.by_motion.map((r) => ({ label: r.motion, row: r })) };
 		if (variant.by_heading?.length)
-			return { title: 'By heading', desc: 'Robot heading, clockwise from the opponent goal',
+			return { title: 'By heading', desc: 'Clockwise from the opponent goal',
 				rows: variant.by_heading.map((r) => ({ label: `${r.heading_deg}°`, row: r })) };
 		return null;
 	});
@@ -67,10 +67,12 @@
 
 <Card.Root>
 	<Card.Header class="pb-2">
-		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Variants</Card.Title>
-		<Card.Description class="font-mono text-[11px]">
-			{result.n_scenarios} start positions · {result.elapsed_s} s · click a row to inspect it
-		</Card.Description>
+		<Card.Title class="flex items-baseline justify-between font-mono text-xs font-semibold uppercase tracking-widest">
+			Variants
+			<span class="text-[10px] font-normal tracking-normal normal-case text-muted-foreground tabular-nums">
+				{result.n_scenarios} starts · {result.elapsed_s} s
+			</span>
+		</Card.Title>
 	</Card.Header>
 	<Card.Content class="overflow-x-auto">
 		<table class="w-full font-mono text-[11px] tabular-nums">
@@ -98,10 +100,9 @@
 {#if breakdown}
 	<Card.Root>
 		<Card.Header class="pb-2">
-			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
+			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest" title={breakdown.desc}>
 				{breakdown.title} · {variant.label}
 			</Card.Title>
-			<Card.Description class="font-mono text-[11px]">{breakdown.desc}</Card.Description>
 		</Card.Header>
 		<Card.Content class="overflow-x-auto">
 			<table class="w-full font-mono text-[11px] tabular-nums">
@@ -127,9 +128,8 @@
 <Card.Root>
 	<Card.Header class="pb-2">
 		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-			Worst cases · {variant.label}
+			Worst · {variant.label}
 		</Card.Title>
-		<Card.Description class="font-mono text-[11px]">Click to replay</Card.Description>
 	</Card.Header>
 	<Card.Content class="overflow-x-auto">
 		<table class="w-full font-mono text-[11px] tabular-nums">
@@ -145,7 +145,7 @@
 			<tbody>
 				{#each variant.worst as rec (rec.scenario.id)}
 					{@const m = rec.metrics}
-					<tr class="cursor-pointer border-t border-border hover:bg-muted/50" onclick={() => onReplay(rec)}>
+					<tr class="cursor-pointer border-t border-border hover:bg-muted/50" title="Replay" onclick={() => onReplay(rec)}>
 						<td class="py-0.5 pr-2 text-left">{rec.scenario.id}</td>
 						<td class="px-1 py-0.5 text-right">
 							{(-rec.scenario.ball[1] * 100).toFixed(0)}, {(rec.scenario.ball[0] * 100).toFixed(0)}

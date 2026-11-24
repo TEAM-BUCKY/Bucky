@@ -91,13 +91,13 @@
 	<Card.Root class="max-w-2xl">
 		<Card.Header class="pb-2 pt-3">
 			<Card.Title class="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-widest">
-				<Plus class="size-4" />Register a guest device
+				<Plus class="size-4" />Register device
 			</Card.Title>
 		</Card.Header>
 		<Card.Content class="flex flex-col gap-3">
 			<div class="flex items-end gap-2">
 				<div class="flex flex-1 flex-col gap-1">
-					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Device name</Label>
+					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Name</Label>
 					<Input
 						bind:value={newName}
 						class="font-mono"
@@ -109,15 +109,9 @@
 					<Plus class="size-4" />Register
 				</Button>
 			</div>
-			{#if !canControl}
-				<p class="font-mono text-[11px] text-muted-foreground">Log in (top right) to register devices.</p>
-			{/if}
-
 			{#if issued}
 				<div class="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
-					<p class="mb-1 font-mono text-[11px] text-emerald-400">
-						Token for "{issued.name}":
-					</p>
+					<p class="mb-1 font-mono text-[11px] text-emerald-400">{issued.name}</p>
 					<div class="flex items-center gap-2">
 						<code class="flex-1 overflow-x-auto rounded bg-background/60 px-2 py-1 font-mono text-[11px]">
 							{issued.token}
@@ -149,9 +143,7 @@
 		</Card.Header>
 		<Card.Content class="flex flex-col gap-2">
 			{#if simulation.devices.length === 0}
-				<p class="py-6 text-center font-mono text-xs text-muted-foreground">
-					No devices registered yet.
-				</p>
+				<p class="py-6 text-center font-mono text-xs text-muted-foreground">No devices</p>
 			{/if}
 			{#each simulation.devices as d (d.id)}
 				<div class="flex items-center gap-2 rounded-md border border-border/70 bg-input/10 px-3 py-2">
@@ -168,8 +160,7 @@
 						{#if d.reported_cores}
 							<span
 								class="flex items-center gap-1.5"
-								title="{d.reported_cores} cores · recommended {d.reported_capacity ??
-									1} concurrent job(s)"
+								title="{d.reported_cores} cores · {d.reported_capacity ?? 1} recommended"
 							>
 								<span>slots</span>
 								<input
@@ -190,7 +181,7 @@
 								</span>
 							</span>
 						{:else}
-							<span class="text-muted-foreground/60" title="waiting for the worker to report its capacity"
+							<span class="text-muted-foreground/60" title="Waiting for worker"
 								>slots —</span
 							>
 						{/if}
@@ -202,7 +193,7 @@
 							disabled={!canControl}
 							onclick={() => showCommand(d.id, d.name)}
 						>
-							<Terminal class="size-3" />Show command
+							<Terminal class="size-3" />Command
 						</Button>
 						<Button
 							variant="ghost"
@@ -224,7 +215,7 @@
 	bind:open={confirmOpen}
 	title="Revoke device"
 	description={pendingRevoke
-		? `Revoke device "${pendingRevoke.name}"? Its token stops working immediately.`
+		? `Revoke "${pendingRevoke.name}"?`
 		: ''}
 	confirmLabel="Revoke"
 	destructive
@@ -237,17 +228,12 @@
 			<Dialog.Title class="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-widest">
 				<Terminal class="size-4" />Connect "{cmdDevice}"
 			</Dialog.Title>
-			<Dialog.Description class="font-mono text-[11px]">
-				Run this on the device to lease &amp; train jobs from the server's queue.
-			</Dialog.Description>
 		</Dialog.Header>
 
 		{#if cmdLoading}
-			<p class="font-mono text-[11px] text-muted-foreground">Issuing a fresh token…</p>
+			<p class="font-mono text-[11px] text-muted-foreground">Issuing token…</p>
 		{:else if !cmdToken}
-			<p class="font-mono text-[11px] text-destructive">
-				Could not issue a token. Make sure you're logged in and try again.
-			</p>
+			<p class="font-mono text-[11px] text-destructive">Couldn't issue token</p>
 		{:else}
 			<div class="flex items-start gap-2">
 				<code class="flex-1 overflow-x-auto rounded bg-background/60 px-2 py-2 font-mono text-[11px] whitespace-pre-wrap break-all">{cmd}</code>
@@ -255,14 +241,7 @@
 					{#if cmdCopied}<Check class="size-3" />Copied{:else}<Copy class="size-3" />Copy{/if}
 				</Button>
 			</div>
-			<p class="font-mono text-[11px] text-muted-foreground">
-				Or set <code class="text-foreground">BUCKY_SERVER</code> /
-				<code class="text-foreground">BUCKY_DEVICE_TOKEN</code> and run
-				<code class="text-foreground">scripts/worker.py</code> with no flags.
-			</p>
-			<p class="font-mono text-[10px] text-amber-400">
-				This rotated the device's token, any previous command for "{cmdDevice}" no longer works!
-			</p>
+			<p class="font-mono text-[10px] text-amber-400">Previous token revoked</p>
 		{/if}
 
 		<Dialog.Footer>

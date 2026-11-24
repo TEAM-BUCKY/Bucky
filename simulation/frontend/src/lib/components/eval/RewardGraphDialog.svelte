@@ -113,21 +113,20 @@
 		<Dialog.Header>
 			<Dialog.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
 				Reward graph
-				<span class="ml-2 font-normal text-muted-foreground">click a point to seek</span>
 			</Dialog.Title>
 		</Dialog.Header>
 
 		{#if n === 0}
-			<p class="font-mono text-xs text-muted-foreground">Run a drill to plot rewards.</p>
+			<p class="font-mono text-xs text-muted-foreground">No data</p>
 		{:else}
 			<div class="flex flex-col gap-3">
 				<!-- controls -->
 				<div class="flex flex-wrap items-end gap-3">
 					<div class="flex flex-col gap-1.5">
-						<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Reward term</span>
+						<span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Term</span>
 						<div class="w-56">
 							<Combobox bind:value={term} items={termItems} size="sm"
-								placeholder="Select a term…" searchPlaceholder="Search terms…" />
+								placeholder="Term" searchPlaceholder="Search…" />
 						</div>
 					</div>
 					<div class="flex flex-col gap-1.5">
@@ -158,6 +157,7 @@
 					onmouseleave={() => (hover = null)}
 					onclick={onClick}
 				>
+					<title>Click to seek</title>
 					{#if zeroY !== null}
 						<line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="currentColor"
 							class="text-border" stroke-width="1" stroke-dasharray="2 3"
@@ -194,13 +194,12 @@
 							frame <span class="text-foreground">{(readoutIdx ?? 0) + 1}</span>/{n}
 							· ep <span class="text-foreground">{readout.ep}</span>
 							· step <span class="text-foreground">{readout.step}</span>
-							{#if hover !== null}<span class="ml-1 text-muted-foreground/70">(hover)</span>{/if}
 						{:else}
-							hover the graph to inspect a frame
+							—
 						{/if}
 					</span>
 					{#if readout}
-						<span style="color: {ACCENT}">{term} · {mode}: {fmt(readout.y)}</span>
+						<span style="color: {ACCENT}">{fmt(readout.y)}</span>
 					{/if}
 				</div>
 			</div>

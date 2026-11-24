@@ -244,18 +244,33 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
         return {"ok": True}
 
     @router.get("/reward-defaults")
-    async def reward_defaults() -> dict:
+    async def reward_defaults(profile: Optional[str] = None) -> dict:
         """The reward-weight defaults of the active reward profile (``bucky.rewards.RewardConfig``).
 
         This is the single source of truth for reward weights: the web UI loads these to
         seed its editor so editing ``bucky/rewards.py`` (and restarting the server) updates
         the website's defaults — instead of the UI shipping a stale hardcoded copy that
         would silently override the code values at launch. Order follows the term registry.
-        """
-        from bucky.rewards import RewardConfig
 
-        cfg = RewardConfig()
-        return {"profile": cfg.profile, "weights": cfg.weight_dict()}
+        ``?profile=`` picks a profile ("pws" default, or "legacy"). ``terms`` carries each
+        weight's group ("pws" / "rule") and description from the term registry, so the UI
+        can group and explain them; legacy weights have none.
+        """
+        from bucky.reward_terms import TERMS
+        from bucky.rewards import RewardConfig, available_profiles
+
+        profiles = available_profiles()
+        if profile is not None and profile not in profiles:
+            raise HTTPException(status_code=400, detail=f"Unknown reward profile: {profile}")
+        cfg = RewardConfig.from_dict(None, profile=profile)
+        weights = cfg.weight_dict()
+        terms = []
+        for key in weights:
+            spec = TERMS.get(key[2:]) if cfg.legacy is None else None
+            terms.append({"key": key,
+                          "group": spec.group if spec else "legacy",
+                          "description": spec.description if spec else ""})
+        return {"profile": cfg.profile, "profiles": profiles, "weights": weights, "terms": terms}
 
     # ── auth (GitHub-org OAuth, or password fallback) ────────────────────────────
     @router.get("/auth/me")

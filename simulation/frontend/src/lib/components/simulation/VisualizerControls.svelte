@@ -45,21 +45,8 @@
 	}
 </script>
 
-<Card.Root>
-	<Card.Header class="pb-3 pt-4">
-		<div class="flex items-center justify-between">
-			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-				{mode === 'match' ? 'Match config' : 'Run config'}
-			</Card.Title>
-			{#if busy}
-				<span class="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-					<Loader2 class="size-3 animate-spin" />running
-				</span>
-			{/if}
-		</div>
-	</Card.Header>
-
-	<Card.Content class="flex flex-col gap-3">
+<Card.Root class="py-4">
+	<Card.Content class="flex flex-col gap-3 px-4">
 		<!-- Mode toggle: Train a single agent, or run two saved policies head-to-head. -->
 		<div class="grid grid-cols-2 gap-1 rounded-md border border-border/70 bg-input/20 p-1">
 			<Button
@@ -85,16 +72,16 @@
 		<div class="mt-1 flex flex-col gap-2">
 			<Button
 				disabled={!canLaunch}
-				title={config.targetIsRemote ? 'Remote-device targets run via the queue' : ''}
+				title={config.targetIsRemote ? 'Remote targets use the queue' : ''}
 				onclick={launch}
 			>
-				<Play class="size-4" />{mode === 'match' ? 'Start now' : 'Launch now'}
+				{#if busy}<Loader2 class="size-4 animate-spin" />{:else}<Play class="size-4" />{/if}{mode === 'match' ? 'Start' : 'Launch'}
 			</Button>
 			<Button variant="secondary" disabled={!canQueue} onclick={addToQueue}>
-				<CalendarPlus class="size-4" />Add to queue
+				<CalendarPlus class="size-4" />Queue
 			</Button>
 			<Button variant="destructive" disabled={!canKill} onclick={() => simulation.kill()}>
-				<Square class="size-4" />Kill current run
+				<Square class="size-4" />Kill
 			</Button>
 		</div>
 

@@ -200,20 +200,18 @@
 						BUCKY
 					</h1>
 					<span class="font-mono text-xs text-muted-foreground">
-						{simulation.status.run_name ?? 'no active run'}
+						{simulation.status.run_name ?? ''}
 						{#if simulation.status.phase}<span class="text-foreground/70"> · {simulation.status.phase}</span>{/if}
 					</span>
 				</div>
 
 				<div class="flex items-center gap-2">
-					<span class="flex items-center gap-1.5 rounded-full border border-border bg-background/60 px-2.5 py-1">
-						<span
-								class="size-2 rounded-full {conn.pulse ? 'animate-pulse' : ''}"
-								style="background: {conn.color}"
-						></span>
-						<span class="font-mono text-[11px] text-muted-foreground">{conn.label}</span>
-					</span>
-					<span class="flex items-center gap-1.5 rounded-full border border-border bg-background/60 px-2.5 py-1">
+					<span
+							class="size-2 rounded-full {conn.pulse ? 'animate-pulse' : ''}"
+							style="background: {conn.color}"
+							title={conn.label}
+					></span>
+					<span class="flex items-center gap-1.5 px-1">
 						<span
 								class="size-2 rounded-full {train.pulse ? 'animate-pulse' : ''}"
 								style="background: {train.color}"
@@ -225,9 +223,9 @@
 						<select
 							bind:value={simulation.selectedDevice}
 							class="h-7 rounded-md border border-border bg-background/60 px-2 font-mono text-[11px] text-muted-foreground outline-none"
-							title="Which device's live stream to watch"
+							title="Stream source"
 						>
-							<option value="">Auto (latest)</option>
+							<option value="">Auto</option>
 							{#each streamOptions as o (o.id)}
 								<option value={o.id}>{o.label}</option>
 							{/each}
@@ -241,7 +239,7 @@
 						<TestTubes class="size-3" />Lab
 					</Button>
 					<Button href="/play" variant="ghost" size="xs" class="font-mono text-[11px]">
-						<Gamepad2 class="size-3" />Play a friend
+						<Gamepad2 class="size-3" />Play
 					</Button>
 					<Button href="/overview" variant="ghost" size="xs" class="font-mono text-[11px]">
 						<Boxes class="size-3" />Overview
@@ -250,7 +248,7 @@
 				</div>
 			</div>
 
-			<div class="mt-2.5 flex items-center gap-3">
+			<div class="mt-2 flex items-center gap-3">
 				<div class="font-mono text-xs tabular-nums text-foreground">
 					{fmtInt(numTimesteps)}<span class="text-muted-foreground">{totalTimesteps ? ` / ${fmtInt(totalTimesteps)}` : ''} steps</span>
 				</div>
@@ -260,22 +258,12 @@
 							style="width: {progress * 100}%; background: {train.color}"
 					></div>
 				</div>
-				<div class="w-10 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
-					{(progress * 100).toFixed(0)}%
+				<div class="font-mono text-[11px] tabular-nums text-muted-foreground">
+					{(progress * 100).toFixed(0)}%{#if timing}
+						· <span class="text-foreground" title="Elapsed">{fmtDuration(timing.elapsed)}</span>{#if timing.remaining != null}
+							· <span title="Remaining">~{fmtDuration(timing.remaining)} left</span>{/if}{/if}
 				</div>
 			</div>
-
-			{#if timing}
-				<div class="mt-1.5 flex items-center gap-4 font-mono text-[11px] tabular-nums text-muted-foreground">
-					<span>elapsed <span class="text-foreground">{fmtDuration(timing.elapsed)}</span></span>
-					<span>
-						remaining
-						<span class="text-foreground">
-							{timing.remaining != null ? `~${fmtDuration(timing.remaining)}` : '—'}
-						</span>
-					</span>
-				</div>
-			{/if}
 		</Card.Content>
 	</Card.Root>
 
@@ -347,7 +335,7 @@
 						data: {}
 					})}
 				>
-					<ChartLine class="size-3.5" />Open training scalars
+					<ChartLine class="size-3.5" />Scalars
 				</Button>
 
 				<TrainingMetrics frame={simulation.frame} episodeReturns={simulation.episodeReturns} />
@@ -362,10 +350,6 @@
 			<div class="flex flex-col gap-4 lg:min-h-0 w-full">
 				{#if manualRun}
 					<ManualControl {fieldEl} />
-				{:else}
-					<p class="font-mono text-[11px] text-muted-foreground">
-						Tick "Drive yourself" in the match config to control red against the AI.
-					</p>
 				{/if}
 			</div>
 		{/if}

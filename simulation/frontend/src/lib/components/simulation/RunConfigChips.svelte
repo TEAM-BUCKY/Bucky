@@ -6,6 +6,7 @@
 		STAGES,
 		STOP_TABS,
 		HP_FIELDS,
+		REWARD_PROFILES,
 		rewardState
 	} from '$lib/state/runConfig.svelte.js';
 	import { Input } from '$lib/components/ui/input';
@@ -47,6 +48,12 @@
 		if (!runs.some((r) => r.run === config.runB)) config.runB = runs[runs.length - 1].run;
 	});
 
+	const REWARD_GROUPS = [
+		{ value: 'pws', label: 'Weights' },
+		{ value: 'rule', label: 'Penalties' },
+		{ value: 'legacy', label: 'Weights' }
+	];
+
 	const TARGET_TABS = [
 		{ value: 'any', label: 'Any' },
 		{ value: 'server', label: 'Server' },
@@ -62,16 +69,16 @@
 	}
 	const targetSummary = $derived(
 		config.target === 'any'
-			? 'Any available'
+			? 'Any'
 			: config.target === 'server'
-				? 'Server only'
-				: (devices.find((d) => d.id === config.target)?.name ?? 'pick a device')
+				? 'Server'
+				: (devices.find((d) => d.id === config.target)?.name ?? 'pick')
 	);
 
 	// ── per-device FedAvg distribution ──────────────────────────────────────────
 	// Assignable shard hosts: the local server plus every registered device.
 	const distHosts = $derived([
-		{ id: 'server', name: 'Server (local)', online: true },
+		{ id: 'server', name: 'Server', online: true },
 		...devices.map((d) => ({ id: d.id, name: d.online ? d.name : `${d.name} (offline)`, online: d.online }))
 	]);
 	// Mode toggle: 'even' = N identical shards, 'device' = per-host env counts.
@@ -100,7 +107,7 @@
 	<div class="grid grid-cols-3 gap-2">
 		<div class="col-span-2 flex flex-col gap-1">
 			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Name</Label>
-			<Input bind:value={config.name} placeholder="e.g. striker" class="font-mono" />
+			<Input bind:value={config.name} placeholder="striker" class="font-mono" />
 		</div>
 		<div class="flex flex-col gap-1">
 			<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Version</Label>
@@ -112,44 +119,72 @@
 {#if config.mode === 'train'}
 	<div class="grid grid-cols-2 gap-2">
 		<!-- Algorithm -->
-		<ConfigChip label="Algorithm" summary={config.algoSummary} title="Learning algorithm">
+		<ConfigChip label="Algorithm" summary={config.algoSummary}>
 			{#snippet body()}
-				<div class="flex flex-col gap-1">
-					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-						Algorithm
-					</Label>
-					<Combobox bind:value={config.algo} items={ALGOS} searchPlaceholder="Search algorithms…" />
-					<p class="font-mono text-[10px] text-muted-foreground">
-						Non-RL model types (classical, tabular, imitation, offline, evolutionary) train via
-						their CLI scripts.
-					</p>
-				</div>
+				<Combobox bind:value={config.algo} items={ALGOS} searchPlaceholder="Search…" />
 			{/snippet}
 		</ConfigChip>
+
+		<!-- Reward weights -->
+		{#if config.caps.advanced}
+			<ConfigChip label="Reward" summary={config.rewardsSummary}>
+				{#snippet body()}
+					<div class="grid grid-cols-2 gap-1 rounded-md border border-border/70 bg-input/20 p-1">
+						{#each REWARD_PROFILES as rp (rp.value)}
+							<Button
+								variant={config.rewardProfile === rp.value ? 'default' : 'ghost'}
+								size="sm"
+								class="h-7 font-mono text-[11px] uppercase tracking-wider"
+								onclick={() => config.setRewardProfile(rp.value)}>{rp.label}</Button
+							>
+						{/each}
+					</div>
+					{#each REWARD_GROUPS as g (g.value)}
+						{@const fields = rewardState.fields.filter((f) => f.group === g.value)}
+						{#if fields.length > 0}
+							<div class="flex flex-col gap-1.5">
+								<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+									{g.label}
+								</Label>
+								<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+									{#each fields as f (f.key)}
+										<div class="flex flex-col gap-0.5" title={f.description}>
+											<Label class="font-mono text-[10px] text-muted-foreground">{f.label}</Label>
+											<!-- Reward weights are whole numbers (the backend rejects e.g. 1.5). -->
+											<Input type="number" step={1} bind:value={config.rw[f.key]} class="h-8 font-mono text-xs" />
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					{/each}
+					{#if rewardState.fields.length === 0}
+						<span class="font-mono text-[11px] text-muted-foreground">Weights unavailable; using defaults</span>
+					{/if}
+					<Button variant="ghost" size="sm" class="h-7 self-start font-mono text-[11px]" onclick={() => config.syncRewardDefaults()}>
+						Reset
+					</Button>
+				{/snippet}
+			</ConfigChip>
+		{/if}
 
 		<!-- Stage -->
 		<ConfigChip label="Stage" summary={config.stageSummary}>
 			{#snippet body()}
-				<div class="flex flex-col gap-1">
-					<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Stage</Label>
-					<Combobox bind:value={config.stage} items={STAGES} searchPlaceholder="Search stages…" />
-				</div>
+				<Combobox bind:value={config.stage} items={STAGES} searchPlaceholder="Search…" />
 				{#if config.stage === 'FULL_TRAINING'}
-					<div class="flex flex-col gap-1">
+					<div class="flex flex-col gap-1" title="Drag to set each phase's share">
 						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-							Phase budget split
+							Phase split
 						</Label>
 						<SplitBar bind:values={config.fullSplit} labels={['Approach', 'Push', 'Kick', 'Self-play']} />
-						<p class="font-mono text-[10px] text-muted-foreground">
-							Drag the dividers to set each phase's share of the total budget.
-						</p>
 					</div>
 				{/if}
 			{/snippet}
 		</ConfigChip>
 
 		<!-- Stop condition -->
-		<ConfigChip label="Stop" summary={config.stopSummary} invalid={!config.stopValid} title="Stop after">
+		<ConfigChip label="Stop" summary={config.stopSummary} invalid={!config.stopValid}>
 			{#snippet body()}
 				<div class="grid grid-cols-3 gap-1 rounded-md border border-border/70 bg-input/20 p-1">
 					{#each STOP_TABS as t (t.value)}
@@ -177,7 +212,7 @@
 				{:else}
 					<DateTimePicker bind:value={config.untilEpoch} />
 					{#if config.untilEpoch != null && !config.stopValid}
-						<span class="font-mono text-[11px] text-destructive">Pick a time in the future.</span>
+						<span class="font-mono text-[11px] text-destructive">Must be in the future</span>
 					{/if}
 				{/if}
 			{/snippet}
@@ -211,13 +246,13 @@
 				<div class="flex items-center gap-2">
 					<Checkbox id="opt-viz" bind:checked={config.viz} />
 					<Label for="opt-viz" class="cursor-pointer font-mono text-xs text-muted-foreground">
-						Watch live (slower)
+						Watch live
 					</Label>
 				</div>
 				<div class="flex items-center gap-2">
 					<Checkbox id="opt-dist" bind:checked={config.distributed} />
 					<Label for="opt-dist" class="cursor-pointer font-mono text-xs text-muted-foreground">
-						Distribute across devices (FedAvg)
+						Distribute (FedAvg)
 					</Label>
 				</div>
 				{#if config.distributed}
@@ -228,7 +263,7 @@
 								variant={distMode === 'even' ? 'default' : 'ghost'}
 								size="sm"
 								class="h-7 font-mono text-[11px] uppercase tracking-wider"
-								onclick={() => (distMode = 'even')}>Even shards</Button
+								onclick={() => (distMode = 'even')}>Even</Button
 							>
 							<Button
 								variant={distMode === 'device' ? 'default' : 'ghost'}
@@ -280,7 +315,7 @@
 								{/each}
 								{#if config.distDevices.filter((d) => d.n_envs >= 1).length < 2}
 									<span class="font-mono text-[11px] text-muted-foreground">
-										Enable at least 2 hosts to distribute.
+										Pick 2+ hosts
 									</span>
 								{/if}
 							</div>
@@ -303,7 +338,7 @@
 					<div class="flex items-center gap-2">
 						<Checkbox id="opt-steps" bind:checked={config.saveStepCheckpoints} />
 						<Label for="opt-steps" class="cursor-pointer font-mono text-xs text-muted-foreground">
-							Save periodic step checkpoints
+							Step checkpoints
 						</Label>
 					</div>
 				{/if}
@@ -316,16 +351,16 @@
 				<div class="flex items-center gap-2 {hasRuns ? '' : 'opacity-50'}">
 					<Checkbox id="resume-cont" bind:checked={config.cont} disabled={!hasRuns} />
 					<Label for="resume-cont" class="{hasRuns ? 'cursor-pointer' : ''} font-mono text-xs text-muted-foreground">
-						Continue from checkpoint
+						Resume from checkpoint
 					</Label>
 				</div>
 				{#if !hasRuns}
-					<span class="font-mono text-[11px] text-muted-foreground">No saved checkpoints yet.</span>
+					<span class="font-mono text-[11px] text-muted-foreground">No checkpoints yet</span>
 				{/if}
 				{#if config.cont && hasRuns}
 					<div class="flex flex-col gap-1">
-						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Source run</Label>
-						<Combobox bind:value={config.srcRun} items={runItems} size="sm" searchPlaceholder="Search runs…" />
+						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Run</Label>
+						<Combobox bind:value={config.srcRun} items={runItems} size="sm" searchPlaceholder="Search…" />
 					</div>
 					<div class="flex flex-col gap-1">
 						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</Label>
@@ -333,7 +368,7 @@
 							bind:value={config.srcCkpt}
 							items={ckptItems(srcCheckpoints)}
 							size="sm"
-							searchPlaceholder="Search checkpoints…"
+							searchPlaceholder="Search…"
 						/>
 					</div>
 				{/if}
@@ -359,34 +394,31 @@
 							bind:value={config.target}
 							items={devices.map((d) => ({ value: d.id, label: d.online ? d.name : `${d.name} (offline)` }))}
 							size="sm"
-							searchPlaceholder="Search devices…"
+							searchPlaceholder="Search…"
 						/>
 					{:else}
-						<span class="font-mono text-[11px] text-muted-foreground">No devices registered yet.</span>
+						<span class="font-mono text-[11px] text-muted-foreground">No devices</span>
 					{/if}
 				{/if}
-				<p class="font-mono text-[10px] text-muted-foreground">
-					Remote-device targets run via the queue, not "Launch now".
-				</p>
 			{/snippet}
 		</ConfigChip>
 
 		{#if config.caps.advanced}
 			<!-- Advanced: net arch + PPO hyperparameters -->
-			<ConfigChip label="Advanced" summary={config.advancedSummary} invalid={!config.archValid} title="Advanced">
+			<ConfigChip label="Advanced" summary={config.advancedSummary} invalid={!config.archValid}>
 				{#snippet body()}
 					<div class="flex flex-col gap-1">
-						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-							Network architecture (comma-separated hidden sizes)
+						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground" title="Comma-separated hidden sizes">
+							Net arch
 						</Label>
 						<Input bind:value={config.netArchStr} placeholder="64,64" class="font-mono" />
 						{#if !config.archValid}
-							<span class="font-mono text-[11px] text-destructive">Enter at least one positive integer.</span>
+							<span class="font-mono text-[11px] text-destructive">Need ≥1 positive integer</span>
 						{/if}
 					</div>
-					<div class="rounded-md border border-border/70 bg-input/10 p-2">
-						<Label class="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-							PPO hyperparameters
+					<div class="flex flex-col gap-1.5">
+						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+							PPO hyperparams
 						</Label>
 						<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
 							{#each HP_FIELDS as f (f.key)}
@@ -400,26 +432,11 @@
 				{/snippet}
 			</ConfigChip>
 
-			<!-- Reward weights -->
-			<ConfigChip label="Rewards" summary={config.rewardsSummary} title="Reward weights">
-				{#snippet body()}
-					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-						{#each rewardState.fields as f (f.key)}
-							<div class="flex flex-col gap-0.5">
-								<Label class="font-mono text-[10px] text-muted-foreground">{f.label}</Label>
-								<!-- PWS §9.3.1: reward weights are whole numbers (the backend rejects e.g. 1.5). -->
-								<Input type="number" step={1} bind:value={config.rw[f.key]} class="h-8 font-mono text-xs" />
-							</div>
-						{/each}
-					</div>
-				{/snippet}
-			</ConfigChip>
 		{/if}
 
 		<!-- Queue start time -->
 		<ConfigChip label="Schedule" summary={config.scheduleSummary} title="Queue start time">
 			{#snippet body()}
-				<p class="font-mono text-[10px] text-muted-foreground">Applies to "Add to queue" only.</p>
 				<DateTimePicker bind:value={config.startEpoch} placeholder="ASAP" />
 			{/snippet}
 		</ConfigChip>
@@ -430,34 +447,24 @@
 		<div class="grid grid-cols-2 gap-2">
 			<ConfigChip label="Bot A" summary={config.botASummary} invalid={!config.runA || !config.ckptA}>
 				{#snippet body()}
-					<Label class="font-mono text-[10px] font-semibold uppercase tracking-wider" style="color:#3c78dc">
-						Bot A network
-					</Label>
 					<ModelVersionPicker bind:run={config.runA} bind:checkpoint={config.ckptA} size="sm" />
 				{/snippet}
 			</ConfigChip>
 
 			<ConfigChip label="Bot B" summary={config.botBSummary} invalid={!config.runB || !config.ckptB}>
 				{#snippet body()}
-					<Label class="font-mono text-[10px] font-semibold uppercase tracking-wider" style="color:#dc3c3c">
-						Bot B network
-					</Label>
 					<ModelVersionPicker bind:run={config.runB} bind:checkpoint={config.ckptB} size="sm" />
 				{/snippet}
 			</ConfigChip>
 
 			<ConfigChip label="Seed" summary={String(config.matchSeed)}>
 				{#snippet body()}
-					<div class="flex flex-col gap-1">
-						<Label class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Seed</Label>
-						<Input type="number" bind:value={config.matchSeed} class="font-mono" />
-					</div>
+					<Input type="number" bind:value={config.matchSeed} class="font-mono" />
 				{/snippet}
 			</ConfigChip>
 
 			<ConfigChip label="Schedule" summary={config.scheduleSummary} title="Queue start time">
 				{#snippet body()}
-					<p class="font-mono text-[10px] text-muted-foreground">Applies to "Add to queue" only.</p>
 					<DateTimePicker bind:value={config.startEpoch} placeholder="ASAP" />
 				{/snippet}
 			</ConfigChip>
@@ -471,8 +478,6 @@
 			</div>
 		</div>
 	{:else}
-		<p class="font-mono text-[11px] text-muted-foreground">
-			No saved checkpoints yet — train a policy first, then pick one for each bot.
-		</p>
+		<p class="font-mono text-[11px] text-muted-foreground">No checkpoints yet</p>
 	{/if}
 {/if}

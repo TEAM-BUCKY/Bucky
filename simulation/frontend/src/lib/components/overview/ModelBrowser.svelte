@@ -76,8 +76,8 @@
 
 	function confirmDeleteModel(name: string, versions: ModelInfo[]) {
 		pending = {
-			title: 'Delete entire model',
-			description: `Delete all ${versions.length} version${versions.length === 1 ? '' : 's'} of "${name}" and every checkpoint? This cannot be undone.`,
+			title: 'Delete model',
+			description: `Delete "${name}" (${versions.length} version${versions.length === 1 ? '' : 's'})? Irreversible.`,
 			confirmLabel: 'Delete model',
 			action: () => versions.forEach((v) => simulation.deleteModel(v.run))
 		};
@@ -87,8 +87,8 @@
 	function confirmPruneSteps(name: string, versions: ModelInfo[]) {
 		const n = stepCount(versions);
 		pending = {
-			title: 'Remove step checkpoints',
-			description: `Remove ${n} periodic step snapshot${n === 1 ? '' : 's'} from "${name}"? The best and final checkpoints are kept.`,
+			title: 'Prune step checkpoints',
+			description: `Remove ${n} step checkpoint${n === 1 ? '' : 's'} from "${name}"? Best and final are kept.`,
 			confirmLabel: 'Remove',
 			action: () => versions.forEach((v) => simulation.pruneStepCheckpoints(v.run))
 		};
@@ -97,8 +97,8 @@
 
 	function confirmDeleteRun(run: string) {
 		pending = {
-			title: 'Delete model version',
-			description: `Delete "${run}" and all its checkpoints? This cannot be undone.`,
+			title: 'Delete version',
+			description: `Delete "${run}"? Irreversible.`,
 			confirmLabel: 'Delete',
 			action: () => simulation.deleteModel(run)
 		};
@@ -107,7 +107,7 @@
 	function confirmDeleteCkpt(run: string, file: string) {
 		pending = {
 			title: 'Delete checkpoint',
-			description: `Delete checkpoint "${file}" from "${run}"?`,
+			description: `Delete "${file}"?`,
 			confirmLabel: 'Delete',
 			action: () => simulation.deleteCheckpoint(run, file)
 		};
@@ -119,7 +119,7 @@
 	<div class="flex flex-wrap items-center gap-2">
 		<Input
 			bind:value={search}
-			placeholder="Search models, runs, stages…"
+			placeholder="Search…"
 			class="h-8 max-w-xs font-mono text-xs"
 		/>
 		<div class="ml-auto flex items-center gap-1 rounded-md border border-border/70 bg-input/20 p-1">
@@ -138,18 +138,10 @@
 		</div>
 	</div>
 
-	{#if !canControl}
-		<p class="font-mono text-[11px] text-muted-foreground">
-			Log in to download or delete models
-		</p>
-	{/if}
-
 	{#if groups.length === 0}
 		<Card.Root>
 			<Card.Content class="py-10 text-center font-mono text-xs text-muted-foreground">
-				{simulation.models.length === 0
-					? 'No models yet. Create one in the Create tab.'
-					: 'No models match your search.'}
+				{simulation.models.length === 0 ? 'No models yet' : 'No matches'}
 			</Card.Content>
 		</Card.Root>
 	{/if}
@@ -170,10 +162,10 @@
 								size="xs"
 								class="font-mono text-[10px]"
 								disabled={!canControl}
-								title="Delete the periodic *_steps.zip snapshots (keep best + final)"
+								title="Delete *_steps.zip (keeps best + final)"
 								onclick={() => confirmPruneSteps(group.name, group.versions)}
 							>
-								<Eraser class="size-3" />Remove step ckpts ({stepCount(group.versions)})
+								<Eraser class="size-3" />Prune ({stepCount(group.versions)})
 							</Button>
 						{/if}
 						<Button
@@ -181,10 +173,9 @@
 							size="xs"
 							class="font-mono text-[10px] text-destructive hover:text-destructive"
 							disabled={!canControl}
-							title="Delete every version of this model"
 							onclick={() => confirmDeleteModel(group.name, group.versions)}
 						>
-							<Trash2 class="size-3" />Delete model
+							<Trash2 class="size-3" />Delete
 						</Button>
 					</div>
 				</div>
@@ -223,11 +214,11 @@
 						{#if expanded[m.run]}
 							<div class="border-t border-border/50 px-3 py-2">
 								<div class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] text-muted-foreground">
-									<span>run: {m.run}</span>
-									<span>created: {fmtDate(m.created_at)}</span>
-									{#if m.created_by}<span>by: {m.created_by}</span>{/if}
-									{#if m.parent}<span>from: {m.parent}</span>{/if}
-									{#if !m.has_meta}<span class="text-amber-500">legacy (no metadata)</span>{/if}
+									<span>{m.run}</span>
+									<span>{fmtDate(m.created_at)}</span>
+									{#if m.created_by}<span>by {m.created_by}</span>{/if}
+									{#if m.parent}<span>from {m.parent}</span>{/if}
+									{#if !m.has_meta}<span class="text-amber-500" title="No metadata">legacy</span>{/if}
 								</div>
 
 								{#if m.config}

@@ -57,13 +57,11 @@
 
 	<Card.Content class="flex flex-col gap-1.5">
 		{#if queue.length === 0}
-			<p class="font-mono text-[11px] text-muted-foreground">
-				No queued runs.
-			</p>
+			<p class="font-mono text-[11px] text-muted-foreground">Empty</p>
 		{:else}
 			{#each queue as item, i (item.id)}
 				<div
-					class="flex items-center gap-2 rounded-md border border-border/70 bg-input/20 px-2.5 py-1.5"
+					class="flex items-center gap-2 py-0.5"
 				>
 					<span class="font-mono text-[11px] tabular-nums text-muted-foreground">{i + 1}</span>
 					<div class="min-w-0 flex-1">
@@ -77,7 +75,7 @@
 									<Clock class="size-2.5" />{fmtTime(item.start_at)}
 								</span>
 							{:else}
-								<span>starts when idle</span>
+								<span>when idle</span>
 							{/if}
 							{#if item.status === 'running'}
 								<span class="text-emerald-400">launching…</span>
@@ -91,7 +89,7 @@
 							variant="ghost"
 							size="xs"
 							class="size-6 p-0"
-							title="Remove from queue"
+							title="Remove"
 							onclick={() => simulation.dequeue(item.id)}
 						>
 							<X class="size-3" />

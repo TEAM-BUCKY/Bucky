@@ -88,7 +88,7 @@
 		{size}
 		{disabled}
 		placeholder="Model…"
-		searchPlaceholder="Search models…"
+		searchPlaceholder="Search…"
 	/>
 	<Combobox
 		bind:value={run}
@@ -96,7 +96,7 @@
 		{size}
 		disabled={disabled || !name}
 		placeholder="Version…"
-		searchPlaceholder="Search versions…"
+		searchPlaceholder="Search…"
 	/>
 	<Combobox
 		bind:value={checkpoint}
@@ -104,6 +104,6 @@
 		{size}
 		disabled={disabled || !run}
 		placeholder="Checkpoint…"
-		searchPlaceholder="Search checkpoints…"
+		searchPlaceholder="Search…"
 	/>
 </div>

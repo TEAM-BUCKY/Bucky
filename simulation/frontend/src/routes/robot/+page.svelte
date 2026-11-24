@@ -67,7 +67,7 @@
 					<div class="flex items-baseline gap-3">
 						<h1 class="font-mono text-base font-bold tracking-tight text-foreground">BUCKY · ROBOT</h1>
 						<span class="font-mono text-xs text-muted-foreground">
-							{#if link.hello}{link.hello.board} · protocol v{link.hello.v}{:else}live telemetry over USB or Bluetooth{/if}
+							{#if link.hello}{link.hello.board} · v{link.hello.v}{/if}
 							{#if link.connected}<span class="text-foreground/70"> · {link.msgRate} msg/s</span>{/if}
 						</span>
 					</div>
@@ -86,7 +86,7 @@
 								size="xs"
 								class="font-mono text-[11px]"
 								disabled={!link.serialSupported}
-								title={link.serialSupported ? 'Connect over the USB cable' : 'Web Serial needs Chrome or Edge'}
+								title={link.serialSupported ? undefined : 'Needs Chrome or Edge'}
 								onclick={() => link.connectSerial()}
 							>
 								<Usb class="size-3" />USB
@@ -96,9 +96,7 @@
 								size="xs"
 								class="font-mono text-[11px]"
 								disabled={!link.bluetoothSupported}
-								title={link.bluetoothSupported
-									? 'Connect to the HM-10 (disconnect any phone first)'
-									: 'Web Bluetooth needs Chrome or Edge'}
+								title={link.bluetoothSupported ? 'Disconnect any phone first' : 'Needs Chrome or Edge'}
 								onclick={() => link.connectBluetooth()}
 							>
 								<Bluetooth class="size-3" />Bluetooth
@@ -125,24 +123,24 @@
 			<!-- left: scalar sensors -->
 			<div class="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
 				<Card.Root>
-					<Card.Header><Card.Title class="font-mono text-xs">Compass</Card.Title></Card.Header>
+					<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Compass</Card.Title></Card.Header>
 					<Card.Content class="grid grid-cols-2 gap-2 font-mono text-xs">
 						<span class="text-muted-foreground">heading</span><span class="tabular-nums">{fmt(s?.heading)}°</span>
 						<span class="text-muted-foreground">offset</span><span class="tabular-nums">{fmt(s?.offset)}°</span>
 					</Card.Content>
 				</Card.Root>
 				<Card.Root>
-					<Card.Header><Card.Title class="font-mono text-xs">Ball (IR)</Card.Title></Card.Header>
+					<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Ball</Card.Title></Card.Header>
 					<Card.Content class="grid grid-cols-2 gap-2 font-mono text-xs">
 						<span class="text-muted-foreground">seen</span><span>{s?.ball ? (s.ball.seen ? 'yes' : 'no') : '–'}</span>
 						<span class="text-muted-foreground">angle</span>
 						<span class="tabular-nums">{s?.ball ? fmt((s.ball.angle * 180) / Math.PI) : '–'}°</span>
-						<span class="text-muted-foreground">distance</span><span class="tabular-nums">{fmt(s?.ball?.dist)} cm</span>
-						<span class="text-muted-foreground">confidence</span><span class="tabular-nums">{fmt(s?.ball?.conf, 2)}</span>
+						<span class="text-muted-foreground">dist</span><span class="tabular-nums">{fmt(s?.ball?.dist)} cm</span>
+						<span class="text-muted-foreground">conf</span><span class="tabular-nums">{fmt(s?.ball?.conf, 2)}</span>
 					</Card.Content>
 				</Card.Root>
 				<Card.Root>
-					<Card.Header><Card.Title class="font-mono text-xs">Sonar</Card.Title></Card.Header>
+					<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Sonar</Card.Title></Card.Header>
 					<Card.Content class="grid grid-cols-2 gap-2 font-mono text-xs">
 						{#each s?.sonar ?? [] as d, i (i)}
 							<span class="text-muted-foreground">S{i}</span><span class="tabular-nums">{d === null ? 'timeout' : `${fmt(d)} cm`}</span>
@@ -152,7 +150,7 @@
 					</Card.Content>
 				</Card.Root>
 				<Card.Root>
-					<Card.Header><Card.Title class="font-mono text-xs">Encoders</Card.Title></Card.Header>
+					<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Encoders</Card.Title></Card.Header>
 					<Card.Content class="grid grid-cols-2 gap-2 font-mono text-xs">
 						{#each s?.enc ?? [] as v, i (i)}
 							<span class="text-muted-foreground">M{i + 1}</span><span class="tabular-nums">{fmt(v, 2)}</span>
@@ -163,7 +161,7 @@
 				</Card.Root>
 				{#if s?.pose}
 					<Card.Root>
-						<Card.Header><Card.Title class="font-mono text-xs">Pose (EKF)</Card.Title></Card.Header>
+						<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Pose</Card.Title></Card.Header>
 						<Card.Content class="grid grid-cols-2 gap-2 font-mono text-xs">
 							<span class="text-muted-foreground">x, y</span><span class="tabular-nums">{fmt(s.pose.x)}, {fmt(s.pose.y)} cm</span>
 							<span class="text-muted-foreground">θ</span><span class="tabular-nums">{fmt((s.pose.theta * 180) / Math.PI)}°</span>
@@ -189,7 +187,7 @@
 			<!-- right: sensor arrays -->
 			<div class="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
 				<Card.Root>
-					<Card.Header><Card.Title class="font-mono text-xs">IR ring</Card.Title></Card.Header>
+					<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">IR ring</Card.Title></Card.Header>
 					<Card.Content class="flex flex-col gap-1 font-mono text-[11px]">
 						{#each irBars as b, i (i)}
 							<div class="flex items-center gap-2">
@@ -205,7 +203,7 @@
 					</Card.Content>
 				</Card.Root>
 				<Card.Root>
-					<Card.Header><Card.Title class="font-mono text-xs">Line (green, reflected)</Card.Title></Card.Header>
+					<Card.Header class="pb-2"><Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Line</Card.Title></Card.Header>
 					<Card.Content class="flex flex-col gap-1 font-mono text-[11px]">
 						{#each lineBars as b, i (i)}
 							<div class="flex items-center gap-2">
@@ -227,14 +225,13 @@
 		<Card.Root class="flex h-64 shrink-0 flex-col">
 			<Card.Content class="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3">
 				<div class="flex flex-wrap items-center gap-2">
-					<span class="font-mono text-xs font-semibold">Logs</span>
-					<Input bind:value={filter} placeholder="filter…" class="h-7 w-48 font-mono text-[11px]" />
+					<span class="font-mono text-xs font-semibold uppercase tracking-widest">Logs</span>
+					<Input bind:value={filter} placeholder="Filter" class="h-7 w-48 font-mono text-[11px]" />
 					<label class="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
 						<input type="checkbox" bind:checked={autoscroll} />autoscroll
 					</label>
 					<span class="ml-auto font-mono text-[11px] text-muted-foreground">
-						{link.recorded} recorded · {link.missedFrames} missed frames · {s?.drop ?? 0} dropped on robot
-						{#if link.parseErrors > 0} · {link.parseErrors} bad lines{/if}
+						{link.recorded} rec · {link.missedFrames} missed · {s?.drop ?? 0} dropped{#if link.parseErrors > 0} · {link.parseErrors} bad{/if}
 					</span>
 					<Button variant="ghost" size="xs" class="font-mono text-[11px]" onclick={() => link.clearLogs()}>
 						<Trash2 class="size-3" />Clear

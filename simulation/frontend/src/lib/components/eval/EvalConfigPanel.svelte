@@ -13,7 +13,7 @@
 	const DRILLS = [
 		{ value: 'APPROACH_STATIC_BALL', label: 'Approach static ball' },
 		{ value: 'PUSH_TO_EMPTY_GOAL', label: 'Push to empty goal' },
-		{ value: 'AIM_AND_KICK', label: 'Aim & kick (shooting)' },
+		{ value: 'AIM_AND_KICK', label: 'Aim & kick' },
 		{ value: 'SELF_PLAY_1V1', label: 'Self-play 1v1' }
 	];
 
@@ -42,7 +42,7 @@
 <Card.Root>
 	<Card.Header class="pb-2">
 		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-			Evaluation drill
+			Evaluate
 		</Card.Title>
 	</Card.Header>
 	<Card.Content class="flex flex-col gap-3">
@@ -71,21 +71,21 @@
 
 		<div class="flex items-center gap-2">
 			<Checkbox id="eval-det" bind:checked={deterministic} disabled={running} />
-			<Label for="eval-det" class="font-mono text-[11px] text-muted-foreground">Deterministic policy</Label>
+			<Label for="eval-det" class="font-mono text-[11px] text-muted-foreground">Deterministic</Label>
 		</div>
 
 		{#if running}
 			<Button variant="destructive" size="sm" class="font-mono text-[11px]" onclick={() => simulation.stopEval()}>
-				<Square class="size-3" />Stop evaluation
+				<Square class="size-3" />Stop
 			</Button>
 		{:else}
 			<Button size="sm" class="font-mono text-[11px]" disabled={!canStart} onclick={start}>
-				<Play class="size-3" />Run drill
+				<Play class="size-3" />Run
 			</Button>
 		{/if}
 
 		{#if !simulation.hasCredentials}
-			<p class="font-mono text-[11px] text-amber-500">Log in to run evaluations.</p>
+			<p class="font-mono text-[11px] text-amber-500">Log in to run.</p>
 		{:else if simulation.evalError}
 			<p class="font-mono text-[11px] text-red-400">{simulation.evalError}</p>
 		{/if}

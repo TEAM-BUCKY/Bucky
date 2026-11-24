@@ -23,21 +23,21 @@
 	<Card.Header class="pb-2 pt-4">
 		<div class="flex items-center justify-between">
 			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-				Active runs{runs.length ? ` · ${runs.length}` : ''}
+				Running{runs.length ? ` · ${runs.length}` : ''}
 			</Card.Title>
-			<span class="font-mono text-[10px] text-muted-foreground">
-				server {simulation.localActive}/{simulation.localSlots}
+			<span class="font-mono text-[10px] text-muted-foreground" title="Server slots">
+				{simulation.localActive}/{simulation.localSlots}
 			</span>
 		</div>
 	</Card.Header>
 
 	<Card.Content class="flex flex-col gap-1.5">
 		{#if runs.length === 0}
-			<p class="font-mono text-[11px] text-muted-foreground">No active runs.</p>
+			<p class="font-mono text-[11px] text-muted-foreground">None</p>
 		{:else}
 			{#each runs as run (run.run_name)}
 				<div
-					class="flex items-center gap-2 rounded-md border border-border/70 bg-input/20 px-2.5 py-1.5"
+					class="flex items-center gap-2 py-0.5"
 				>
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center gap-1.5">
@@ -58,7 +58,7 @@
 								{deviceLabel(run)}
 							</span>
 							{#if run.dist_group}
-								<span class="text-sky-400" title="Federated shard of {run.dist_group}">⇆ shard</span>
+								<span class="text-sky-400" title="Shard of {run.dist_group}">shard</span>
 							{/if}
 							{#if run.cancel_requested}
 								<span class="text-amber-400">stopping…</span>
@@ -72,7 +72,7 @@
 							variant="ghost"
 							size="xs"
 							class="size-6 p-0"
-							title="Stop this run"
+							title="Stop"
 							disabled={run.cancel_requested || run.state === 'stopping'}
 							onclick={() => simulation.stopRun(run.run_name)}
 						>

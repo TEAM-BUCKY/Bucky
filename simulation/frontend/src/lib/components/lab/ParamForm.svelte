@@ -22,7 +22,7 @@
 		allowSearch?: boolean;
 	} = $props();
 
-	const STAR_ITEM = { value: '*', label: '* · try every option' };
+	const STAR_ITEM = { value: '*', label: '* (search)' };
 
 	// A spec can render a frame before its values are filled in (e.g. right after switching modules).
 	const val = (name: string) => values[name] ?? spec[name].default;
@@ -61,7 +61,7 @@
 						<button
 							type="button"
 							class="ml-auto font-mono text-[10px] {isStar(val(name)) ? 'text-primary' : 'text-muted-foreground/60 hover:text-foreground'}"
-							title="Search both values for the best fit"
+							title="Search"
 							{disabled}
 							onclick={() => (values[name] = isStar(val(name)) ? Boolean(p.default) : '*')}
 						>*</button>
@@ -116,9 +116,6 @@
 						class="h-8 font-mono text-xs tabular-nums"
 					/>
 				{/if}
-			{/if}
-			{#if p.help}
-				<span class="font-mono text-[10px] leading-tight text-muted-foreground/70">{p.help}</span>
 			{/if}
 		</div>
 	{/each}

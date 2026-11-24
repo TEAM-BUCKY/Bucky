@@ -208,6 +208,8 @@ export interface LaunchConfig {
 	hyperparams?: Hyperparams;
 	net_arch?: number[];
 	reward_weights?: Record<string, number>;
+	/** Reward profile: "pws" (default) or "legacy". */
+	reward_profile?: string;
 	/** Keep periodic model_<N>_steps.zip snapshots (off by default). */
 	save_step_checkpoints?: boolean;
 	/** Where the run executes: 'any' (default), 'server', or a device id. */

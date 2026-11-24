@@ -42,7 +42,6 @@
 			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
 				Episode return
 			</Card.Title>
-			<span class="font-mono text-[10px] text-muted-foreground">last {episodeReturns.length}</span>
 		</div>
 	</Card.Header>
 	<Card.Content>
@@ -81,7 +80,7 @@
 				</svg>
 			{/if}
 		{:else}
-			<p class="font-mono text-xs text-muted-foreground">No live rollout yet.</p>
+			<p class="font-mono text-xs text-muted-foreground">No data</p>
 		{/if}
 	</Card.Content>
 </Card.Root>

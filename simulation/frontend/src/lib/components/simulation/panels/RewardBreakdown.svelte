@@ -63,7 +63,7 @@
 				{/each}
 			</div>
 		{:else}
-			<p class="font-mono text-xs text-muted-foreground">Waiting for the live rollout…</p>
+			<p class="font-mono text-xs text-muted-foreground">No data</p>
 		{/if}
 	</Card.Content>
 </Card.Root>

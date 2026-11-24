@@ -40,7 +40,7 @@
 	const showTransport = $derived(running || simulation.evalFrames.length > 0);
 	const conn = $derived.by(() => {
 		if (simulation.connected) return { label: 'Connected', color: '#34d399' };
-		return { label: 'Reconnecting…', color: '#f87171' };
+		return { label: 'Offline', color: '#f87171' };
 	});
 </script>
 
@@ -56,14 +56,13 @@
 					<div class="flex items-baseline gap-3">
 						<h1 class="font-mono text-base font-bold tracking-tight text-foreground">BUCKY · EVAL</h1>
 						<span class="font-mono text-xs text-muted-foreground">
-							{simulation.evalRun ?? 'no evaluation'}
+							{simulation.evalRun ?? ''}
 							{#if running}<span class="text-foreground/70"> · {simulation.evalStatus.phase ?? 'running'}</span>{/if}
 						</span>
 					</div>
 					<div class="flex items-center gap-2">
-						<span class="flex items-center gap-1.5 rounded-full border border-border bg-background/60 px-2.5 py-1">
-							<span class="size-2 rounded-full" style="background: {conn.color}"></span>
-							<span class="font-mono text-[11px] text-muted-foreground">{conn.label}</span>
+						<span class="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground" title={conn.label}>
+							<span class="size-2 rounded-full" style="background: {conn.color}"></span>{conn.label}
 						</span>
 						<Button href="/viz" variant="ghost" size="xs" class="font-mono text-[11px]">
 							<ChartLine class="size-3" />Train
@@ -72,7 +71,7 @@
 							<TestTubes class="size-3" />Lab
 						</Button>
 						<Button href="/play" variant="ghost" size="xs" class="font-mono text-[11px]">
-							<Gamepad2 class="size-3" />Play a friend
+							<Gamepad2 class="size-3" />Play
 						</Button>
 						<Button href="/overview" variant="ghost" size="xs" class="font-mono text-[11px]">
 							<Boxes class="size-3" />Overview
@@ -119,8 +118,6 @@
 					cumulative={view?.reward_cumulative ?? null}
 					total={view?.total_return ?? null}
 					history={simulation.evalCumulativeHistory}
-					episode={view?.episode ?? null}
-					step={view?.step ?? null}
 				/>
 			</div>
 		</div>

@@ -20,25 +20,23 @@
 <Card.Root>
 	<Card.Header class="pb-2">
 		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-			Aggregate · {summary ? `${summary.n_episodes} episodes` : '—'}
+			Summary{#if summary}<span class="ml-2 font-normal text-muted-foreground">{summary.n_episodes} ep</span>{/if}
 		</Card.Title>
 	</Card.Header>
 	<Card.Content class="flex flex-col gap-3">
 		{#if !summary}
-			<p class="font-mono text-xs text-muted-foreground">
-				Runs to completion to show mean return, success rate and per-term totals.
-			</p>
+			<p class="font-mono text-xs text-muted-foreground">No results</p>
 		{:else}
 			<div class="grid grid-cols-2 gap-2">
-				<div class="rounded-md border border-border/70 bg-card/40 p-2.5">
-					<div class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Mean return</div>
+				<div>
+					<div class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Return</div>
 					<div class="font-mono text-sm tabular-nums" style="color: {summary.return_mean >= 0 ? POS : NEG}">
 						{summary.return_mean >= 0 ? '+' : ''}{summary.return_mean.toFixed(2)}
 						<span class="text-muted-foreground">± {summary.return_std.toFixed(2)}</span>
 					</div>
 				</div>
-				<div class="rounded-md border border-border/70 bg-card/40 p-2.5">
-					<div class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Success rate</div>
+				<div>
+					<div class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Success</div>
 					<div class="font-mono text-sm tabular-nums text-foreground">
 						{(summary.success_rate * 100).toFixed(0)}%
 					</div>
@@ -47,12 +45,12 @@
 
 			<div class="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-muted-foreground">
 				<span>{summary.deterministic ? 'deterministic' : 'stochastic'}</span>
-				{#if summary.opponent}<span>opponent: {summary.opponent}</span>{/if}
+				{#if summary.opponent}<span>vs {summary.opponent}</span>{/if}
 			</div>
 
 			<div class="flex flex-col gap-1">
 				<div class="flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-					<span>Term</span><span>mean ± std / ep</span>
+					<span>Term</span><span>mean ± std</span>
 				</div>
 				{#each terms as t (t.key)}
 					<div class="flex justify-between font-mono text-[11px]">

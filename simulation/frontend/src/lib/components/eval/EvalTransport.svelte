@@ -22,11 +22,11 @@
 	<div class="flex items-center justify-between gap-3">
 		<!-- transport -->
 		<div class="flex items-center gap-1">
-			<Button variant="ghost" size="xs" title="Jump to episode start"
+			<Button variant="ghost" size="xs" title="Rewind"
 				disabled={!frames.length} onclick={() => simulation.evalRewind()}>
 				<SkipBack class="size-3.5" />
 			</Button>
-			<Button variant="ghost" size="xs" title="Step back one frame"
+			<Button variant="ghost" size="xs" title="Back"
 				disabled={!frames.length} onclick={() => simulation.evalStepBack()}>
 				<ChevronLeft class="size-3.5" />
 			</Button>
@@ -35,7 +35,7 @@
 				onclick={() => simulation.setEvalPlaying(!playing)}>
 				{#if playing}<Pause class="size-3.5" />{:else}<Play class="size-3.5" />{/if}
 			</Button>
-			<Button variant="ghost" size="xs" title="Step forward one frame"
+			<Button variant="ghost" size="xs" title="Forward"
 				disabled={!frames.length || (atEdge && !running)} onclick={() => simulation.evalStepForward()}>
 				<ChevronRight class="size-3.5" />
 			</Button>
@@ -74,7 +74,7 @@
 				variant="ghost"
 				size="xs"
 				class="ml-1"
-				title="Reward graph — plot a term across the run, click to seek"
+				title="Reward graph"
 				disabled={!frames.length}
 				onclick={() => DialogsState.open({ component: RewardGraphDialog, data: {} })}
 			>
@@ -83,7 +83,7 @@
 			<Button
 				variant="ghost"
 				size="xs"
-				title="Inspect frame — observation + reward inputs"
+				title="Inspect frame"
 				disabled={!view}
 				onclick={() => DialogsState.open({ component: EvalDebugDialog, data: {} })}
 			>

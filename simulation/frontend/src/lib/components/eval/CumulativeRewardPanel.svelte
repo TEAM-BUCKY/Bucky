@@ -6,15 +6,11 @@
 	let {
 		cumulative,
 		total,
-		history,
-		episode,
-		step
+		history
 	}: {
 		cumulative: Record<string, number> | null;
 		total: number | null;
 		history: MetricPoint[];
-		episode: number | null;
-		step: number | null;
 	} = $props();
 
 	const POS = '#34d399';
@@ -36,17 +32,12 @@
 
 <Card.Root>
 	<Card.Header class="pb-2">
-		<div class="flex items-baseline justify-between">
-			<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-				Cumulative reward
-			</Card.Title>
-			<span class="font-mono text-[10px] text-muted-foreground tabular-nums">
-				{#if episode !== null}ep {episode}{/if}{#if step !== null} · step {step}{/if}
-			</span>
-		</div>
+		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
+			Cumulative
+		</Card.Title>
 	</Card.Header>
 	<Card.Content class="flex flex-col gap-3">
-		<LineChart label="Return this episode" points={history} color={(total ?? 0) >= 0 ? POS : NEG} />
+		<LineChart label="Return" points={history} color={(total ?? 0) >= 0 ? POS : NEG} />
 
 		{#if rows.length > 0}
 			<div class="flex flex-col gap-1.5">
@@ -70,7 +61,7 @@
 				{/each}
 			</div>
 		{:else}
-			<p class="font-mono text-xs text-muted-foreground">Waiting for the drill to start…</p>
+			<p class="font-mono text-xs text-muted-foreground">No data</p>
 		{/if}
 	</Card.Content>
 </Card.Root>

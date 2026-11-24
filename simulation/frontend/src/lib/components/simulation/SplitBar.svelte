@@ -88,7 +88,7 @@
 		{#each labels as label, i (i)}
 			<span class="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
 				<span class="inline-block h-2 w-2 rounded-sm" style="background:{colors[i % colors.length]}"></span>
-				{label} {values[i]}%
+				{label}
 			</span>
 		{/each}
 	</div>

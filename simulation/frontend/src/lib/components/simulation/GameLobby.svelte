@@ -81,56 +81,45 @@
 <div class="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-4 p-4">
 	<div class="flex items-center justify-between gap-3">
 		<h1 class="flex items-center gap-2 font-mono text-base font-bold tracking-tight text-foreground">
-			<Gamepad2 class="size-5" />Play a friend
+			<Gamepad2 class="size-5" />Play
 		</h1>
-		<Button href="/viz" variant="ghost" size="xs" class="font-mono text-[11px]">Trainer view</Button>
+		<Button href="/viz" variant="ghost" size="xs" class="font-mono text-[11px]">Trainer</Button>
 	</div>
 
 	{#if !game}
 		<!-- ── Lobby: create or join ─────────────────────────────────────────── -->
-		<Card.Root>
-			<Card.Header>
-				<Card.Title class="font-mono text-sm">Start a new game</Card.Title>
-				<Card.Description class="font-mono text-[11px]">
-					Create a game, share the code, and your friend joins from their own PC.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content class="flex flex-col gap-3">
+		<Card.Root class="py-4">
+			<Card.Content class="flex flex-col gap-3 px-4">
 				<div class="flex gap-2">
 					<Button
 						variant={mode === 'casual' ? 'default' : 'outline'}
 						size="sm"
 						class="flex-1 font-mono text-[11px]"
 						onclick={() => (mode = 'casual')}
-					>Casual (endless)</Button>
+					>Casual</Button>
 					<Button
 						variant={mode === 'match' ? 'default' : 'outline'}
 						size="sm"
 						class="flex-1 font-mono text-[11px]"
 						onclick={() => (mode = 'match')}
-					>Full match (2×7 min)</Button>
+						title="2 × 7 min"
+					>Match</Button>
 				</div>
 				<Button class="font-mono text-[11px]" disabled={busy} onclick={create}>
-					{#if busy}<Loader class="size-3.5 animate-spin" />{/if}Create game
+					{#if busy}<Loader class="size-3.5 animate-spin" />{/if}Create
 				</Button>
-			</Card.Content>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header>
-				<Card.Title class="font-mono text-sm">Join with a code</Card.Title>
-			</Card.Header>
-			<Card.Content class="flex gap-2">
-				<Input
-					placeholder="ABCD"
-					bind:value={joinCode}
-					maxlength={6}
-					class="font-mono text-sm uppercase tracking-[0.3em]"
-					onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && join()}
-				/>
-				<Button class="font-mono text-[11px]" disabled={busy || !joinCode.trim()} onclick={join}>
-					Join
-				</Button>
+				<div class="flex gap-2 border-t border-border pt-3">
+					<Input
+						placeholder="ABCD"
+						bind:value={joinCode}
+						maxlength={6}
+						class="font-mono text-sm uppercase tracking-[0.3em]"
+						onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && join()}
+					/>
+					<Button class="font-mono text-[11px]" disabled={busy || !joinCode.trim()} onclick={join}>
+						Join
+					</Button>
+				</div>
 			</Card.Content>
 		</Card.Root>
 
@@ -171,7 +160,7 @@
 			</span>
 			{#if playing && !game.opponentPresent}
 				<span class="flex items-center gap-1.5 font-mono text-[10px] text-amber-400">
-					<Loader class="size-3 animate-spin" />waiting for opponent…
+					<Loader class="size-3 animate-spin" />waiting for opponent
 				</span>
 			{/if}
 		</div>
@@ -207,7 +196,7 @@
 		{#if playing && game.side}
 			<ManualControl {fieldEl} side={game.side} context="game" />
 		{:else if !simulation.gameFrame}
-			<p class="font-mono text-[11px] text-muted-foreground">Connecting to the match…</p>
+			<p class="font-mono text-[11px] text-muted-foreground">Connecting…</p>
 		{/if}
 	{/if}
 </div>

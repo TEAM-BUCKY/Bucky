@@ -26,7 +26,7 @@
     <Dialog.Content class="w-[50vw]">
         <Dialog.Header>
             <Dialog.Title class="font-mono text-xs font-semibold uppercase tracking-widest">
-                Training scalars
+                Scalars
             </Dialog.Title>
         </Dialog.Header>
         {#if activeCharts.length}
@@ -36,9 +36,7 @@
                 {/each}
             </div>
         {:else}
-            <p class="font-mono text-xs text-muted-foreground">
-                Scalars appear after the first PPO update completes.
-            </p>
+            <p class="font-mono text-xs text-muted-foreground">No data yet</p>
         {/if}
     </Dialog.Content>
 </Dialog.Root>

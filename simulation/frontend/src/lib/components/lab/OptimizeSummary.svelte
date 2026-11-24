@@ -24,10 +24,12 @@
 
 <Card.Root>
 	<Card.Header class="pb-2">
-		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Best fit</Card.Title>
-		<Card.Description class="font-mono text-[11px]">
-			max mean {opt.objective} · {opt.history.length} values tried · {opt.rounds} rounds × {opt.points} points
-		</Card.Description>
+		<Card.Title class="flex items-baseline justify-between font-mono text-xs font-semibold uppercase tracking-widest">
+			Best fit
+			<span class="text-[10px] font-normal tracking-normal normal-case text-muted-foreground tabular-nums">
+				{opt.history.length} tried
+			</span>
+		</Card.Title>
 	</Card.Header>
 	<Card.Content class="flex flex-col gap-3">
 		<table class="w-full font-mono text-[11px] tabular-nums">
@@ -57,15 +59,14 @@
 			</tbody>
 		</table>
 		<Button size="xs" variant="outline" class="self-start font-mono text-[11px]" onclick={() => onApply(opt.best)}>
-			Use best values
+			Use best
 		</Button>
 	</Card.Content>
 </Card.Root>
 
 <Card.Root>
 	<Card.Header class="pb-2">
-		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Top candidates</Card.Title>
-		<Card.Description class="font-mono text-[11px]">Best {top.length} of every value tried</Card.Description>
+		<Card.Title class="font-mono text-xs font-semibold uppercase tracking-widest">Top {top.length}</Card.Title>
 	</Card.Header>
 	<Card.Content class="overflow-x-auto">
 		<table class="w-full font-mono text-[11px] tabular-nums">
