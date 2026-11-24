@@ -8,7 +8,9 @@ from bucky.game.field import (
 )
 from bucky.physics.backend import PhysicsState
 from bucky.physics.python_backend import PyPhysics, predict_goal_by_rollout
-from bucky.rewards import CAPTURE_RADIUS, RewardConfig, compute_rewards
+from bucky.reward_terms.legacy import CAPTURE_RADIUS  # legacy-profile reward tests
+from bucky.reward_terms.legacy import LegacyRewardConfig as RewardConfig
+from bucky.reward_terms.legacy import compute_legacy_rewards as compute_rewards
 
 
 @pytest.fixture

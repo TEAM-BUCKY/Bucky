@@ -80,6 +80,10 @@ def make_env(stage: str, domain_rand: bool, reward_config=None, env_wrapper: str
         elif env_wrapper == "residual":
             from bucky.envs.residual_wrapper import ResidualActionWrapper
             env = ResidualActionWrapper(env)
+        elif env_wrapper == "fsm_hybrid":
+            # PWS §9.2.1 FSM + RL: the FSM picks the mode, RL learns how to execute it.
+            from bucky.envs.fsm_hybrid_wrapper import FSMHybridObsWrapper
+            env = FSMHybridObsWrapper(env)
         return env
     return _init
 
@@ -157,7 +161,10 @@ def main() -> None:
             args.no_domain_rand = not bool(cfg["domain_rand"])
     hyperparams = cfg.get("hyperparams", {})
     net_arch = cfg.get("net_arch", [64, 64])
-    reward_config = RewardConfig.from_dict(cfg.get("reward_weights"))
+    # Reward profile: "pws" (default, the PWS §9.3 integer weights) or "legacy" (the old reward).
+    reward_config = RewardConfig.from_dict(cfg.get("reward_weights"),
+                                           profile=cfg.get("reward_profile", "pws"))
+    print(f"reward profile: {reward_config.profile} {reward_config.weight_dict()}")
 
     # Which learning algorithm to train. PPO is the default and reproduces the historical
     # behaviour exactly; other algos plug in via the registry. ``algo_params`` carries any

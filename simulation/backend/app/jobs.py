@@ -568,6 +568,7 @@ class JobManager:
                 hyperparams=cfg.get("hyperparams") or {},
                 net_arch=cfg.get("net_arch") or [64, 64],
                 reward_weights=cfg.get("reward_weights") or {},
+                reward_profile=cfg.get("reward_profile") or "pws",
                 save_step_checkpoints=bool(cfg.get("save_step_checkpoints", False)),
                 resume_from=resume if resume_path else None,
             )
@@ -1314,6 +1315,7 @@ class JobManager:
             hyperparams=config.get("hyperparams") or {},
             net_arch=config.get("net_arch") or [64, 64],
             reward_weights=config.get("reward_weights") or {},
+            reward_profile=config.get("reward_profile") or "pws",
             save_step_checkpoints=bool(config.get("save_step_checkpoints", False)),
             resume_from=config.get("resume_from"),
         )
@@ -1735,12 +1737,13 @@ class JobManager:
 
     def _resolve_entrant(self, ent: dict) -> tuple[str, str]:
         """Return (label, artifact_path) for one entrant, or raise ValueError. The literal
-        ``run == "classical"`` selects the hand-coded controller (no checkpoint file)."""
+        ``run == "classical"`` selects the hand-coded controller (no checkpoint file); likewise
+        ``"fsm"`` / ``"apf"`` / ``"bt"`` select the scripted PWS §9 algorithms."""
         run = str(ent.get("run", "")).strip()
         ckpt = str(ent.get("checkpoint", "")).strip()
         label = str(ent.get("label") or "").strip()
-        if run == "classical":
-            return (label or "classical", "classical")
+        if run in ("classical", "fsm", "apf", "bt"):
+            return (label or run, run)
         path = self.checkpoint_path(run, ckpt)
         if path is None:
             raise ValueError(f"checkpoint not found: {run}/{ckpt}")

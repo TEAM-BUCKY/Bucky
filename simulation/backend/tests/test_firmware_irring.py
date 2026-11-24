@@ -8,7 +8,8 @@ import numpy as np
 import pytest
 
 from bucky.firmware import glue
-from bucky.firmware.ir_ball import IRRingModel, with_ball
+from bucky.firmware.ir_ball import IRRingGeometry, IRRingModel, with_ball
+from bucky.game.field import BALL_RADIUS
 
 MODEL = IRRingModel()
 
@@ -23,7 +24,8 @@ def angle_err_deg(a_rad: float, truth_deg: float) -> float:
     return abs((math.degrees(a_rad) - truth_deg + 180) % 360 - 180)
 
 
-GRID = [(b, d) for b in np.arange(-180.0, 180.0, 3.7) for d in (30.0, 45.0, 70.0, 100.0, 150.0)]
+# From 35 cm: closer, the ball is near the fold (see test_inside_the_fold_*).
+GRID = [(b, d) for b in np.arange(-180.0, 180.0, 3.7) for d in (35.0, 45.0, 70.0, 100.0, 150.0)]
 
 
 def test_estimate_over_the_ring(fw):
@@ -54,10 +56,30 @@ def test_estimate_with_droop_offsets_and_noise(fw):
     assert np.percentile(errs_r, 95) < 0.10
 
 
+def test_height_matters(fw):
+    """Read as if the sensors were level with the ball, near frames come out ~10–20 % long."""
+    flat = MODEL.firmware_config(fw, heightCm=0.0)
+    for d in (30.0, 40.0):
+        frame = [int(v) for v in ideal_codes(0.0, d)]
+        assert fw.IRRing.estimate(frame).distanceCm == pytest.approx(d, rel=0.02)
+        assert fw.IRRing.estimate(frame, flat).distanceCm > 1.08 * d
+
+
+def test_inside_the_fold_the_near_answer_is_reported(fw):
+    for d in (16.0, 19.0, 21.0):
+        r = fw.IRRing.estimate([int(v) for v in ideal_codes(0.0, d)])
+        assert r.seen and r.distanceCm > 25.0                    # reads as a farther ball …
+        assert r.nearDistanceCm == pytest.approx(d, abs=1.0)     # … or exactly this one
+    r = fw.IRRing.estimate([int(v) for v in ideal_codes(0.0, 25.0)])
+    assert r.nearFold and r.distanceCm == pytest.approx(25.0, rel=0.03)
+
+
 def test_clipped_ball_is_flagged_and_bounded(fw):
-    r = fw.IRRing.estimate([int(v) for v in ideal_codes(0.0, 18.0)])   # 7 cm from sensor 0
+    flat = IRRingModel(geometry=IRRingGeometry(sensor_height_m=BALL_RADIUS))   # can't clip at 6.4 cm
+    cfg = flat.firmware_config(fw, kCm=fw.IRConfig().kCm, baselineCode=fw.IRConfig().baselineCode)
+    r = fw.IRRing.estimate([int(v) for v in ideal_codes(0.0, 16.5, flat)], cfg)   # 7 cm from sensor 0
     assert r.seen and r.clipped
-    assert r.distanceCm <= 27.0
+    assert r.distanceCm <= 25.5
     assert angle_err_deg(r.angle, 0.0) < 1.0
 
 

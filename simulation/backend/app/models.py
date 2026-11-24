@@ -83,6 +83,8 @@ class ModelConfig(BaseModel):
     net_arch: list[int] = Field(default_factory=lambda: [64, 64])
     # Partial map of RewardConfig w_* weights; missing keys keep their tuned default.
     reward_weights: dict[str, float] = Field(default_factory=dict)
+    # Reward profile: "pws" (PWS §9.3 integer weights, default) or "legacy" (the old reward).
+    reward_profile: str = "pws"
     # Keep the periodic `model_<N>_steps.zip` snapshots. Off by default — only the
     # best + final (and self-play opponent) checkpoints are kept, which is what you
     # almost always want; the step snapshots pile up disk fast.

@@ -94,10 +94,11 @@ class IRFrontEnd:
 class IRRingGeometry:
     n_sensors: int = 12
     angle_step_deg: float = 30.0
-    mount_radius_m: float = ROBOT_RADIUS     # TODO measure: photodiode distance from robot centre
-    sensor_height_m: float = BALL_RADIUS     # TODO measure: photodiode height above the floor
+    mount_radius_m: float = 0.095            # photodiode distance from the robot centre (measured)
+    sensor_height_m: float = 0.064           # photodiode height above the floor (measured)
+    tilt_rad: float = 0.0                    # photodiode axis pitched down from horizontal
     cos_power: float = 20.0                  # cosⁿθ fit to ±15° half sensitivity; UNVERIFIED shape
-    own_body_radius_m: float = ROBOT_RADIUS - 1e-3
+    own_body_radius_m: float = 0.095 - 1e-3   # shadows the far side of the ring
 
     def angles_cw(self) -> np.ndarray:
         return np.radians(self.angle_step_deg * np.arange(self.n_sensors))
@@ -105,10 +106,11 @@ class IRRingGeometry:
     def sensors_world(self, robot_m, heading: float) -> tuple[np.ndarray, np.ndarray]:
         """3D positions (n, 3) and unit axes (n, 3) of the photodiodes, sim frame."""
         world = heading - self.angles_cw()          # CW in the body = CCW negative
-        axes = np.stack([np.cos(world), np.sin(world), np.zeros_like(world)], axis=1)
+        c, s = math.cos(self.tilt_rad), math.sin(self.tilt_rad)
+        axes = np.stack([c * np.cos(world), c * np.sin(world), np.full_like(world, -s)], axis=1)
         pos = np.empty_like(axes)
-        pos[:, 0] = robot_m[0] + self.mount_radius_m * axes[:, 0]
-        pos[:, 1] = robot_m[1] + self.mount_radius_m * axes[:, 1]
+        pos[:, 0] = robot_m[0] + self.mount_radius_m * np.cos(world)
+        pos[:, 1] = robot_m[1] + self.mount_radius_m * np.sin(world)
         pos[:, 2] = self.sensor_height_m
         return pos, axes
 
@@ -231,9 +233,24 @@ class IRRingModel:
     def clip_code(self) -> float:
         return self.front_end.clip_code(self.ball.carrier_hz)
 
+    @property
+    def height_cm(self) -> float:
+        """Photodiode height above the ball centre — the firmware's heightCm."""
+        return (self.geometry.sensor_height_m - self.ball.center_height_m) * 100.0
+
     def max_range_cm(self, min_amp: float = 8.0) -> float:
         """Centre distance where the facing sensor drops to ``min_amp`` codes (IRConfig.minAmp)."""
-        return self.geometry.mount_radius_m * 100.0 + self.range_k / math.sqrt(min_amp)
+        g, h = self.geometry, self.height_cm
+        def ln_amp(s):      # facing sensor, ball on its axis at planar distance s (cm)
+            cos_inc = (math.cos(g.tilt_rad) * s + math.sin(g.tilt_rad) * h) / math.hypot(s, h)
+            return 2 * math.log(self.range_k / math.hypot(s, h)) + g.cos_power * math.log(max(cos_inc, 1e-3))
+        lo, hi = 0.0, 1e4
+        if h > 0:
+            lo = max(range(1, 200), key=ln_amp)                     # past the fold
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if ln_amp(mid) > math.log(min_amp) else (lo, mid)
+        return g.mount_radius_m * 100.0 + lo
 
     def firmware_config(self, fw, **overrides):
         """An ``IRConfig`` whose constants match this model."""
@@ -242,6 +259,8 @@ class IRRingModel:
         cfg.baselineCode = float(self.baseline)
         cfg.kCm = float(self.range_k)
         cfg.mountRadiusCm = self.geometry.mount_radius_m * 100.0
+        cfg.heightCm = self.height_cm
+        cfg.tiltRad = self.geometry.tilt_rad
         cfg.cosPower = self.geometry.cos_power
         for k, v in overrides.items():
             setattr(cfg, k, v)

@@ -48,17 +48,17 @@ def test_foundational_stage_runs(stage):
     env.close()
 
 
-def test_approach_stage_excludes_goal_and_kick_terms():
+def test_approach_stage_excludes_goal_and_kick_terms_legacy():
     """The approach drill should reward reaching the ball, not scoring/kicking."""
-    active = set(get_stage_config(Stage.APPROACH_STATIC_BALL).active_reward_terms)
+    active = set(get_stage_config(Stage.APPROACH_STATIC_BALL).legacy_active_reward_terms)
     assert "approach" in active
     for kick_term in ("goal", "predicted_goal", "kick_power_to_goal", "kick_goal"):
         assert kick_term not in active
 
 
-def test_aim_and_kick_stage_drills_shooting_not_possession():
+def test_aim_and_kick_stage_drills_shooting_not_possession_legacy():
     cfg = get_stage_config(Stage.AIM_AND_KICK)
-    active = set(cfg.active_reward_terms)
+    active = set(cfg.legacy_active_reward_terms)
     assert cfg.spawn_mode == "kick_blend"
     assert "possession" not in active            # shoot, don't camp
     for kick_term in ("goal", "predicted_goal", "kick_power_to_goal", "kick_goal", "kick_attempt"):
@@ -94,10 +94,23 @@ def test_kick_blend_spawn_places_robot_behind_ball():
     env.close()
 
 
-def test_push_stage_includes_goal_and_kick_terms():
-    active = set(get_stage_config(Stage.PUSH_TO_EMPTY_GOAL).active_reward_terms)
+def test_push_stage_includes_goal_and_kick_terms_legacy():
+    active = set(get_stage_config(Stage.PUSH_TO_EMPTY_GOAL).legacy_active_reward_terms)
     for t in ("goal", "predicted_goal", "kick_power_to_goal", "shot_on_goal", "ball_to_goal"):
         assert t in active
+
+
+def test_pws_stage_term_lists():
+    """PWS profile (default): approach drill = drive to the ball only; scoring drills use all five
+    PWS weights; the 1v1 match adds the goal-against penalty."""
+    from bucky.reward_terms import PROFILES
+    approach = set(get_stage_config(Stage.APPROACH_STATIC_BALL).active_reward_terms)
+    assert "ball_distance" in approach and "goal" not in approach and "kick_goal" not in approach
+    five = {"goal", "ball_distance", "ball_position", "kick_goal", "smoothness"}
+    for st in (Stage.PUSH_TO_EMPTY_GOAL, Stage.AIM_AND_KICK, Stage.SHOOT_AROUND_DEFENDER):
+        assert five <= set(get_stage_config(st).active_reward_terms)
+    match = set(get_stage_config(Stage.SELF_PLAY_1V1).active_reward_terms)
+    assert match == set(PROFILES["pws"])
 
 
 def test_obs_expansion_transfer_preserves_shared_weights(tmp_path):

@@ -21,27 +21,38 @@ WALL_X_CM = ARENA_HALF_Y * 100.0
 WALL_Y_CM = ARENA_HALF_X * 100.0
 
 
-def ir_bearing_range(frame16, *, baseline: float = 4.0, range_k: float = 760.0,
-                     n_sensors: int = 12, mount_radius_cm: float = 11.0, cos_power: float = 20.0,
-                     clip_code: float = 2300.0, min_amp: float = 8.0,
-                     min_neighbour_amp: float = 2.0, max_cm: float = 300.0
-                     ) -> tuple[float, float] | None:
-    """NumPy port of ``IRRing::estimate`` (robot/src/hardware/sensors/IRRing.cpp), defaults =
-    ``IRConfig``. Returns (bearing rad, robot frame CW, distance cm from the robot centre), or
-    None when no ball is seen."""
-    r = ir_estimate(frame16, baseline=baseline, range_k=range_k, n_sensors=n_sensors,
-                    mount_radius_cm=mount_radius_cm, cos_power=cos_power, clip_code=clip_code,
-                    min_amp=min_amp, min_neighbour_amp=min_neighbour_amp, max_cm=max_cm)
+def ir_bearing_range(frame16, **config) -> tuple[float, float] | None:
+    """NumPy port of ``IRRing::estimate`` (robot/src/hardware/sensors/ir/IRRing.cpp), defaults =
+    ``IRConfig`` (see :func:`ir_estimate`). Returns (bearing rad, robot frame CW, distance cm from
+    the robot centre), or None when no ball is seen."""
+    r = ir_estimate(frame16, **config)
     return (r["angle"], r["distance_cm"]) if r["seen"] else None
 
 
+def _bisect(lo: float, hi: float, f, iterations: int = 16) -> float:
+    """``Solvers::bisect``: root of f in [lo, hi]; without a sign change, the end with smaller |f|."""
+    f_lo, f_hi = f(lo), f(hi)
+    if (f_lo > 0) == (f_hi > 0):
+        return lo if abs(f_lo) <= abs(f_hi) else hi
+    for _ in range(iterations):
+        mid = 0.5 * (lo + hi)
+        f_mid = f(mid)
+        if (f_mid > 0) == (f_lo > 0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
 def ir_estimate(frame16, *, baseline: float = 4.0, range_k: float = 760.0, n_sensors: int = 12,
-                mount_radius_cm: float = 11.0, cos_power: float = 20.0, clip_code: float = 2300.0,
-                min_amp: float = 8.0, min_neighbour_amp: float = 2.0,
-                max_cm: float = 300.0) -> dict:
+                mount_radius_cm: float = 9.5, height_cm: float = 4.3, tilt_rad: float = 0.0,
+                cos_power: float = 20.0, clip_code: float = 2300.0, min_amp: float = 8.0,
+                min_neighbour_amp: float = 2.0, max_cm: float = 300.0) -> dict:
     """``IRRing::estimate`` step for step: peak sensor, far-field bearing from the neighbour
-    ratio of the cosⁿ response, then Gauss–Newton on (bearing, centre distance) over the peak and
-    its neighbours with each sensor's real ring position (parallax)."""
+    ratio of the cosⁿ response, range along that bearing on the far side of the fold (the near
+    side's answer in ``near_distance_cm``), then
+    Gauss–Newton on (bearing, centre distance) over the peak and its neighbours with each sensor's
+    real 3D position (ring parallax and height)."""
     min_cos = 1e-3
     n = int(n_sensors)
     step = 2 * math.pi / n
@@ -49,14 +60,16 @@ def ir_estimate(frame16, *, baseline: float = 4.0, range_k: float = 760.0, n_sen
     amp = np.maximum(raw - baseline, 0.0)
     clip = raw >= clip_code
     peak = int(np.argmax(amp))
-    out = {"seen": False, "clipped": False, "angle": 0.0, "distance_cm": 0.0,
+    out = {"seen": False, "clipped": False, "near_fold": False, "angle": 0.0, "distance_cm": 0.0,
+           "near_distance_cm": 0.0,
            "peak_sensor": peak, "peak_amp": float(amp[peak]), "contributors": 0}
     if amp[peak] < min_amp:
         return out
     out["seen"] = True
     out["clipped"] = bool(clip[peak])
     left, right = (peak - 1) % n, (peak + 1) % n
-    R = mount_radius_cm
+    R, H = mount_radius_cm, height_cm
+    cos_t, sin_t = math.cos(tilt_rad), math.sin(tilt_rad)
 
     offset = 0.0
     if not clip[peak]:
@@ -85,8 +98,23 @@ def ir_estimate(frame16, *, baseline: float = 4.0, range_k: float = 760.0, n_sen
         offset = d
     peak_angle = step * peak
     bearing = peak_angle + offset
-    on_axis = amp[peak] / max(math.cos(offset), min_cos) ** cos_power
-    dist = R + range_k / math.sqrt(on_axis)
+
+    def model(p, b, rho):           # IRModel::lnAmp; p = sensor direction (x right, y forward)
+        dx, dy = rho * math.sin(b) - R * p[0], rho * math.cos(b) - R * p[1]
+        dd = math.sqrt(dx * dx + dy * dy + H * H)
+        c = max((cos_t * (dx * p[0] + dy * p[1]) + sin_t * H) / dd, min_cos)
+        return 2 * math.log(range_k) - 2 * math.log(dd) + cos_power * math.log(c)
+
+    def fold_along(p, b):           # IRModel::foldDistance: where the slope changes sign
+        slope = lambda r: model(p, b, r * 1.01) - model(p, b, r)
+        return min_dist if slope(min_dist) <= 0 else _bisect(min_dist, max_cm, slope)
+
+    peak_dir = (math.sin(peak_angle), math.cos(peak_angle))
+    min_dist = R + 2.0
+    fold = fold_along(peak_dir, bearing)
+    ln_peak = math.log(amp[peak])
+    dist = _bisect(fold, max_cm, lambda r: model(peak_dir, bearing, r) - ln_peak)
+    out["near_distance_cm"] = _bisect(min_dist, fold, lambda r: model(peak_dir, bearing, r) - ln_peak)
 
     pts = []
     for k in (left, peak, right):
@@ -95,12 +123,6 @@ def ir_estimate(frame16, *, baseline: float = 4.0, range_k: float = 760.0, n_sen
         a = step * k
         pts.append((math.sin(a), math.cos(a), math.log(amp[k]), amp[k] ** 2))
     out["contributors"] = len(pts)
-
-    def model(p, b, rho):
-        dx, dy = rho * math.sin(b) - R * p[0], rho * math.cos(b) - R * p[1]
-        dd = math.hypot(dx, dy)
-        c = max((dx * p[0] + dy * p[1]) / dd, min_cos)
-        return 2 * math.log(range_k) - 2 * math.log(dd) + cos_power * math.log(c)
 
     if len(pts) >= 2:
         for _ in range(4):
@@ -119,12 +141,15 @@ def ir_estimate(frame16, *, baseline: float = 4.0, range_k: float = 760.0, n_sen
             bearing += (jtj[1, 1] * jtr[0] - jtj[0, 1] * jtr[1]) / det
             dist += (jtj[0, 0] * jtr[1] - jtj[0, 1] * jtr[0]) / det
             bearing = min(max(bearing, peak_angle - step), peak_angle + step)
-            dist = max(dist, R + 2.0)
+            dist = min(max(dist, fold), max_cm)
 
     if out["clipped"]:
-        dist = min(dist, R + range_k / math.sqrt(clip_code - baseline))
+        ln_clip = math.log(clip_code - baseline)
+        axis = (0.0, 1.0)
+        dist = min(dist, _bisect(fold_along(axis, 0.0), max_cm, lambda r: model(axis, 0.0, r) - ln_clip))
     out["angle"] = math.remainder(bearing, math.tau)
     out["distance_cm"] = min(dist, max_cm)
+    out["near_fold"] = out["distance_cm"] < 1.25 * fold
     return out
 
 

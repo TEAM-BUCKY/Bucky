@@ -104,6 +104,7 @@ class LaunchRequest(BaseModel):
     hyperparams: Optional[dict] = None
     net_arch: Optional[list[int]] = None
     reward_weights: Optional[dict] = None
+    reward_profile: Optional[str] = None
     save_step_checkpoints: Optional[bool] = None
 
 
@@ -172,7 +173,8 @@ class ControlRequest(BaseModel):
 
 
 class TournamentEntrant(BaseModel):
-    # A run+checkpoint (as elsewhere), or run="classical" for the hand-coded controller.
+    # A run+checkpoint (as elsewhere), or run="classical" / "fsm" / "apf" / "bt" for a
+    # hand-coded controller.
     run: str
     checkpoint: str = ""
     label: Optional[str] = None
@@ -243,19 +245,17 @@ def build_router(manager: JobManager, broadcaster: Broadcaster) -> APIRouter:
 
     @router.get("/reward-defaults")
     async def reward_defaults() -> dict:
-        """The reward-weight defaults from the Python ``RewardConfig`` dataclass.
+        """The reward-weight defaults of the active reward profile (``bucky.rewards.RewardConfig``).
 
         This is the single source of truth for reward weights: the web UI loads these to
         seed its editor so editing ``bucky/rewards.py`` (and restarting the server) updates
         the website's defaults — instead of the UI shipping a stale hardcoded copy that
-        would silently override the code values at launch. Field order follows the dataclass.
+        would silently override the code values at launch. Order follows the term registry.
         """
-        from dataclasses import fields as _fields
-
         from bucky.rewards import RewardConfig
 
         cfg = RewardConfig()
-        return {"weights": {f.name: getattr(cfg, f.name) for f in _fields(cfg)}}
+        return {"profile": cfg.profile, "weights": cfg.weight_dict()}
 
     # ── auth (GitHub-org OAuth, or password fallback) ────────────────────────────
     @router.get("/auth/me")

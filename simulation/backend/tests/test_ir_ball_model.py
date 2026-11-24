@@ -8,7 +8,9 @@ import pytest
 
 from bucky.firmware.ir_ball import (BallOrientation, IRBall, IRFrontEnd, IRRingGeometry,
                                     IRRingModel, fibonacci_sphere, with_ball)
-from bucky.game.field import ROBOT_RADIUS
+from bucky.game.field import BALL_RADIUS
+
+FLAT = IRRingGeometry(sensor_height_m=BALL_RADIUS)     # sensors level with the ball centre
 
 
 def ball_at(bearing_cw_deg: float, centre_cm: float) -> tuple[float, float]:
@@ -44,10 +46,10 @@ def test_ball_power_and_k_match_the_firmware(fw):
 
 
 def test_on_axis_square_law():
-    m = IRRingModel()
+    m = IRRingModel(geometry=FLAT)
     f = m.ball.carrier_hz
     for d_sensor in (20.0, 50.0, 150.0):
-        i = m.photocurrents((0, 0), 0.0, ball_at(0.0, d_sensor + ROBOT_RADIUS * 100))
+        i = m.photocurrents((0, 0), 0.0, ball_at(0.0, d_sensor + m.geometry.mount_radius_m * 100))
         amp = m.front_end.code_of(i, f)[0] - m.baseline
         assert amp == pytest.approx((m.range_k / d_sensor) ** 2, rel=0.01, abs=0.6)
 
@@ -108,11 +110,28 @@ def test_own_body_shadows_the_far_side():
 
 
 def test_sensor_height_costs_cos_n_of_the_elevation():
-    flat = IRRingModel()
-    dz = 0.05
-    high = IRRingModel(geometry=IRRingGeometry(sensor_height_m=flat.ball.center_height_m + dz))
+    flat = IRRingModel(geometry=FLAT)
+    high = IRRingModel()                                     # the real 6.4 cm sensors
+    dz = high.geometry.sensor_height_m - BALL_RADIUS
+    assert high.height_cm == pytest.approx(dz * 100)
     d = 0.4
-    ratio = (high.photocurrents((0, 0), 0.0, (ROBOT_RADIUS + d, 0))[0]
-             / flat.photocurrents((0, 0), 0.0, (ROBOT_RADIUS + d, 0))[0])
+    x = flat.geometry.mount_radius_m + d
+    ratio = high.photocurrents((0, 0), 0.0, (x, 0))[0] / flat.photocurrents((0, 0), 0.0, (x, 0))[0]
     el = math.atan2(dz, d)
     assert ratio == pytest.approx(math.cos(el) ** 20 * d ** 2 / (d ** 2 + dz ** 2), rel=1e-6)
+
+
+def test_tilting_down_by_the_elevation_restores_the_square_law():
+    d = 0.3
+    dz = IRRingModel().height_cm / 100
+    tilted = IRRingModel(geometry=IRRingGeometry(tilt_rad=math.atan2(dz, d)))
+    x = tilted.geometry.mount_radius_m + d
+    e = tilted.photocurrents((0, 0), 0.0, (x, 0))[0] / (tilted.front_end.responsivity * tilted.ball.iso_w_sr)
+    assert e == pytest.approx(1.0 / (d ** 2 + dz ** 2), rel=1e-6)
+
+
+def test_ball_fades_inside_the_fold():
+    """Seen from 4.3 cm above, the facing sensor peaks ~23 cm from the centre and falls closer in."""
+    m = IRRingModel()
+    amp = [m.photocurrents((0, 0), 0.0, ball_at(0.0, c))[0] for c in (15, 23, 40)]
+    assert amp[1] > amp[0] and amp[1] > amp[2]

@@ -142,7 +142,13 @@ def test_same_seed_same_frames(sim, hw):
 
 
 def test_tia_clips_close_up(sim, hw):
-    hw.set_ir(0.0, 21.0)                                    # 10 cm from sensor 0
+    from bucky.firmware.hardware import RobotHardwareConfig
+    from bucky.firmware.ir_ball import IRRingGeometry, IRRingModel
+    from bucky.game.field import BALL_RADIUS
+
+    # Sensors level with the ball centre: at the real 6.4 cm height the ball never clips.
+    hw.cfg = RobotHardwareConfig(ir=IRRingModel(geometry=IRRingGeometry(sensor_height_m=BALL_RADIUS)))
+    hw.set_ir(0.0, 19.5)                                    # 10 cm from sensor 0
     port = begin_ir(sim)
     f = frames(sim, port, 30)[:, 0]
     ceiling = hw.cfg.ir.clip_code

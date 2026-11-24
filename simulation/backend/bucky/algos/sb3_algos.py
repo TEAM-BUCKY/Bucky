@@ -126,7 +126,8 @@ def _dqn_cls():
     return DQN
 
 
-def _build_dqn(cls, *, env, params, net_arch, seed, device, tensorboard_log, ent_coef):
+def _dqn_family(cls, *, env, params, net_arch, seed, device, tensorboard_log, policy_kwargs=None):
+    """Shared DQN-style builder (DQN, C51): same replay/target/ε-greedy knobs and defaults."""
     return cls(
         policy="MlpPolicy", env=env, verbose=1, tensorboard_log=tensorboard_log, seed=seed,
         learning_rate=_hp(params, "learning_rate", 1e-4),
@@ -139,11 +140,38 @@ def _build_dqn(cls, *, env, params, net_arch, seed, device, tensorboard_log, ent
         target_update_interval=int(_hp(params, "target_update_interval", 1_000)),
         exploration_fraction=_hp(params, "exploration_fraction", 0.2),
         exploration_final_eps=_hp(params, "exploration_final_eps", 0.05),
-        policy_kwargs={"net_arch": list(net_arch)}, device=device,
+        policy_kwargs=policy_kwargs or {"net_arch": list(net_arch)}, device=device,
     )
 
 
+def _build_dqn(cls, *, env, params, net_arch, seed, device, tensorboard_log, ent_coef):
+    return _dqn_family(cls, env=env, params=params, net_arch=net_arch, seed=seed, device=device,
+                       tensorboard_log=tensorboard_log)
+
+
 register(AlgoSpec("dqn", "discrete", False, _dqn_cls, _build_dqn, env_wrapper="discrete"))
+
+
+# ── C51 — Categorical DQN (PWS §9.2.5 distributional RL), see bucky/algos/c51.py ─────────
+def _c51_cls():
+    from bucky.algos.c51 import C51
+    return C51
+
+
+def _build_c51(cls, *, env, params, net_arch, seed, device, tensorboard_log, ent_coef):
+    from bucky.algos.c51 import DEFAULT_ATOMS, DEFAULT_V_MAX, DEFAULT_V_MIN
+    model = _dqn_family(cls, env=env, params=params, net_arch=net_arch, seed=seed,
+                                   device=device, tensorboard_log=tensorboard_log,
+                                   policy_kwargs={
+                                       "net_arch": list(net_arch),
+                                       "n_atoms": int(_hp(params, "n_atoms", DEFAULT_ATOMS)),
+                                       "v_min": float(_hp(params, "v_min", DEFAULT_V_MIN)),
+                                       "v_max": float(_hp(params, "v_max", DEFAULT_V_MAX)),
+                                   })
+    return model
+
+
+register(AlgoSpec("c51", "discrete", False, _c51_cls, _build_c51, env_wrapper="discrete"))
 
 
 # ── Fuzzy + RL residual hybrid — RL learns a correction on top of the classical controller ──
@@ -155,3 +183,11 @@ register(AlgoSpec("residual_sac", "continuous", False, _sac_cls, _build_sac,
                   env_wrapper="residual"))
 register(AlgoSpec("residual_ppo", "continuous", False, _ppo_cls, _build_ppo,
                   env_wrapper="residual"))
+
+
+# ── FSM + RL hybrid (PWS §9.2.1) — the FSM decides WHAT (mode), the RL decides HOW ──────────
+# Same learners as PPO/SAC on an obs prefixed with the FSM mode one-hot (envs/fsm_hybrid_wrapper).
+# The actor's input is wider than the 43-dim self-play obs, so it can't serve as a plain numpy
+# opponent → not self-play-pool capable; it plays matches via bucky.policies.hybrid.HybridPolicy.
+register(AlgoSpec("fsm_ppo", "continuous", False, _ppo_cls, _build_ppo, env_wrapper="fsm_hybrid"))
+register(AlgoSpec("fsm_sac", "continuous", False, _sac_cls, _build_sac, env_wrapper="fsm_hybrid"))

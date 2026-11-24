@@ -4,19 +4,9 @@
 
 	let { terms, total }: { terms: RewardTerms | null; total: number | null } = $props();
 
-	const TERM_ORDER = [
-		'ball_to_goal',
-		'approach',
-		'speed',
-		'possession',
-		'front_alignment',
-		'goal',
-		'out_of_bounds',
-		'ball_out',
-		'spin',
-		'time_penalty',
-		'action_smoothness'
-	];
+	// Show whatever terms the backend reward profile produced (the term registry is
+	// extensible, so the set is not fixed here), in the backend's order.
+	const TERM_ORDER = $derived(terms ? Object.keys(terms) : []);
 
 	const POS = '#34d399';
 	const NEG = '#f87171';

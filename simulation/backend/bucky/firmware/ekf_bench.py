@@ -219,6 +219,7 @@ class EkfBench:
             meas = glue.ir_bearing_range(frame, baseline=ir.baseline, range_k=ir.range_k,
                                          n_sensors=ir.n_sensors,
                                          mount_radius_cm=ir.geometry.mount_radius_m * 100.0,
+                                         height_cm=ir.height_cm, tilt_rad=ir.geometry.tilt_rad,
                                          cos_power=ir.geometry.cos_power) if frame else None
             if meas is not None:
                 ekf.updateBall(*meas)

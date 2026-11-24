@@ -1,4 +1,4 @@
-"""sb3-contrib algorithm builders (TQC, TRPO, ARS, QR-DQN), registered into the registry.
+"""sb3-contrib algorithm builders (TQC, DSAC, TRPO, ARS, QR-DQN), registered into the registry.
 
   * **TQC** — Truncated Quantile Critics: off-policy continuous control with a SAC-style
     tanh-squashed actor → exports a numpy opponent (self-play capable).
@@ -34,6 +34,39 @@ def _build_tqc(cls, *, env, params, net_arch, seed, device, tensorboard_log, ent
 
 
 register(AlgoSpec("tqc", "continuous", True, _tqc_cls, _build_tqc))
+
+
+# ── DSAC — Distributional SAC with a risk-sensitive actor (PWS §9.2.7), bucky/algos/dsac.py ──
+# TQC's quantile critic without truncation + actor objective = risk measure over the quantiles
+# (algo_params: risk = "neutral" | "cvar" | "optimistic", risk_alpha ∈ (0, 1]). Same SAC-style
+# actor as TQC → exports a numpy opponent (self-play capable).
+def _dsac_cls():
+    from bucky.algos.dsac import DSAC
+    return DSAC
+
+
+def _build_dsac(cls, *, env, params, net_arch, seed, device, tensorboard_log, ent_coef):
+    return cls(
+        policy="MlpPolicy", env=env, verbose=1, tensorboard_log=tensorboard_log, seed=seed,
+        learning_rate=_hp(params, "learning_rate", 3e-4),
+        buffer_size=int(_hp(params, "buffer_size", 1_000_000)),
+        batch_size=int(_hp(params, "batch_size", 256)),
+        tau=_hp(params, "tau", 0.005), gamma=_hp(params, "gamma", 0.99),
+        train_freq=int(_hp(params, "train_freq", 1)),
+        gradient_steps=int(_hp(params, "gradient_steps", 1)),
+        learning_starts=int(_hp(params, "learning_starts", 5_000)),
+        ent_coef=_hp(params, "ent_coef", "auto"),
+        risk=str(_hp(params, "risk", "neutral")),
+        risk_alpha=float(_hp(params, "risk_alpha", 0.25)),
+        top_quantiles_to_drop_per_net=int(_hp(params, "top_quantiles_to_drop_per_net", 0)),
+        policy_kwargs={"net_arch": list(net_arch),
+                       "n_quantiles": int(_hp(params, "n_quantiles", 25)),
+                       "n_critics": int(_hp(params, "n_critics", 2))},
+        device=device,
+    )
+
+
+register(AlgoSpec("dsac", "continuous", True, _dsac_cls, _build_dsac))
 
 
 def _trpo_cls():

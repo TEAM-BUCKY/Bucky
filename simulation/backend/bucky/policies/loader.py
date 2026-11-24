@@ -85,6 +85,10 @@ def _load_sb3(path: Path, algo: str | None) -> Any:
     if spec.env_wrapper == "residual":
         from bucky.policies.residual import ResidualPolicyAdapter
         return ResidualPolicyAdapter(model)
+    # FSM + RL hybrid: re-run the FSM and prepend its mode one-hot, as during training.
+    if spec.env_wrapper == "fsm_hybrid":
+        from bucky.policies.hybrid import HybridPolicy
+        return HybridPolicy(model)
     # A narrower-obs checkpoint plays via the projection wrapper the match engine expects.
     if dim != SELF_PLAY_OBS_DIM and dim in MATCH_COMPATIBLE_OBS_DIMS:
         return CompatPolicy(model, dim)
@@ -104,13 +108,17 @@ def load_policy(ref: PolicyRef | str) -> Any:
     """Resolve a :class:`PolicyRef` (or a bare path string) to a ``.predict``-compatible policy.
 
     Recognized artifacts: SB3 ``.zip`` (any registered algo), numpy ``.npz``, a hand-coded
-    controller (the literal ``"classical"``, or a ``*.controller.json`` parameter file).
+    controller (the literal ``"classical"``, or a ``*.controller.json`` parameter file), or a
+    scripted PWS algorithm by name (``"fsm"``, ``"apf"``, ``"bt"``).
     """
     if isinstance(ref, str):
         ref = PolicyRef(ref)
     # Non-file pseudo-artifact: the default classical controller.
     if ref.path == "classical":
         return _load_controller(None)
+    from bucky.controllers import SCRIPTED_CONTROLLERS
+    if ref.path in SCRIPTED_CONTROLLERS:            # PWS §9 scripted algorithms: fsm / apf / bt
+        return SCRIPTED_CONTROLLERS[ref.path]()
     path = Path(ref.path)
     if not path.exists():
         raise FileNotFoundError(f"policy artifact not found: {path}")

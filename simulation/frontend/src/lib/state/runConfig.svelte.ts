@@ -64,6 +64,11 @@ export const HP_FIELDS: { key: keyof Hyperparams; label: string; step: number }[
 // Any weight the backend returns that isn't listed here still shows up, with a label derived
 // from its key, so adding a weight in rewards.py needs no frontend change.
 const REWARD_LABELS: Record<string, string> = {
+	// PWS reward profile (default, §9.3): five integer weights + RoboCup rule penalties.
+	w_ball_distance: 'ball distance',
+	w_ball_position: 'ball position',
+	w_smoothness: 'smoothness',
+	// Legacy profile weights.
 	w_approach: 'approach',
 	w_speed: 'speed',
 	w_ball_to_goal: 'ball→goal',

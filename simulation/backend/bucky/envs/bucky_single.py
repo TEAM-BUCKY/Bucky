@@ -203,13 +203,14 @@ class BuckySingleEnv(gym.Env):
         # Look-ahead "inevitable goal": on a kick (that didn't already score this step), roll the
         # ball forward; if it scores, award goal-level credit now and end the episode early.
         predicted_goal = False
-        if info["kicked"] and not info["goal_scored"]:
+        if info["kicked"] and not info["goal_scored"] and self._reward_cfg.uses_predicted_goal:
             scored, _, _ = predict_goal_by_rollout(
                 state1.ball_pos, state1.ball_vel, attack_sign=1,
                 horizon_steps=int(self._reward_cfg.predicted_goal_horizon_steps),
             )
             predicted_goal = scored
         info["predicted_goal"] = predicted_goal
+        info["max_steps"] = self._stage_cfg.max_episode_steps
 
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, info,
                                        action=action, prev_action=self._prev_action)
@@ -249,7 +250,9 @@ class BuckySingleEnv(gym.Env):
         return np.clip(obs, OBS_LOW, OBS_HIGH)
 
     def _filter_reward(self, terms: RewardTerms) -> float:
-        active = set(self._stage_cfg.active_reward_terms)
+        active = set(self._stage_cfg.legacy_active_reward_terms
+                     if self._reward_cfg.profile == "legacy"
+                     else self._stage_cfg.active_reward_terms)
         if not active:
             return terms.total
         d = terms.as_dict()

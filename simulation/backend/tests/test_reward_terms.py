@@ -1,8 +1,11 @@
 import numpy as np
 import pytest
 from bucky.physics.python_backend import PyPhysics, FIELD_W
-from bucky.rewards import (  # noqa: F401
-    RewardConfig, RewardTerms, compute_rewards, ALIGN_RADIUS, OPP_GOAL,
+# These tests pin the LEGACY reward profile (the pre-PWS reward, still selectable as
+# reward_profile="legacy"). The PWS reward is covered by tests/test_pws_rewards.py.
+from bucky.reward_terms.legacy import (  # noqa: F401
+    LegacyRewardConfig as RewardConfig, LegacyRewardTerms as RewardTerms,
+    compute_legacy_rewards as compute_rewards, ALIGN_RADIUS, OPP_GOAL,
     CAPTURE_RADIUS, SHOT_SPEED_THRESHOLD,
 )
 
@@ -384,7 +387,7 @@ def test_stuck_zero_in_possession(physics, config):
 
 # ── on-target shot helper ────────────────────────────────────────────────────
 def test_shot_enters_goal_mouth_helper():
-    from bucky.rewards import _shot_enters_goal_mouth
+    from bucky.reward_terms.legacy import _shot_enters_goal_mouth
     # straight at the goal centre → on target
     assert _shot_enters_goal_mouth([0.0, 0.0], [3.0, 0.0]) is True
     # angled so it crosses the side line first → off target

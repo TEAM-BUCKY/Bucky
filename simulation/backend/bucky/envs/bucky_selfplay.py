@@ -225,7 +225,7 @@ class BuckySelfPlayEnv(gym.Env):
         # roll the ball forward with the opponent as a static obstacle. Confident only if it scores
         # *and* the path doesn't pass through the opponent (interception safeguard).
         predicted_goal = False
-        if reward_info.get("kicked") and not decision.goal_a:
+        if reward_info.get("kicked") and not decision.goal_a and self._reward_cfg.uses_predicted_goal:
             scored, _, intercepted = predict_goal_by_rollout(
                 state1.ball_pos, state1.ball_vel, attack_sign=1,
                 horizon_steps=int(self._reward_cfg.predicted_goal_horizon_steps),
@@ -244,6 +244,7 @@ class BuckySelfPlayEnv(gym.Env):
             reward_info["goal_scored"] = False
             reward_info["kicked_goal"] = False
             self._predicted_goal_guard = 0
+        reward_info["max_steps"] = self._stage_cfg.max_episode_steps
 
         reward_terms = compute_rewards(state0, state1, self._reward_cfg, reward_info,
                                        action=action, prev_action=self._prev_action)
@@ -314,7 +315,9 @@ class BuckySelfPlayEnv(gym.Env):
         return np.clip(obs, OBS_LOW, OBS_HIGH)
 
     def _filter_reward(self, terms: RewardTerms) -> float:
-        active = set(self._stage_cfg.active_reward_terms)
+        active = set(self._stage_cfg.legacy_active_reward_terms
+                     if self._reward_cfg.profile == "legacy"
+                     else self._stage_cfg.active_reward_terms)
         if not active:
             return terms.total
         d = terms.as_dict()

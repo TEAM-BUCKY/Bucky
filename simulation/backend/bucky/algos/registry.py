@@ -32,8 +32,9 @@ class AlgoSpec:
     supports_selfplay: bool     # can export a numpy MLP opponent + play in the self-play pool
     _cls: Callable[[], Any]     # lazy import → the SB3(-contrib) algorithm class
     _build: Builder
-    # Optional env transform the trainer applies: "discrete" (Box(4)→Discrete for DQN) or
-    # "residual" (RL learns a residual on top of the classical controller — the fuzzy+RL hybrid).
+    # Optional env transform the trainer applies: "discrete" (Box(4)→Discrete for DQN),
+    # "residual" (RL learns a residual on top of the classical controller — the fuzzy+RL hybrid)
+    # or "fsm_hybrid" (the PWS FSM picks a mode that is prepended to the obs; RL executes it).
     env_wrapper: str | None = None
 
     @property

@@ -23,13 +23,28 @@ class Stage(str, Enum):
     SELF_PLAY_2V2 = "SELF_PLAY_2V2"
 
 
+
+# ── PWS reward-term whitelists per stage (PWS §9.3) ─────────────────────────────────────────────
+_PWS_RULES_SOLO = ["out_of_bounds", "defective", "lack_of_progress"]
+# Drive-to-ball drill: no goal on the field, so only closing in (smoothly, staying in bounds) pays.
+_PWS_APPROACH = ["ball_distance", "smoothness", "out_of_bounds"]
+# Single-robot scoring drills: all five PWS weights + the solo rule penalties.
+_PWS_SOLO = ["goal", "ball_distance", "ball_position", "kick_goal", "smoothness", *_PWS_RULES_SOLO]
+# 1v1 match: everything, including the goal-against penalty.
+_PWS_MATCH = [*_PWS_SOLO, "goal_against"]
+
+
 @dataclass
 class StageConfig:
     stage: Stage
     max_episode_steps: int
     ball_spawn_radius: float
     goal_present: bool
+    # Reward terms that count in this stage under the default PWS reward profile (names from
+    # bucky/reward_terms). Empty = every term of the profile.
     active_reward_terms: list[str] = field(default_factory=list)
+    # The same whitelist for the old `legacy` reward profile (bucky/reward_terms/legacy.py).
+    legacy_active_reward_terms: list[str] = field(default_factory=list)
     opponent_present: bool = False
     # Spawn layout for single-agent stages (BuckySingleEnv._place_entities):
     #   "default"    → robot near centre, ball within ball_spawn_radius of it (APPROACH).
@@ -58,7 +73,8 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         max_episode_steps=300,
         ball_spawn_radius=0.6,           # ball placed up to 0.6 m from the robot, stationary
         goal_present=True,
-        active_reward_terms=[
+        active_reward_terms=_PWS_APPROACH,
+        legacy_active_reward_terms=[
             "approach", "speed", "possession", "front_alignment",
             "stuck", "out_of_bounds", "in_goal", "spin",
             "time_penalty", "action_smoothness",
@@ -73,7 +89,8 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         ball_spawn_radius=0.9,
         goal_present=True,
         spawn_mode="shoot",              # ball on the centre line, robot anywhere on its own half
-        active_reward_terms=[
+        active_reward_terms=_PWS_SOLO,
+        legacy_active_reward_terms=[
             "approach", "speed", "ball_to_goal", "possession", "front_alignment",
             "goal", "predicted_goal", "in_goal",
             "kick_attempt", "kick_power_to_goal", "shot_on_goal", "kick_goal", "bank_shot",
@@ -90,7 +107,8 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         ball_spawn_radius=0.5,
         goal_present=True,
         spawn_mode="kick_blend",         # robot behind a scattered ball, close↔mid distance
-        active_reward_terms=[
+        active_reward_terms=_PWS_SOLO,
+        legacy_active_reward_terms=[
             # NOTE: plain ``goal`` is intentionally omitted — in the kicking drill the only way to
             # earn scoring credit is to fire the kicker. Scoring is paid by the kick-gated terms
             # ``predicted_goal``/``kick_goal`` (both require info["kicked"]), so a dribbled-in goal
@@ -117,7 +135,8 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         # wall bounces with an interception check at the defender, so a banked shot that avoids the
         # defender and scores is credited; bank_shot adds a premium on top. Plain ``goal`` omitted —
         # only kicked goals score, same as AIM_AND_KICK.
-        active_reward_terms=[
+        active_reward_terms=_PWS_SOLO,
+        legacy_active_reward_terms=[
             "approach", "speed", "ball_to_goal", "front_alignment", "front_misalign",
             "predicted_goal", "in_goal",
             "kick_attempt", "kick_power_to_goal", "kick_aim", "kick_angle", "kick_goal", "bank_shot", "wasted_kick",
@@ -134,7 +153,8 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
         max_episode_steps=1500,
         ball_spawn_radius=0.5,
         goal_present=True,
-        active_reward_terms=[
+        active_reward_terms=_PWS_MATCH,
+        legacy_active_reward_terms=[
             # plain ``goal`` omitted (``goal_against`` kept): only KICKED goals score here.
             # Dense camping farms (front_alignment, possession, defense_position, front_misalign,
             # shot_on_goal) stay stripped. ALSO removed now: ``ball_to_goal`` (it rewarded advancing
@@ -161,6 +181,7 @@ STAGE_CONFIGS: dict[Stage, StageConfig] = {
 
 # Safety net: FULL_TRAINING is a meta-stage the trainer expands into the phases below — it never
 # builds an env directly. Mirror SELF_PLAY_1V1 so any incidental get_stage_config() call is sane.
+
 STAGE_CONFIGS[Stage.FULL_TRAINING] = StageConfig(
     **{**STAGE_CONFIGS[Stage.SELF_PLAY_1V1].__dict__, "stage": Stage.FULL_TRAINING,
        "description": "Meta-stage: APPROACH → PUSH → SELF_PLAY in one run (see FULL_TRAINING_PHASES)."}

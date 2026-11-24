@@ -33,8 +33,6 @@ def build_app(tmp_path, monkeypatch):
 def test_reward_defaults_match_reward_config(tmp_path, monkeypatch):
     # The web UI seeds its reward editor from this endpoint, so it must return exactly the
     # Python RewardConfig defaults (single source of truth — no stale hardcoded UI copy).
-    from dataclasses import fields as _fields
-
     from bucky.rewards import RewardConfig
 
     app, _ = build_app(tmp_path, monkeypatch)
@@ -45,11 +43,13 @@ def test_reward_defaults_match_reward_config(tmp_path, monkeypatch):
     weights = res.json()["weights"]
 
     cfg = RewardConfig()
-    expected = {f.name: getattr(cfg, f.name) for f in _fields(cfg)}
-    assert weights == expected
-    # New terms from this work must be present so the UI exposes (and doesn't clobber) them.
-    assert "w_speed" in weights and "w_action_smooth" in weights
-    assert "w_action_mag" not in weights
+    assert res.json()["profile"] == "pws"
+    assert weights == cfg.weight_dict()
+    # The five PWS weights (§9.3) + rule penalties, all whole numbers.
+    for k in ("w_goal", "w_ball_distance", "w_ball_position", "w_kick_goal", "w_smoothness",
+              "w_goal_against", "w_out_of_bounds"):
+        assert k in weights and float(weights[k]).is_integer()
+    assert "w_front_align" not in weights   # legacy weights are off in the default profile
 
 
 def test_create_join_and_control_flow(tmp_path, monkeypatch):

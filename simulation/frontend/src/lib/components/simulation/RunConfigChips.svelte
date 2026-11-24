@@ -407,7 +407,8 @@
 						{#each rewardState.fields as f (f.key)}
 							<div class="flex flex-col gap-0.5">
 								<Label class="font-mono text-[10px] text-muted-foreground">{f.label}</Label>
-								<Input type="number" step={0.1} bind:value={config.rw[f.key]} class="h-8 font-mono text-xs" />
+								<!-- PWS §9.3.1: reward weights are whole numbers (the backend rejects e.g. 1.5). -->
+								<Input type="number" step={1} bind:value={config.rw[f.key]} class="h-8 font-mono text-xs" />
 							</div>
 						{/each}
 					</div>
