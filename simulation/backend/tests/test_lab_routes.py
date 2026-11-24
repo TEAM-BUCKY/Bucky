@@ -75,3 +75,22 @@ def test_lab_modules_without_firmware_tree(monkeypatch):
     registry.discover()
     assert registry.list_modules("firmware") == []
     assert registry.list_modules("drive")
+
+
+def test_lab_sweep_with_star_runs_a_search(tmp_path):
+    with _client(tmp_path) as c:
+        grid = {"ball_step_cm": 60, "ring_radii_cm": [50], "ring_angles": 4}
+        r = c.post("/api/lab/sweep", json={"module": "bisector", "grid": grid, "workers": 1,
+                                           "params": {"behind_dist": "*10..30"},
+                                           "optimize": {"points": 3, "rounds": 1}})
+        assert r.status_code == 200, r.text
+        assert r.json()["optimize"] is True
+        for _ in range(400):
+            view = c.get(f"/api/lab/sweep/{r.json()['id']}").json()
+            if view["state"] != "running":
+                break
+            time.sleep(0.05)
+        assert view["state"] == "done", view
+        opt = view["result"]["optimize"]
+        assert set(opt["best"]) == {"behind_dist"} and len(opt["history"]) == 3
+        assert view["search"]["evaluations"] == 3

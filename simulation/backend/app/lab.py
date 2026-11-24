@@ -3,7 +3,8 @@
 Sweeps run in a background thread (which fans out over a process pool, see
 :mod:`bucky.lab.runner`). Only one sweep runs at a time and the worker count is capped, so the
 production trainer on this machine keeps its CPU. Results stay in memory (last few jobs only).
-The UI polls ``GET /api/lab/sweep/{id}`` for progress.
+The UI polls ``GET /api/lab/sweep/{id}`` for progress. A request with module params set to
+``"*"`` runs a best-fit search instead (:mod:`bucky.lab.optimize`); ``search`` then holds its state.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
+from bucky.lab.optimize import run_optimize, starred
 from bucky.lab.runner import default_workers, run_sweep
 
 log = logging.getLogger(__name__)
@@ -35,8 +37,10 @@ class LabJobs:
         if self.running():
             raise RuntimeError("a lab sweep is already running")
         job_id = uuid.uuid4().hex[:12]
+        optimize = bool(starred(req.get("params")))
         job = {"id": job_id, "state": "running", "done": 0, "total": 0, "error": None,
-               "result": None, "request": req, "actor": actor, "started": time.time()}
+               "result": None, "request": req, "actor": actor, "started": time.time(),
+               "optimize": optimize, "search": None}
         with self._lock:
             self._jobs[job_id] = job
             while len(self._jobs) > _KEEP:
@@ -45,16 +49,26 @@ class LabJobs:
         def progress(done: int, total: int) -> None:
             job["done"], job["total"] = done, total
 
+        def status(info: dict) -> None:
+            job["search"] = info
+
         workers = min(int(req.get("workers") or default_workers()), default_workers())
 
         async def run() -> None:
             try:
-                job["result"] = await asyncio.to_thread(
-                    run_sweep, req["module"], kind=req["kind"], experiment=req["experiment"],
-                    params=req.get("params"), variants=req.get("variants"), grid=req.get("grid"),
+                kwargs = dict(
+                    kind=req["kind"], experiment=req["experiment"], params=req.get("params"),
+                    variants=req.get("variants"), grid=req.get("grid"),
                     sensor_params=req.get("sensor_params"), workers=workers, seed=req["seed"],
                     progress=progress,
                 )
+                if optimize:   # params marked "*": best-fit search (bucky.lab.optimize)
+                    opt = req.get("optimize") or {}
+                    kwargs.update(status=status, **{k: opt[k] for k in ("points", "rounds")
+                                                    if opt.get(k)})
+                    job["result"] = await asyncio.to_thread(run_optimize, req["module"], **kwargs)
+                else:
+                    job["result"] = await asyncio.to_thread(run_sweep, req["module"], **kwargs)
                 job["state"] = "done"
             except Exception as e:  # noqa: BLE001 — user code errors are shown in the UI
                 log.exception("lab sweep %s failed", job_id)
