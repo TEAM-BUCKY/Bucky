@@ -9,14 +9,14 @@ void testIRPositioning(const TestContext& ctx)
 {
     DBG_PRINTLN("=== IR Ball Positioning Test ===");
 
-    if (ctx.irPort == nullptr)
+    if (ctx.irRing == nullptr)
     {
         DBG_PRINTLN("No G port is configured for the IR ring.");
         while (true)
         {
         }
     }
-    IRRing ring(*ctx.irPort);
+    IRRing& ring = *ctx.irRing;   // the one telemetry reports, so the visualizer sees the ball
     const uint8_t sensorCount = ring.config().sensors;
 
     uint32_t lastPrintMs = 0;
@@ -24,6 +24,13 @@ void testIRPositioning(const TestContext& ctx)
 
     while (true)
     {
+        if (ctx.compass.isReady() && ctx.compass.isReadComplete())
+        {
+            ctx.compass.processRead();
+            ctx.compass.startRead();
+        }
+        if (ctx.telemetry != nullptr) ctx.telemetry->tick();
+
         if (!ring.update())
         {
             delay(1);

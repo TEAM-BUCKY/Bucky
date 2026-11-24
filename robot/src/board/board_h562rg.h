@@ -20,6 +20,7 @@ constexpr auto NAME = "H562RG";
 constexpr MotorPin MOTOR1 = {PB_14_ALT2, PB_15_ALT2};   // TIM12_CH1 / TIM12_CH2
 constexpr MotorPin MOTOR2 = {PA_9, PA_10};              // TIM1_CH2  / TIM1_CH3
 constexpr MotorPin MOTOR3 = {PB_6, PC_2};               // TIM4_CH1  / TIM4_CH4
+constexpr float MOTOR_POLARITY[3] = {-1.0f, 1.0f, -1.0f};   // M1 and M3 are wired reversed
 
 constexpr PinName BUTTON1 = PB_0;
 constexpr PinName BUTTON2 = PB_1;

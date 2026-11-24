@@ -8,12 +8,13 @@ void haltForever() {
     while (true) { delay(1000); }
 }
 
+// scale and rotation in percent, like the rest of the calibration.
 void driveDirectDegrees(Motors& md, const float degrees, const float scale, const float rotation) {
     float sinR, cosR;
     cordic_sin_cos(Math::degreesToRadians(degrees), &sinR, &cosR);
     float raw[Motors::MOTOR_COUNT];
     Motors::wheelSpeeds(sinR, cosR, scale, rotation, raw);
-    md.driveMotorsDirect(-raw[0], raw[1], -raw[2]);
+    md.driveMotorsDirect(raw[0] / 100.0f, raw[1] / 100.0f, raw[2] / 100.0f);
 }
 
 void updateLoop(Motors& md, const uint32_t durationMs) {

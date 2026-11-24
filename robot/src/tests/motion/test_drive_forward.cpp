@@ -5,10 +5,11 @@
 void testDriveForward(const TestContext& ctx) {
     DBG_PRINTLN("=== Drive Forward Test ===");
 
-    while (true) {
-        ctx.motorDriver.driveDegrees(0, 50, 0);
-        ctx.motorDriver.syncUpdateAllMotors();
+    // Once: drive() restarts the ramp only when the command changes.
+    ctx.motorDriver.driveDegrees(0, 0.5f, 0);
 
-        delay(1000);
+    while (true) {
+        ctx.motorDriver.syncUpdateAllMotors();   // advances the ramp, so call it often
+        delay(5);
     }
 }

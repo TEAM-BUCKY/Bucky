@@ -9,6 +9,8 @@
 #include <hardware/motor/Kicker.h>
 #include <hardware/sensors/gport/GPort.h>
 #include <hardware/comms/HM10.h>
+#include <hardware/comms/Telemetry.h>
+#include <hardware/sensors/ir/IRRing.h>
 
 struct TestContext {
     Motors& motorDriver;
@@ -20,6 +22,8 @@ struct TestContext {
     GPort* irPort;     // nullptr when no G port carries the IR ring
     GPort* linePort;   // nullptr when no G port carries the line sensors
     HM10* bluetooth;   // nullptr when the board has no Bluetooth module
+    IRRing* irRing;    // the ring telemetry reports; nullptr when irPort is
+    Telemetry* telemetry; // tick() from long-running test loops to keep the visualizer live
 };
 
 void testHoldHeading(const TestContext& ctx);

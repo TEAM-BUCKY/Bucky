@@ -14,9 +14,10 @@ void testHoldHeading(const TestContext& ctx) {
     while (true) {
         ctx.compass.update();
 
-        const float rotation = ctx.compass.computeRotation(0);
+        const float rotation = ctx.compass.computeRotation(0);   // percent
+        const float speed = rotation / 100.0f;
 
-        ctx.motorDriver.driveMotorsDirect(-rotation, rotation, -rotation);
+        ctx.motorDriver.driveMotorsDirect(speed, speed, speed);
         ctx.motorDriver.syncUpdateAllMotors();
 
         DBG_PRINT("Offset: ");

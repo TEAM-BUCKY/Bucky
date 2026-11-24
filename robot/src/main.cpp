@@ -16,7 +16,7 @@
 #include <hardware/sensors/pos/Sonar.h>
 #include <tests/tests.h>
 
-#define RUN_TEST testBluetooth
+#define RUN_TEST testIRPositioning
 
 Motors motorDriver(Board::MOTOR1, Board::MOTOR2, Board::MOTOR3);
 I2CDMABus sensorI2C;
@@ -43,7 +43,6 @@ GPort gPort2;
     return nullptr;
 }
 
-// Only fed while their port carries that sensor kind (see irPort()/linePort()).
 IRRing irRing(Board::G_PORT1_KIND == GSensorKind::IR ? gPort1 : gPort2);
 LineSensor lineSensor(Board::G_PORT1_KIND == GSensorKind::Line ? gPort1 : gPort2);
 #else
@@ -100,7 +99,8 @@ void setupEnvironment() {
 
     analogReadResolution(12);
 
-    motorDriver.init(0.0f, 1.0f, Board::ENCODERS);
+    motorDriver.init(0.5f, 1.0f, Board::ENCODERS);
+    motorDriver.setPolarity(Board::MOTOR_POLARITY);
 #ifdef BOARD_HAS_KICKER
     kicker.init();
 #endif
@@ -138,8 +138,6 @@ void setupEnvironment() {
     if (!button2.begin(Board::BUTTON2)) DBG_PRINTLN_SUBJECT(DEBUG_SUBJ_MAIN, "Button 2 EXTI line taken");
 #endif
 
-
-
     Kicker* const kickerPtr = &kicker;
 
 #ifdef BOARD_HAS_BLUETOOTH
@@ -147,8 +145,11 @@ void setupEnvironment() {
 #else
     HM10* const bluetoothPtr = nullptr;
 #endif
+
+    IRRing* const irRingPtr = irPort() != nullptr ? &irRing : nullptr;
+
     const TestContext ctx = {motorDriver, kickerPtr, compass, accel, sonar, sensorI2C, irPort(), linePort(),
-                             bluetoothPtr};
+                             bluetoothPtr, irRingPtr, &telemetry};
 
 #ifdef RUN_TEST
     dbg.setBlocking(true);   // test reports are long; let them arrive complete
@@ -157,7 +158,7 @@ void setupEnvironment() {
 #endif
 
     kicker.kick(1.0f);
-    motorDriver.driveMotorsDirect(100, 0, 0);
+    motorDriver.driveMotorsDirect(1.0f, 0, 0);
 
     uint32_t lastTick = millis();
     while (true) {
@@ -171,10 +172,10 @@ void setupEnvironment() {
             sonar.processRead();
             sonar.startRead();
         }
-#ifdef BOARD_HAS_GPORTS
-        if (irPort() != nullptr) irRing.update();
-        if (linePort() != nullptr) lineSensor.update();
-#endif
+
+        irRing.update();
+        lineSensor.update();
+
         telemetry.tick();
 
 #ifdef BOARD_HAS_BUTTONS

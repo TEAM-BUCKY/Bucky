@@ -19,6 +19,30 @@ namespace Solvers
 		return x;
 	}
 
+	// Root of f in [lo, hi]; without a sign change, the end with the smaller |f|.
+	template <typename F>
+	FORCE_INLINE float bisect(float lo, float hi, const int iterations, F f)
+	{
+		float fLo = f(lo);
+		const float fHi = f(hi);
+		if ((fLo > 0.0f) == (fHi > 0.0f)) return fabsf(fLo) <= fabsf(fHi) ? lo : hi;
+		for (int i = 0; i < iterations; i++)
+		{
+			const float mid = 0.5f * (lo + hi);
+			const float fMid = f(mid);
+			if ((fMid > 0.0f) == (fLo > 0.0f))
+			{
+				lo = mid;
+				fLo = fMid;
+			}
+			else
+			{
+				hi = mid;
+			}
+		}
+		return 0.5f * (lo + hi);
+	}
+
 	template <typename F>
 	FORCE_INLINE float forwardDifference(F f, const float x, const float step, const float f0)
 	{

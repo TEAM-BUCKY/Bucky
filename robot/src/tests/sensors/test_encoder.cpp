@@ -6,7 +6,7 @@
 void testEncoder(const TestContext& ctx) {
     DBG_PRINTLN("=== Encoder Test (All Motors) ===");
 
-    ctx.motorDriver.driveMotorsDirect(100, 100, 100);
+    ctx.motorDriver.driveMotorsDirect(1.0f, 1.0f, 1.0f);
 
     uint32_t lastPrint = millis();
 

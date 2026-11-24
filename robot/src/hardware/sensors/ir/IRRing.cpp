@@ -67,7 +67,7 @@ namespace
     float limitDistance(float centreDist, const bool clipped, const IRConfig& cfg)
     {
         if (clipped) {
-            const float clipDist = cfg.mountRadiusCm + IRModel::inverseSquareRange(cfg.clipCode - cfg.baselineCode, cfg);
+            const float clipDist = cfg.mountRadiusCm + IRRing::sensorDistanceCm(cfg.clipCode - cfg.baselineCode, cfg);
             if (centreDist > clipDist) centreDist = clipDist;
         }
         return centreDist > cfg.maxCm ? cfg.maxCm : centreDist;
@@ -82,8 +82,9 @@ float IRRing::sensorAngle(const uint8_t sensor, const IRConfig& cfg)
 float IRRing::sensorDistanceCm(const float amp, const IRConfig& cfg)
 {
     if (amp <= 0.0f) return cfg.maxCm;
-    const float dist = IRModel::inverseSquareRange(amp, cfg);
-    return dist > cfg.maxCm ? cfg.maxCm : dist;
+    const Geometry::Point axis = Geometry::fromBearing(0.0f, 1.0f);
+    return IRModel::centreRange(axis, 0.0f, logf(amp), IRModel::foldDistance(axis, 0.0f, cfg), cfg.maxCm, cfg)
+        - cfg.mountRadiusCm;
 }
 
 BallReading IRRing::estimate(const uint16_t frame[GPort::SENSORS], const IRConfig& cfg)
@@ -103,23 +104,30 @@ BallReading IRRing::estimate(const uint16_t frame[GPort::SENSORS], const IRConfi
     const float peakAngle = sensorAngle(ring.peak, cfg);
     const float offset = peakOffset(ring, cfg);
     float bearing = peakAngle + offset;
-    float centreDist = cfg.mountRadiusCm + IRModel::inverseSquareRange(IRModel::onAxisAmp(out.peakAmp, offset, cfg), cfg);
+
+    // Range along the bearing on the far side of the fold; the near side's answer is kept aside.
+    const Geometry::Point peakDir = Geometry::fromBearing(peakAngle, 1.0f);
+    const float lnPeak = logf(out.peakAmp);
+    const float minCentreDist = cfg.mountRadiusCm + 2.0f;
+    const float foldDist = IRModel::foldDistance(peakDir, bearing, cfg);
+    float centreDist = IRModel::centreRange(peakDir, bearing, lnPeak, foldDist, cfg.maxCm, cfg);
+    out.nearDistanceCm = IRModel::centreRange(peakDir, bearing, lnPeak, minCentreDist, foldDist, cfg);
 
     const auto [dir, lnAmp, count] = collectFitPoints(ring, cfg);
     out.contributors = count;
     if (count >= 2) {
-        const float minCentreDist = cfg.mountRadiusCm + 2.0f;
         Solvers::gaussNewton2(bearing, centreDist, 4, lnAmp, count,
             [&](const int i, const float b, const float d) { return IRModel::lnAmp(dir[i], Geometry::fromBearing(b, d), cfg); },
             1e-3f, [](const float d) { return 1e-2f * d; },
             [&](float& b, float& d) {
                 b = clamp(b, peakAngle - ring.step, peakAngle + ring.step);
-                d = fmaxf(d, minCentreDist);
+                d = clamp(d, foldDist, cfg.maxCm);
             });
     }
 
     out.angle = Math::wrapRadians(bearing);
     out.distanceCm = limitDistance(centreDist, out.clipped, cfg);
+    out.nearFold = out.distanceCm < 1.25f * foldDist;
 
     const Geometry::Point ball = Geometry::fromBearing(out.angle, out.distanceCm);
     out.sensorDistanceCm = Geometry::length(ball - Geometry::fromBearing(peakAngle, cfg.mountRadiusCm));

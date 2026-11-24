@@ -57,7 +57,7 @@ bool runMaxSpeedPhase(MotorCalibration& cal) {
     md.setPIGains(0, 0, 0);
     resetEncoders();
 
-    md.driveMotorsDirect(100, 100, 100);
+    md.driveMotorsDirect(1.0f, 1.0f, 1.0f);
     updateLoop(md, 500);
     averageSpeeds(md, SPEED_SAMPLES, SPEED_DISCARD, SPEED_PERIOD_MS, cal.result.maxTicksPerSec);
     for (uint8_t i = 0; i < 3; i++) {
@@ -99,7 +99,7 @@ void runLinearityPhase(MotorCalibration& cal) {
     CalibrationResult& r = cal.result;
 
     resetEncoders();
-    md.driveMotorsDirect(50, 50, 50);
+    md.driveMotorsDirect(0.5f, 0.5f, 0.5f);
     updateLoop(md, 500);
     averageSpeeds(md, SPEED_SAMPLES, SPEED_DISCARD, SPEED_PERIOD_MS, r.speedAt50);
     for (uint8_t i = 0; i < 3; i++) {

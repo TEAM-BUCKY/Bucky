@@ -10,6 +10,8 @@ struct IRConfig {
     float kCm = 760.0f;
     uint16_t clipCode = 2300;
     float mountRadiusCm = 9.5f;
+    float heightCm = 4.3f;     // photodiode axis above the ball centre: 6.4 cm sensors, 2.1 cm ball radius
+    float tiltRad = 0.0f;      // photodiode axis pitched down from horizontal
     float cosPower = 20.0f;
     float minAmp = 8.0f;
     float minNeighbourAmp = 2.0f;
@@ -19,8 +21,12 @@ struct IRConfig {
 struct BallReading {
     bool seen = false;
     bool clipped = false;
+    // The sensors look down on the ball, so a ball inside the fold (~23 cm on-axis) reads as a
+    // farther one. distanceCm is the far answer; when nearFold, nearDistanceCm is just as likely.
+    bool nearFold = false;
     float angle = 0.0f;
     float distanceCm = 0.0f;
+    float nearDistanceCm = 0.0f;
     float sensorDistanceCm = 0.0f;
     VectorXY position = {0.0f, 0.0f};
     float peakAmp = 0.0f;
